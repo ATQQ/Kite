@@ -1,0 +1,19 @@
+{
+  "name": "@kite/server",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --watch src/index.ts"
+  },
+  "dependencies": {
+    "@tursodatabase/database": "^0.4.4",
+    "adm-zip": "^0.5.17",
+    "drizzle-orm": "^1.0.0-beta.15-859cf75",
+    "elysia": "latest"
+  },
+  "devDependencies": {
+    "@types/adm-zip": "^0.5.8",
+    "bun-types": "latest",
+    "drizzle-kit": "latest"
+  }
+}

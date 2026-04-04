@@ -1,0 +1,20 @@
+{
+  "name": "kite",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "bun --bun run dev:all",
+    "dev:all": "concurrently \"bun run dev:server\" \"bun run dev:web\"",
+    "dev:server": "cd apps/server && bun run dev",
+    "dev:web": "cd apps/web && bun run dev",
+    "build:cli": "cd packages/cli && bun run build",
+    "deploy:test": "cd apps/web && bun run ../../packages/cli/bin/kite.js push --token test-token --server http://localhost:3000"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
