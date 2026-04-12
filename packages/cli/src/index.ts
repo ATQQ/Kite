@@ -66,6 +66,7 @@ cli.command('push', 'Push and deploy project')
       }
 
       const outputDir = options.out || projectConfig.outputDir || './';
+      const files = projectConfig.files || []; // 获取配置的要上传的文件/目录列表
       const preDeploy = options.pre || projectConfig.preDeploy;
       const postDeploy = options.post || projectConfig.postDeploy;
 
@@ -79,7 +80,7 @@ cli.command('push', 'Push and deploy project')
       const spinner = ora('Packing files...').start();
       const zipFilePath = path.resolve(process.cwd(), '.deploy-archive.zip');
       
-      await packProject(sourceDir, zipFilePath);
+      await packProject(sourceDir, zipFilePath, files.length > 0 ? files : undefined);
       spinner.succeed(chalk.green(`Packed successfully: ${zipFilePath}`));
 
       // 5. 上传与部署

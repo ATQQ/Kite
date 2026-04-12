@@ -3,9 +3,10 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "bun run --watch src/index.ts"
+    "dev": "bun run --env-file=.env.local --watch src/index.ts"
   },
   "dependencies": {
+    "@libsql/client": "^0.17.2",
     "@tursodatabase/database": "^0.4.4",
     "adm-zip": "^0.5.17",
     "drizzle-orm": "^1.0.0-beta.15-859cf75",

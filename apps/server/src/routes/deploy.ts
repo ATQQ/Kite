@@ -4,8 +4,85 @@ import path from 'path';
 import AdmZip from 'adm-zip';
 import { $ } from 'bun';
 import { db } from '../db/index.js';
+import { randomUUID } from 'crypto';
+
+// Token verification helper
+const verifyAdminToken = (headers: Record<string, string | undefined>) => {
+  const authHeader = headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) return false;
+  const token = authHeader.split(' ')[1];
+  
+  // Verify against the ADMIN_TOKEN loaded via Bun env
+  return token === process.env.ADMIN_TOKEN;
+};
 
 export const deployRoutes = new Elysia()
+  .post('/api/auth/login', async ({ body, set }) => {
+    const { token } = body;
+    if (token === process.env.ADMIN_TOKEN) {
+      return { success: true, message: 'Login successful' };
+    }
+    set.status = 401;
+    return { success: false, message: 'Invalid token' };
+  }, {
+    body: t.Object({ token: t.String() })
+  })
+  .get('/api/projects', async ({ headers, set }) => {
+    if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
+    return await db.projects.findAll();
+  })
+  .post('/api/projects', async ({ headers, body, set }) => {
+    if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
+    const project = await db.projects.create({
+      ...body,
+      id: 'proj_' + randomUUID().replace(/-/g, '').substring(0, 12),
+      token: 'kt_' + randomUUID().replace(/-/g, ''),
+    });
+    return { success: true, project };
+  }, {
+    body: t.Object({
+      name: t.String(),
+      description: t.Optional(t.String()),
+      deployPath: t.String()
+    })
+  })
+  .get('/api/projects/:id', async ({ headers, params, set }) => {
+    if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
+    const project = await db.projects.findById(params.id);
+    if (!project) { set.status = 404; return { error: 'Project not found' }; }
+    return project;
+  })
+  .put('/api/projects/:id', async ({ headers, params, body, set }) => {
+    if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
+    const project = await db.projects.update(params.id, body);
+    if (!project) { set.status = 404; return { error: 'Project not found' }; }
+    return { success: true, project };
+  }, {
+    body: t.Object({
+      preDeployScript: t.Optional(t.String()),
+      postDeployScript: t.Optional(t.String()),
+      deployPath: t.Optional(t.String())
+    })
+  })
+  .delete('/api/projects/:id', async ({ headers, params, set }) => {
+    if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
+    
+    // params.id 会获取 URL 路径参数，比如 "proj_xxxxx"
+    const success = await db.projects.remove(params.id);
+    if (!success) { set.status = 404; return { error: 'Project not found' }; }
+    
+    return { success: true, message: 'Project deleted successfully' };
+  })
+  .post('/api/projects/:id/token', async ({ headers, params, set }) => {
+    if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
+    const project = await db.projects.update(params.id, { token: 'kt_' + randomUUID().replace(/-/g, '') });
+    if (!project) { set.status = 404; return { error: 'Project not found' }; }
+    return { success: true, token: project.token };
+  })
+  .get('/api/logs', async ({ headers, set }) => {
+    if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
+    return await db.deployments.findAll();
+  })
   .post('/api/deploy/upload', async ({ body, headers, set }) => {
     try {
       const authHeader = headers.authorization;
@@ -37,50 +114,99 @@ export const deployRoutes = new Elysia()
 
       console.log(`[Deploy] Received zip for project: ${projectId}`);
       
-      // 1. 保存 zip 到临时目录
-      const tempDir = path.join(process.cwd(), '.temp_deploy');
-      await fs.mkdir(tempDir, { recursive: true });
-      const tempZipPath = path.join(tempDir, `${Date.now()}.zip`);
-      
-      // bun 中直接读写 ArrayBuffer
-      await Bun.write(tempZipPath, await file.arrayBuffer());
-      console.log(`[Deploy] Saved temp zip to: ${tempZipPath}`);
+      const deployLog = await db.deployments.insert({
+        projectId: project.id,
+        projectName: project.name,
+        status: 'running',
+        triggerSource: 'cli',
+        startTime: new Date().toISOString(),
+        output: `[Kite Deploy] Starting deployment for ${project.name}...\n`
+      });
 
-      // 2. 准备解压目录
-      const destPath = path.resolve(process.cwd(), project.deployPath);
-      await fs.mkdir(destPath, { recursive: true });
+      await db.projects.update(project.id, { status: 'running' });
 
-      // 3. 执行前置脚本（在解压之前）
-      if (preDeployCmd) {
-        console.log(`[Deploy] Running Pre-deploy: ${preDeployCmd}`);
-        const { stdout, stderr, exitCode } = await $`cd ${destPath} && sh -c ${preDeployCmd}`;
-        if (exitCode !== 0) throw new Error(`Pre-deploy failed: ${stderr.toString()}`);
-      }
-
-      // 4. 解压
-      console.log(`[Deploy] Extracting to: ${destPath}`);
-      const zip = new AdmZip(tempZipPath);
-      zip.extractAllTo(destPath, true); // true=覆盖文件
-
-      // 5. 执行后置脚本（解压之后）
-      let postDeployLog = '';
-      if (postDeployCmd) {
-        console.log(`[Deploy] Running Post-deploy: ${postDeployCmd}`);
-        const { stdout, stderr, exitCode } = await $`cd ${destPath} && sh -c ${postDeployCmd}`;
-        if (exitCode !== 0) {
-          throw new Error(`Post-deploy failed: ${stderr.toString()}`);
-        }
-        postDeployLog = stdout.toString();
-      }
-
-      // 清理临时文件
-      await fs.unlink(tempZipPath);
-
-      return { 
-        success: true, 
-        message: 'Deployed successfully',
-        postDeployLog 
+      let fullOutput = deployLog.output;
+      const appendLog = async (text: string) => {
+        fullOutput += text + '\n';
+        await db.deployments.update(deployLog.id, { output: fullOutput });
       };
+
+      const startTime = Date.now();
+
+      try {
+        // 1. 保存 zip 到临时目录
+        const tempDir = path.join(process.cwd(), '.temp_deploy');
+        await fs.mkdir(tempDir, { recursive: true });
+        const tempZipPath = path.join(tempDir, `${Date.now()}.zip`);
+        
+        // bun 中直接读写 ArrayBuffer
+        await Bun.write(tempZipPath, await file.arrayBuffer());
+        await appendLog(`[Kite Deploy] Saved temp zip to: ${tempZipPath}`);
+
+        // 2. 准备解压目录
+        const destPath = path.resolve(process.cwd(), project.deployPath);
+        await fs.mkdir(destPath, { recursive: true });
+        await appendLog(`[Kite Deploy] Target deploy path: ${destPath}`);
+
+        // 3. 执行前置脚本（在解压之前）
+        if (preDeployCmd) {
+          await appendLog(`[Kite Deploy] Running Pre-deploy: ${preDeployCmd}`);
+          const { stdout, stderr, exitCode } = await $`cd ${destPath} && sh -c ${preDeployCmd}`;
+          await appendLog(stdout.toString() || '');
+          if (exitCode !== 0) {
+             await appendLog(stderr.toString());
+             throw new Error(`Pre-deploy failed`);
+          }
+        }
+
+        // 4. 解压
+        await appendLog(`[Kite Deploy] Extracting files...`);
+        const zip = new AdmZip(tempZipPath);
+        zip.extractAllTo(destPath, true); // true=覆盖文件
+
+        // 5. 执行后置脚本（解压之后）
+        if (postDeployCmd) {
+          await appendLog(`[Kite Deploy] Running Post-deploy: ${postDeployCmd}`);
+          const { stdout, stderr, exitCode } = await $`cd ${destPath} && sh -c ${postDeployCmd}`;
+          await appendLog(stdout.toString() || '');
+          if (exitCode !== 0) {
+            await appendLog(stderr.toString());
+            throw new Error(`Post-deploy failed`);
+          }
+        }
+
+        // 清理临时文件
+        await fs.unlink(tempZipPath);
+
+        const durationStr = ((Date.now() - startTime) / 1000).toFixed(1) + 's';
+        await appendLog(`[Kite Deploy] Deployment completed successfully in ${durationStr}.`);
+        
+        await db.deployments.update(deployLog.id, { 
+          status: 'success', 
+          duration: durationStr,
+          endTime: new Date().toISOString()
+        });
+        await db.projects.update(project.id, { status: 'success' });
+
+        return { 
+          success: true, 
+          message: 'Deployed successfully'
+        };
+
+      } catch (err: any) {
+        const durationStr = ((Date.now() - startTime) / 1000).toFixed(1) + 's';
+        await appendLog(`[Kite Deploy] Deployment failed: ${err.message}`);
+        
+        await db.deployments.update(deployLog.id, { 
+          status: 'failed', 
+          duration: durationStr,
+          endTime: new Date().toISOString()
+        });
+        await db.projects.update(project.id, { status: 'failed' });
+        
+        set.status = 500;
+        return { error: err.message };
+      }
 
     } catch (error: any) {
       console.error('[Deploy] Error:', error);
