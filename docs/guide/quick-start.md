@@ -1,71 +1,92 @@
 # 快速开始
 
-## 1. 安装依赖
+## 1. 安装 CLI
+
+```bash
+npm install -g @kite/cli
+```
+
+本地开发仓库内也可以先构建再直接使用源码 CLI：
 
 ```bash
 bun install
+bun run build
+node packages/cli/bin/kite.js --help
 ```
 
-项目已配置 Bun registry，安装依赖时会使用 `https://registry.npmmirror.com/`。
-
-## 2. 启动 Kite
+## 2. 启动内置 Kite 服务
 
 ```bash
-bun run dev
+kite serve
 ```
 
-默认地址：
+`kite serve` 会同时启动：
 
-- Web 管理端：`http://localhost:5173`
-- Server API：`http://localhost:3000`
-- Admin Token：查看 `apps/server/.env.local`
+- Web 管理端
+- Server API
+- CLI 上传接收与部署执行服务
 
-开发环境会自动初始化一个演示项目：
+默认地址是 `http://127.0.0.1:3000`。首次启动会自动创建 `~/.kite`：
+
+```txt
+~/.kite/
+  config.json        # CLI 全局配置
+  kite.db.json       # 项目、Token、部署日志
+  deployments/       # 默认部署目录
+  tmp/               # 上传临时文件
+```
+
+启动日志会打印 Admin Token，用它登录 Web 管理端。
+
+## 3. 选择运行时
+
+内置服务使用 Node 标准 HTTP/FS/Child Process 能力实现，因此可以被 Node 或 Bun 运行。CLI 提供 `--runtime` 参数用于显式标记和后续扩展：
+
+```bash
+kite serve --runtime node
+kite serve --runtime bun
+kite serve --host 0.0.0.0 --port 3000
+```
+
+如果通过源码测试：
+
+```bash
+node packages/cli/bin/kite.js serve --runtime node
+bun packages/cli/bin/kite.js serve --runtime bun
+```
+
+## 4. 部署示例项目
+
+CLI 内置服务会初始化一个演示项目：
 
 ```txt
 Project ID: proj_abc123
 Deploy Token: test-token
-Deploy Path: apps/server/.deployments/proj_abc123
 ```
 
-## 3. 构建 CLI
-
-```bash
-bun run build:cli
-```
-
-本仓库内可以直接通过 `packages/cli/bin/kite.js` 调试 CLI。如果需要全局命令：
-
-```bash
-cd packages/cli
-npm link
-```
-
-## 4. 跑通内置部署测试
-
-保持 Server 正在运行，然后执行：
-
-```bash
-bun run deploy:test
-```
-
-该命令会构建 `apps/web`，把 `dist` 目录打包上传到 Server，并在服务端执行项目配置里的部署命令。
-
-## 5. 部署 examples
-
-示例项目位于 `examples/`：
-
-```bash
-examples/frontend-basic
-examples/backend-api
-examples/ssr-basic
-```
-
-进入任一示例后，可以使用示例内的 `kite.config.json` 测试 CLI 上传：
+进入任一示例后运行：
 
 ```bash
 bun run build
-bun ../../packages/cli/bin/kite.js push --server http://localhost:3000 --token test-token
+kite push --server http://127.0.0.1:3000 --token test-token
 ```
+
+真实项目中不建议把 Deploy Token 写入 `kite.config.json`。可以保存到全局配置：
+
+```bash
+kite config set token <DEPLOY_TOKEN>
+```
+
+也可以保存到当前项目 `.env.local`：
+
+```bash
+printf "KITE_DEPLOY_TOKEN=<DEPLOY_TOKEN>\n" >> .env.local
+```
+
+示例项目位于：
+
+- `examples/frontend-basic`
+- `examples/backend-api`
+- `examples/ssr-basic`
 
 如果你在 Web 端创建了自己的项目，请把示例里的 `projectId` 改成新项目 ID，并使用对应的 Deploy Token。

@@ -19,8 +19,11 @@ const formData = ref({
 
 const isTokenVisible = ref(false)
 const isCopied = ref(false)
+const copiedCommand = ref('')
+const serverUrl = ref('http://127.0.0.1:3000')
 
 onMounted(async () => {
+  serverUrl.value = window.location.origin
   await projectStore.fetchProjects()
   if (project.value) {
     formData.value.destPath = project.value.destPath || ''
@@ -43,6 +46,25 @@ const copyToken = () => {
     setTimeout(() => isCopied.value = false, 2000)
   }
 }
+
+const copyCommand = (key: string, value: string) => {
+  navigator.clipboard.writeText(value)
+  copiedCommand.value = key
+  setTimeout(() => copiedCommand.value = '', 2000)
+}
+
+const installCommand = 'npm install -g @kite/cli'
+const initCommand = computed(() => `kite init --project ${projectId} --out ./dist --server ${serverUrl.value}`)
+const globalTokenCommand = 'kite config set token <DEPLOY_TOKEN>'
+const localTokenCommand = 'printf "KITE_DEPLOY_TOKEN=<DEPLOY_TOKEN>\\n" >> .env.local'
+const pushCommand = 'kite push'
+const directPushCommand = computed(() => `kite push --server ${serverUrl.value} --project ${projectId} --token <DEPLOY_TOKEN> --out ./dist`)
+const configExample = computed(() => JSON.stringify({
+  projectId,
+  outputDir: './dist',
+  files: ['**/*'],
+  postDeploy: project.value?.postDeploy || 'pm2 restart your-service'
+}, null, 2))
 
 const refreshToken = async () => {
   if (confirm('重新生成 Token 将导致旧 Token 立即失效，是否继续？')) {
@@ -143,6 +165,100 @@ const removeProject = async () => {
             <p class="text-textMuted leading-relaxed">
               <strong class="text-primary font-medium">CLI 用法:</strong><br />
               <code class="bg-base px-1.5 py-0.5 rounded font-mono text-xs text-textMain mt-2 inline-block border border-border">kite config set token &lt;你的 Token&gt;</code>
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- CLI Help Card -->
+      <div class="bg-panel border border-border rounded-xl shadow-sm overflow-hidden">
+        <div class="px-6 py-5 border-b border-border bg-white/[0.02]">
+          <h2 class="text-lg font-semibold text-white flex items-center">
+            <TerminalSquare class="w-5 h-5 mr-2 text-primary" />
+            CLI 快速部署指引
+          </h2>
+          <p class="text-sm text-textMuted mt-1">Token 不建议写入 <code class="font-mono">kite.config.json</code>。可以保存到全局 <code class="font-mono">~/.kite/config.json</code>，或当前项目的 <code class="font-mono">.env.local</code>。</p>
+        </div>
+
+        <div class="p-6 space-y-5">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-border bg-base p-4">
+              <p class="text-sm font-medium text-white mb-2">1. 安装 CLI</p>
+              <div class="flex items-center gap-2">
+                <code class="flex-1 text-xs text-success font-mono break-all">{{ installCommand }}</code>
+                <button @click="copyCommand('install', installCommand)" class="text-xs text-primary hover:text-white">
+                  {{ copiedCommand === 'install' ? '已复制' : '复制' }}
+                </button>
+              </div>
+            </div>
+
+            <div class="rounded-lg border border-border bg-base p-4">
+              <p class="text-sm font-medium text-white mb-2">2. 初始化项目配置</p>
+              <div class="flex items-center gap-2">
+                <code class="flex-1 text-xs text-success font-mono break-all">{{ initCommand }}</code>
+                <button @click="copyCommand('init', initCommand)" class="text-xs text-primary hover:text-white">
+                  {{ copiedCommand === 'init' ? '已复制' : '复制' }}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="rounded-lg border border-border bg-base p-4">
+            <p class="text-sm font-medium text-white mb-3">3. 保存 Deploy Token（二选一）</p>
+            <div class="space-y-3">
+              <div class="flex items-center gap-2">
+                <span class="text-xs text-textMuted w-24 shrink-0">全局配置</span>
+                <code class="flex-1 text-xs text-success font-mono break-all">{{ globalTokenCommand }}</code>
+                <button @click="copyCommand('global-token', globalTokenCommand)" class="text-xs text-primary hover:text-white">
+                  {{ copiedCommand === 'global-token' ? '已复制' : '复制' }}
+                </button>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="text-xs text-textMuted w-24 shrink-0">项目本地</span>
+                <code class="flex-1 text-xs text-success font-mono break-all">{{ localTokenCommand }}</code>
+                <button @click="copyCommand('local-token', localTokenCommand)" class="text-xs text-primary hover:text-white">
+                  {{ copiedCommand === 'local-token' ? '已复制' : '复制' }}
+                </button>
+              </div>
+            </div>
+            <p class="text-xs text-textMuted mt-3">将上方 <code class="font-mono">&lt;DEPLOY_TOKEN&gt;</code> 替换为本页 Token。为避免泄露，示例命令不会直接填入真实 Token。</p>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-border bg-base p-4">
+              <p class="text-sm font-medium text-white mb-2">4. 使用默认配置部署</p>
+              <div class="flex items-center gap-2">
+                <code class="flex-1 text-xs text-success font-mono break-all">{{ pushCommand }}</code>
+                <button @click="copyCommand('push', pushCommand)" class="text-xs text-primary hover:text-white">
+                  {{ copiedCommand === 'push' ? '已复制' : '复制' }}
+                </button>
+              </div>
+            </div>
+
+            <div class="rounded-lg border border-border bg-base p-4">
+              <p class="text-sm font-medium text-white mb-2">直接通过 CLI 覆盖配置</p>
+              <div class="flex items-center gap-2">
+                <code class="flex-1 text-xs text-success font-mono break-all">{{ directPushCommand }}</code>
+                <button @click="copyCommand('direct-push', directPushCommand)" class="text-xs text-primary hover:text-white">
+                  {{ copiedCommand === 'direct-push' ? '已复制' : '复制' }}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="rounded-lg border border-border bg-base p-4">
+            <div class="flex items-center justify-between mb-2">
+              <p class="text-sm font-medium text-white">kite.config.json 示例（不包含 Token）</p>
+              <button @click="copyCommand('config', configExample)" class="text-xs text-primary hover:text-white">
+                {{ copiedCommand === 'config' ? '已复制' : '复制' }}
+              </button>
+            </div>
+            <pre class="text-xs text-success font-mono whitespace-pre-wrap overflow-x-auto">{{ configExample }}</pre>
+          </div>
+
+          <div class="rounded-lg border border-primary/20 bg-primary/5 p-4">
+            <p class="text-sm text-textMuted leading-relaxed">
+              配置优先级：<strong class="text-primary">CLI 参数</strong> &gt; <strong class="text-primary">本地配置 / .env.local</strong> &gt; <strong class="text-primary">服务端项目默认配置</strong>。未在 CLI 或本地配置中传入的部署脚本，会回退到本页保存的云端默认脚本。
             </p>
           </div>
         </div>

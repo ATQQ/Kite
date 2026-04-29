@@ -17,7 +17,7 @@ bun run dev
 
 ```bash
 bun run build
-bun ../../packages/cli/bin/kite.js push --server http://localhost:3000 --token test-token
+node ../../packages/cli/bin/kite.js push --server http://127.0.0.1:3000 --token test-token
 ```
 
 示例中的 `postDeploy` 默认只输出提示，不会真的启动常驻进程。真实部署时可以改成：

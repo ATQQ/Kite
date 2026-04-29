@@ -14,7 +14,7 @@ bun run build
 ## 使用 Kite 上传
 
 ```bash
-bun ../../packages/cli/bin/kite.js push --server http://localhost:3000 --token test-token
+node ../../packages/cli/bin/kite.js push --server http://127.0.0.1:3000 --token test-token
 ```
 
 默认配置：

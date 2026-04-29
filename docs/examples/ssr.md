@@ -17,7 +17,7 @@ bun run dev
 
 ```bash
 bun run build
-bun ../../packages/cli/bin/kite.js push --server http://localhost:3000 --token test-token
+node ../../packages/cli/bin/kite.js push --server http://127.0.0.1:3000 --token test-token
 ```
 
 示例默认上传 `dist` 目录。真实部署时，后置命令可以替换成进程管理命令，例如：

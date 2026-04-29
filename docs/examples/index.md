@@ -12,17 +12,17 @@
 
 ## 通用测试方式
 
-先启动 Kite Server：
+先启动 CLI 内置服务：
 
 ```bash
-bun run dev:server
+node packages/cli/bin/kite.js serve --runtime node
 ```
 
 然后进入任意示例项目：
 
 ```bash
 bun run build
-bun ../../packages/cli/bin/kite.js push --server http://localhost:3000 --token test-token
+node ../../packages/cli/bin/kite.js push --server http://127.0.0.1:3000 --token test-token
 ```
 
 示例默认使用开发种子项目 `proj_abc123`。如果你在 Web 管理端创建了新项目，请修改示例目录中的 `kite.config.json`。

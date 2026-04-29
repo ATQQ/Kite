@@ -11,7 +11,7 @@
     "dev:all": "concurrently \"bun run dev:server\" \"bun run dev:web\"",
     "dev:server": "cd apps/server && bun run dev",
     "dev:web": "cd apps/web && bun run dev",
-    "build": "bun run build:cli && bun run --cwd apps/web build",
+    "build": "bun run --cwd apps/web build && bun run build:cli",
     "build:cli": "cd packages/cli && bun run build",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
