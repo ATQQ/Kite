@@ -42,7 +42,37 @@ kite serve --runtime bun
 kite serve --host 0.0.0.0 --port 3000
 ```
 
-## 三、全局配置
+## 三、重置管理端密码
+
+管理端登录密码本质上是 `~/.kite/kite.db.json` 中的 Admin Token。运行中的 `kite serve` 会在每次请求时读取该文件，因此修改后无需重启后端服务。
+
+交互式重置：
+
+```bash
+kite admin reset-password
+```
+
+命令会询问你使用随机密码，还是手动输入新密码。
+
+也可以非交互式执行：
+
+```bash
+# 生成随机 Admin Token
+kite admin reset-password --random
+
+# 手动指定 Admin Token
+kite admin reset-password --password "your-new-admin-password"
+```
+
+也可以使用短命令别名：
+
+```bash
+kite reset-password --random
+```
+
+重置后，用命令输出的新 Admin Token 重新登录 Web 管理端即可。
+
+## 四、全局配置
 
 首次使用前，建议配置服务端的访问地址。Deploy Token 可以保存到全局配置，也可以保存到当前项目的 `.env.local`。
 
@@ -63,7 +93,7 @@ kite config list
 printf "KITE_DEPLOY_TOKEN=<DEPLOY_TOKEN>\n" >> .env.local
 ```
 
-## 四、初始化项目配置
+## 五、初始化项目配置
 
 推荐使用 `kite init` 创建不包含 Token 的 `kite.config.json`：
 
@@ -80,7 +110,7 @@ kite init --project proj_1a2b3c4d5e --token <DEPLOY_TOKEN> --token-store local
 
 `--token-store global` 会写入 `~/.kite/config.json`，`--token-store local` 会写入当前项目 `.env.local`。
 
-## 五、项目级配置
+## 六、项目级配置
 
 在你要部署的前端或后端项目的根目录，创建一个 `kite.config.json` 文件：
 
@@ -103,7 +133,7 @@ kite init --project proj_1a2b3c4d5e --token <DEPLOY_TOKEN> --token-store local
 
 *注：`kite.config.json` 不应包含 Deploy Token。*
 
-## 六、执行部署
+## 七、执行部署
 
 在包含 `kite.config.json` 的项目根目录下执行：
 
@@ -125,7 +155,7 @@ CLI 默认读取：
 kite push --token "YOUR_TEMP_TOKEN" --server "http://test-env:3000" --out "./build" --post "npm run reload"
 ```
 
-## 七、配置优先级
+## 八、配置优先级
 
 部署配置优先级为：
 
@@ -133,7 +163,7 @@ kite push --token "YOUR_TEMP_TOKEN" --server "http://test-env:3000" --out "./bui
 2. 本地配置：`.env.local` 和 `kite.config.json`
 3. 服务端项目默认配置：Web 管理端保存的默认部署目录与脚本
 
-## 八、部署流程示例
+## 九、部署流程示例
 
 1.  运行 `kite push`。
 2.  CLI 自动读取当前目录的 `.env.local` 和 `kite.config.json`。

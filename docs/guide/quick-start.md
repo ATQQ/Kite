@@ -55,7 +55,22 @@ node packages/cli/bin/kite.js serve --runtime node
 bun packages/cli/bin/kite.js serve --runtime bun
 ```
 
-## 4. 部署示例项目
+## 4. 重置管理端密码
+
+运行中的 `kite serve` 不需要重启即可切换管理端登录密码：
+
+```bash
+kite admin reset-password
+```
+
+你可以在交互中选择随机生成，或手动输入。也可以直接传参：
+
+```bash
+kite admin reset-password --random
+kite admin reset-password --password "your-new-admin-password"
+```
+
+## 5. 部署示例项目
 
 CLI 内置服务会初始化一个演示项目：
 

@@ -7,7 +7,8 @@ import readline from 'readline/promises';
 import { stdin as input, stdout as output } from 'process';
 import { packProject } from './pack.js';
 import { uploadZip } from './upload.js';
-import { getKiteHome, readGlobalConfig, readLocalEnv, setGlobalConfig, writeLocalEnvValue } from './home.js';
+import { getKiteHome, randomToken, readGlobalConfig, readLocalEnv, setGlobalConfig, writeLocalEnvValue } from './home.js';
+import { LocalStore } from './local-store.js';
 import { startLocalServer } from './local-server.js';
 
 // @ts-ignore
@@ -37,6 +38,67 @@ cli.command('home', 'Print Kite home directory')
   .action(() => {
     console.log(getKiteHome());
   });
+
+const askAdminToken = async () => {
+  if (!process.stdin.isTTY) {
+    return randomToken('admin');
+  }
+
+  const rl = readline.createInterface({ input, output });
+  const mode = (await rl.question('Reset admin password with random token or manual input? (random/manual) ')).trim().toLowerCase();
+  if (mode === 'manual') {
+    const manualToken = (await rl.question('Enter new admin password/token: ')).trim();
+    rl.close();
+    if (!manualToken) {
+      throw new Error('Admin password/token cannot be empty.');
+    }
+    return manualToken;
+  }
+
+  rl.close();
+  return randomToken('admin');
+};
+
+const resetAdminPassword = async (options: any) => {
+  try {
+    const nextToken = options.password
+      ? String(options.password)
+      : options.random
+        ? randomToken('admin')
+        : await askAdminToken();
+
+    if (!nextToken) {
+      throw new Error('Admin password/token cannot be empty.');
+    }
+
+    const store = new LocalStore();
+    store.updateAdminToken(nextToken);
+    console.log(chalk.green('Admin password/token has been reset.'));
+    console.log(chalk.gray(`Data home: ${store.home}`));
+    console.log(chalk.yellow(`New admin password/token: ${nextToken}`));
+    console.log(chalk.gray('Running `kite serve` instances read this file on each request, so restart is not required.'));
+  } catch (error: any) {
+    console.error(chalk.red(`Failed to reset admin password/token: ${error.message}`));
+    process.exit(1);
+  }
+};
+
+cli.command('admin <action>', 'Admin operations')
+  .option('--random', 'Generate a random admin password/token')
+  .option('--password <password>', 'Set admin password/token manually')
+  .action(async (action: string, options: any) => {
+    if (action !== 'reset-password') {
+      console.error(chalk.red(`Unknown admin action: ${action}`));
+      console.log('Available actions: reset-password');
+      process.exit(1);
+    }
+    await resetAdminPassword(options);
+  });
+
+cli.command('reset-password', 'Reset Web admin password without restarting Kite server')
+  .option('--random', 'Generate a random admin password/token')
+  .option('--password <password>', 'Set admin password/token manually')
+  .action(resetAdminPassword);
 
 const askTokenStore = async () => {
   if (!process.stdin.isTTY) return 'none';

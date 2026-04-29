@@ -91,6 +91,13 @@ export class LocalStore {
     return this.read().adminToken;
   }
 
+  updateAdminToken(adminToken: string) {
+    const db = this.read();
+    db.adminToken = adminToken;
+    this.write(db);
+    return adminToken;
+  }
+
   findProjects() {
     return this.read().projects;
   }
