@@ -1,0 +1,10 @@
+{
+  "name": "@kite/example-backend-api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --hot src/index.ts",
+    "build": "rm -rf dist && mkdir -p dist/src && cp src/index.ts dist/src/index.ts && cp package.json dist/package.json"
+  }
+}

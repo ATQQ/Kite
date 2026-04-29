@@ -10,24 +10,27 @@ import { uploadZip } from './upload.js';
 
 // @ts-ignore
 const cli = cac('kite');
-const config = new Conf({ projectName: 'kite-cli' });
+const getConfig = () => new Conf({ projectName: 'kite-cli' });
 
 // ==========================
 // Config commands
 // ==========================
 cli.command('config set <key> <value>', 'Set global configuration')
   .action((key: string, value: string) => {
+    const config = getConfig();
     config.set(key, value);
     console.log(chalk.green(`Set ${key} = ${value}`));
   });
 
 cli.command('config get <key>', 'Get global configuration')
   .action((key: string) => {
+    const config = getConfig();
     console.log(config.get(key));
   });
 
 cli.command('config list', 'List all global configurations')
   .action(() => {
+    const config = getConfig();
     console.log(config.store);
   });
 
@@ -37,14 +40,17 @@ cli.command('config list', 'List all global configurations')
 cli.command('push', 'Push and deploy project')
   .option('--token <token>', 'Deployment token')
   .option('--server <server>', 'Server URL')
+  .option('--project <projectId>', 'Project ID')
   .option('--out <dir>', 'Output directory to pack')
   .option('--pre <script>', 'Pre-deploy script (Server side)')
   .option('--post <script>', 'Post-deploy script (Server side)')
+  .option('--command <script>', 'Deploy command alias, same as --post')
   .action(async (options: any) => {
     try {
       // 1. 读取全局配置
-      const token = options.token || config.get('token');
-      const serverUrl = options.server || config.get('serverUrl');
+      const config = options.token && options.server ? null : getConfig();
+      const token = options.token || config?.get('token');
+      const serverUrl = options.server || config?.get('serverUrl');
       
       if (!token || !serverUrl) {
         console.error(chalk.red('Missing token or serverUrl. Please set them via CLI options or config set.'));
@@ -59,16 +65,16 @@ cli.command('push', 'Push and deploy project')
       }
 
       // 3. 合并配置优先级 (CLI > kite.config.json)
-      const projectId = projectConfig.projectId;
+      const projectId = options.project || projectConfig.projectId;
       if (!projectId) {
-        console.error(chalk.red('Error: projectId is required in kite.config.json'));
+        console.error(chalk.red('Error: projectId is required. Pass --project or set projectId in kite.config.json.'));
         process.exit(1);
       }
 
       const outputDir = options.out || projectConfig.outputDir || './';
       const files = projectConfig.files || []; // 获取配置的要上传的文件/目录列表
       const preDeploy = options.pre || projectConfig.preDeploy;
-      const postDeploy = options.post || projectConfig.postDeploy;
+      const postDeploy = options.command || options.post || projectConfig.command || projectConfig.postDeploy;
 
       const sourceDir = path.resolve(process.cwd(), outputDir);
       if (!fs.existsSync(sourceDir)) {

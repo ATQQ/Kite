@@ -1,5 +1,8 @@
 import { Elysia } from "elysia";
 import { deployRoutes } from "./routes/deploy.js";
+import { ensureDbReady } from "./db/index.js";
+
+await ensureDbReady();
 
 const app = new Elysia()
   .use(deployRoutes)

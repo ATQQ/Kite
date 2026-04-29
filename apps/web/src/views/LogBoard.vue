@@ -104,7 +104,7 @@ const refreshLogs = async () => {
           <div v-if="selectedLog" class="space-y-1 whitespace-pre-wrap break-all">
             <template v-for="(line, index) in selectedLog.output.split('\n')" :key="index">
               <div class="flex hover:bg-white/5 px-2 -mx-2 rounded transition-colors group">
-                <span class="w-8 text-right mr-4 text-textMuted/30 select-none group-hover:text-textMuted/50 transition-colors">{{ index + 1 }}</span>
+                <span class="w-8 text-right mr-4 text-textMuted/30 select-none group-hover:text-textMuted/50 transition-colors">{{ Number(index) + 1 }}</span>
                 <span :class="{'text-danger': line.includes('error') || line.includes('failed'), 'text-success': line.includes('success'), 'text-primary': line.includes('[Kite Deploy]')}">
                   {{ line }}
                 </span>

@@ -1,0 +1,6 @@
+{
+  "projectId": "proj_abc123",
+  "outputDir": "./dist",
+  "files": ["**/*"],
+  "postDeploy": "echo ssr-basic deployed && ls"
+}

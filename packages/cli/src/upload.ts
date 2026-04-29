@@ -36,7 +36,14 @@ export async function uploadZip(options: UploadOptions): Promise<void> {
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`[${response.status}] ${errorText}`);
+      let message = errorText;
+      try {
+        const data = JSON.parse(errorText);
+        message = data.error || data.message || errorText;
+      } catch {
+        message = errorText;
+      }
+      throw new Error(`[${response.status}] ${message}`);
     }
 
     const data = await response.json();

@@ -41,7 +41,7 @@ export const router = createRouter({
   routes
 })
 
-router.beforeEach((to, from, next) => {
+router.beforeEach((to, _from, next) => {
   const projectStore = useProjectStore()
   if (to.meta.requiresAuth && !projectStore.adminToken) {
     next('/login')

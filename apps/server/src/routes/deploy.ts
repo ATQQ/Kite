@@ -2,7 +2,6 @@ import { Elysia, t } from 'elysia';
 import fs from 'fs/promises';
 import path from 'path';
 import AdmZip from 'adm-zip';
-import { $ } from 'bun';
 import { db } from '../db/index.js';
 import { randomUUID } from 'crypto';
 
@@ -14,6 +13,22 @@ const verifyAdminToken = (headers: Record<string, string | undefined>) => {
   
   // Verify against the ADMIN_TOKEN loaded via Bun env
   return token === process.env.ADMIN_TOKEN;
+};
+
+const runShellCommand = async (command: string, cwd: string) => {
+  const proc = Bun.spawn(['sh', '-c', command], {
+    cwd,
+    stdout: 'pipe',
+    stderr: 'pipe'
+  });
+
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited
+  ]);
+
+  return { stdout, stderr, exitCode };
 };
 
 export const deployRoutes = new Elysia()
@@ -83,6 +98,12 @@ export const deployRoutes = new Elysia()
     if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
     return await db.deployments.findAll();
   })
+  .get('/api/logs/:deployId', async ({ headers, params, set }) => {
+    if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
+    const log = await db.deployments.findById(params.deployId);
+    if (!log) { set.status = 404; return { error: 'Deployment log not found' }; }
+    return log;
+  })
   .post('/api/deploy/upload', async ({ body, headers, set }) => {
     try {
       const authHeader = headers.authorization;
@@ -151,10 +172,10 @@ export const deployRoutes = new Elysia()
         // 3. 执行前置脚本（在解压之前）
         if (preDeployCmd) {
           await appendLog(`[Kite Deploy] Running Pre-deploy: ${preDeployCmd}`);
-          const { stdout, stderr, exitCode } = await $`cd ${destPath} && sh -c ${preDeployCmd}`;
-          await appendLog(stdout.toString() || '');
+          const { stdout, stderr, exitCode } = await runShellCommand(preDeployCmd, destPath);
+          if (stdout) await appendLog(stdout.trimEnd());
           if (exitCode !== 0) {
-             await appendLog(stderr.toString());
+             if (stderr) await appendLog(stderr.trimEnd());
              throw new Error(`Pre-deploy failed`);
           }
         }
@@ -167,10 +188,10 @@ export const deployRoutes = new Elysia()
         // 5. 执行后置脚本（解压之后）
         if (postDeployCmd) {
           await appendLog(`[Kite Deploy] Running Post-deploy: ${postDeployCmd}`);
-          const { stdout, stderr, exitCode } = await $`cd ${destPath} && sh -c ${postDeployCmd}`;
-          await appendLog(stdout.toString() || '');
+          const { stdout, stderr, exitCode } = await runShellCommand(postDeployCmd, destPath);
+          if (stdout) await appendLog(stdout.trimEnd());
           if (exitCode !== 0) {
-            await appendLog(stderr.toString());
+            if (stderr) await appendLog(stderr.trimEnd());
             throw new Error(`Post-deploy failed`);
           }
         }

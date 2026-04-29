@@ -2,7 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useProjectStore } from '../store/project'
-import { Plus, MoreVertical, Server, Clock, GitBranch } from 'lucide-vue-next'
+import { Plus, MoreVertical, Server, Clock } from 'lucide-vue-next'
 
 const projectStore = useProjectStore()
 const router = useRouter()

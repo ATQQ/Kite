@@ -2,7 +2,7 @@
 import { computed, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useProjectStore } from '../store/project'
-import { ArrowLeft, Save, Key, Copy, RefreshCw, Trash2, CheckCircle2 } from 'lucide-vue-next'
+import { ArrowLeft, Save, Key, Copy, RefreshCw, Trash2, CheckCircle2, TerminalSquare } from 'lucide-vue-next'
 
 const route = useRoute()
 const router = useRouter()
