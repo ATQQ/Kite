@@ -33,6 +33,7 @@ export interface DeploymentLog {
 
 interface LocalDb {
   adminToken: string;
+  globalDeployToken?: string;
   projects: Project[];
   deployments: DeploymentLog[];
 }
@@ -96,6 +97,17 @@ export class LocalStore {
     db.adminToken = adminToken;
     this.write(db);
     return adminToken;
+  }
+
+  getGlobalDeployToken() {
+    return this.read().globalDeployToken || '';
+  }
+
+  updateGlobalDeployToken(token: string) {
+    const db = this.read();
+    db.globalDeployToken = token;
+    this.write(db);
+    return token;
   }
 
   findProjects() {

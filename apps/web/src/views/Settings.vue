@@ -3,7 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useProjectStore } from '../store/project'
 import { useThemeStore } from '../store/theme'
 import type { ThemeMode } from '../store/theme'
-import { Settings, Server, Key, HardDrive, Webhook, Save, CheckCircle2, AlertTriangle, Activity, Sun, Moon, Monitor } from 'lucide-vue-next'
+import { Settings, Server, Key, HardDrive, Webhook, Save, CheckCircle2, AlertTriangle, Activity, Sun, Moon, Monitor, RefreshCw, Eye, EyeOff, Copy } from 'lucide-vue-next'
 
 const projectStore = useProjectStore()
 const themeStore = useThemeStore()
@@ -23,8 +23,19 @@ const form = ref({
   webhook_url: '',
   webhook_events: [] as string[],
   default_deploy_path: '',
-  max_upload_size: '50'
+  max_upload_size: '50',
+  global_deploy_token: ''
 })
+
+const showGlobalToken = ref(false)
+const isGlobalTokenCopied = ref(false)
+
+const copyGlobalToken = () => {
+  if (!form.value.global_deploy_token) return
+  navigator.clipboard.writeText(form.value.global_deploy_token)
+  isGlobalTokenCopied.value = true
+  setTimeout(() => isGlobalTokenCopied.value = false, 2000)
+}
 
 // Token change form
 const tokenForm = ref({
@@ -55,6 +66,7 @@ onMounted(async () => {
     form.value.webhook_events = settingsData.webhook_events ? settingsData.webhook_events.split(',') : []
     form.value.default_deploy_path = settingsData.default_deploy_path || ''
     form.value.max_upload_size = settingsData.max_upload_size || '50'
+    form.value.global_deploy_token = settingsData.global_deploy_token || ''
   }
 })
 
@@ -66,6 +78,7 @@ const saveSettings = async () => {
     webhook_events: form.value.webhook_events.join(','),
     default_deploy_path: form.value.default_deploy_path,
     max_upload_size: form.value.max_upload_size,
+    global_deploy_token: form.value.global_deploy_token,
   })
   saveMessage.value = success ? '保存成功' : '保存失败'
   isSaving.value = false
@@ -93,6 +106,11 @@ const changeToken = async () => {
     tokenMessage.value = result.error || '修改失败'
     tokenMessageType.value = 'error'
   }
+}
+
+const generateGlobalToken = () => {
+  const uuid = crypto.randomUUID().replace(/-/g, '')
+  form.value.global_deploy_token = `kt_${uuid}`
 }
 
 const toggleEvent = (event: string) => {
@@ -259,6 +277,46 @@ const toggleEvent = (event: string) => {
         <p class="text-sm text-textMuted mt-1">设置全局默认的部署参数，可在项目级别覆盖。</p>
       </div>
       <div class="p-6 space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-textMain mb-2">全局部署 Token</label>
+          <div class="flex gap-2">
+            <div class="relative flex-1">
+              <input
+                v-model="form.global_deploy_token"
+                :type="showGlobalToken ? 'text' : 'password'"
+                class="w-full bg-base border border-border rounded-md px-4 py-3 pr-10 text-textMain font-mono text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all"
+                placeholder="留空则不启用全局 Token"
+              />
+              <button
+                @click="showGlobalToken = !showGlobalToken"
+                class="absolute right-3 top-1/2 -translate-y-1/2 text-textMuted hover:text-textMain transition-colors"
+                type="button"
+              >
+                <EyeOff v-if="showGlobalToken" class="w-4 h-4" />
+                <Eye v-else class="w-4 h-4" />
+              </button>
+            </div>
+            <button
+              @click="generateGlobalToken"
+              class="flex items-center px-3 bg-base border border-border rounded-md text-textMuted hover:text-textMain hover:border-primary/50 transition-all"
+              title="生成随机 Token"
+              type="button"
+            >
+              <RefreshCw class="w-4 h-4" />
+            </button>
+            <button
+              @click="copyGlobalToken"
+              :disabled="!form.global_deploy_token"
+              class="flex items-center px-3 bg-base border border-border rounded-md text-textMuted hover:text-textMain hover:border-primary/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              title="复制 Token"
+              type="button"
+            >
+              <CheckCircle2 v-if="isGlobalTokenCopied" class="w-4 h-4 text-success" />
+              <Copy v-else class="w-4 h-4" />
+            </button>
+          </div>
+          <p class="text-xs text-textMuted mt-2">所有项目共用的部署 Token。CLI 使用全局 Token 时，配合 --project 指定项目即可部署，无需为每个项目单独配置 Token。留空则禁用。</p>
+        </div>
         <div>
           <label class="block text-sm font-medium text-textMain mb-2">默认部署路径</label>
           <input

@@ -6,6 +6,7 @@ import crypto from 'crypto';
 export interface KiteGlobalConfig {
   serverUrl?: string;
   token?: string;
+  projectToken?: Record<string, string>;
 }
 
 export interface KiteLocalEnv {
@@ -45,8 +46,11 @@ export function writeGlobalConfig(config: KiteGlobalConfig) {
   fs.writeFileSync(getConfigPath(), `${JSON.stringify(config, null, 2)}\n`);
 }
 
-export function setGlobalConfig(key: keyof KiteGlobalConfig, value: string) {
+export function setGlobalConfig(key: 'serverUrl' | 'token', value: string) {
   const config = readGlobalConfig();
+  console.log('config', config);
+  console.log('value', value);
+  
   config[key] = value;
   writeGlobalConfig(config);
 }

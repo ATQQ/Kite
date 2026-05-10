@@ -141,11 +141,24 @@ export async function startLocalServer(options: ServeOptions = {}) {
 
     if (url.pathname === '/api/deploy/upload' && request.method === 'POST') {
       const token = getAuthToken(request);
-      const project = store.findProjectByToken(token);
-      if (!project) return json(403, { error: 'Invalid Token' });
+      let project = store.findProjectByToken(token);
 
       const form = await parseMultipart(request);
-      if (form.fields.projectId !== project.id) {
+
+      if (!project) {
+        // Fallback: 检查全局部署 token
+        const globalToken = store.getGlobalDeployToken();
+        if (!globalToken || token !== globalToken) {
+          if (form.filePath) await fsp.rm(form.filePath, { force: true });
+          return json(403, { error: 'Invalid Token' });
+        }
+        // 全局 token 匹配，通过 projectId 查找项目
+        project = store.findProjectById(form.fields.projectId);
+        if (!project) {
+          if (form.filePath) await fsp.rm(form.filePath, { force: true });
+          return json(404, { error: 'Project not found' });
+        }
+      } else if (form.fields.projectId !== project.id) {
         if (form.filePath) await fsp.rm(form.filePath, { force: true });
         return json(403, { error: 'Project ID mismatch' });
       }
@@ -260,6 +273,41 @@ export async function startLocalServer(options: ServeOptions = {}) {
     if (logMatch?.[1] && request.method === 'GET') {
       const log = store.findDeploymentById(logMatch[1]);
       return log ? json(200, log) : json(404, { error: 'Deployment log not found' });
+    }
+
+    // Settings routes
+    if (url.pathname === '/api/settings' && request.method === 'GET') {
+      return json(200, {
+        global_deploy_token: store.getGlobalDeployToken(),
+        default_deploy_path: '.deployments',
+        max_upload_size: '50',
+        webhook_url: '',
+        webhook_events: 'deploy_success,deploy_failure'
+      });
+    }
+
+    if (url.pathname === '/api/settings' && request.method === 'PUT') {
+      const body = JSON.parse(await readBody(request) || '{}');
+      if (body.global_deploy_token !== undefined) {
+        store.updateGlobalDeployToken(String(body.global_deploy_token));
+      }
+      return json(200, { success: true, message: 'Settings updated' });
+    }
+
+    if (url.pathname === '/api/settings/status' && request.method === 'GET') {
+      const projects = store.findProjects();
+      const deployments = store.findDeployments();
+      const successCount = deployments.filter(d => d.status === 'success').length;
+      const failedCount = deployments.filter(d => d.status === 'failed').length;
+      return json(200, {
+        version: '1.0.0',
+        uptime: '-',
+        projectCount: projects.length,
+        deploymentCount: deployments.length,
+        successCount,
+        failedCount,
+        successRate: deployments.length > 0 ? Math.round((successCount / deployments.length) * 100) : 0,
+      });
     }
 
     return json(404, { error: 'Not found' });

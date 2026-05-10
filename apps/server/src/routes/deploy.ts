@@ -113,18 +113,26 @@ export const deployRoutes = new Elysia()
       }
       
       const token = authHeader.split(' ')[1];
-      const project = await db.projects.findByToken(token);
-      
-      if (!project) {
-        set.status = 403;
-        return { error: 'Invalid Token' };
-      }
+      let project = await db.projects.findByToken(token);
 
       // 获取 body 中的字段
       const file = body.file as File;
       const projectId = body.projectId;
-      
-      if (projectId !== project.id) {
+
+      if (!project) {
+        // Fallback: 检查全局部署 token
+        const globalToken = await db.settings.get('global_deploy_token');
+        if (!globalToken || token !== globalToken) {
+          set.status = 403;
+          return { error: 'Invalid Token' };
+        }
+        // 全局 token 匹配，通过 projectId 查找项目
+        project = await db.projects.findById(projectId);
+        if (!project) {
+          set.status = 404;
+          return { error: 'Project not found' };
+        }
+      } else if (projectId !== project.id) {
         set.status = 403;
         return { error: 'Project ID mismatch' };
       }

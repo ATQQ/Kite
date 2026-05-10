@@ -7,7 +7,7 @@ import readline from 'readline/promises';
 import { stdin as input, stdout as output } from 'process';
 import { packProject } from './pack.js';
 import { uploadZip } from './upload.js';
-import { getKiteHome, randomToken, readGlobalConfig, readLocalEnv, setGlobalConfig, writeLocalEnvValue } from './home.js';
+import { getKiteHome, randomToken, readGlobalConfig, readLocalEnv, setGlobalConfig, writeGlobalConfig, writeLocalEnvValue } from './home.js';
 import { LocalStore } from './local-store.js';
 import { startLocalServer } from './local-server.js';
 
@@ -18,20 +18,56 @@ const cli = cac('kite');
 // Config commands
 // ==========================
 cli.command('config set <key> <value>', 'Set global configuration')
-  .action((key: string, value: string) => {
+  .option('--global', 'Set global fallback token instead of per-project token')
+  .action((key: string, value: string, options: any) => {
+    if (key === 'token' && !options.global) {
+      // 按项目存储 token
+      const configPath = path.resolve(process.cwd(), 'kite.config.json');
+      if (fs.existsSync(configPath)) {
+        const projectConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+        if (projectConfig.projectId) {
+          const config = readGlobalConfig();
+          config.projectToken = { ...config.projectToken, [projectConfig.projectId]: value };
+          writeGlobalConfig(config);
+          console.log(chalk.green(`Set token for project ${projectConfig.projectId}`));
+          return;
+        }
+      }
+      // 没有 kite.config.json 时 fallback 到全局
+      console.log(chalk.yellow('No kite.config.json found, setting as global token.'));
+    }
     setGlobalConfig(key as 'serverUrl' | 'token', value);
     console.log(chalk.green(`Set ${key} = ${value}`));
   });
 
 cli.command('config get <key>', 'Get global configuration')
   .action((key: string) => {
-    const config = readGlobalConfig() as Record<string, string | undefined>;
-    console.log(config[key]);
+    const config = readGlobalConfig();
+    if (key === 'token') {
+      // 优先返回项目级 token
+      const configPath = path.resolve(process.cwd(), 'kite.config.json');
+      if (fs.existsSync(configPath)) {
+        const projectConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+        const projectToken = config.projectToken?.[projectConfig.projectId];
+        if (projectToken) {
+          console.log(projectToken);
+          return;
+        }
+      }
+    }
+    console.log((config as Record<string, string | undefined>)[key]);
   });
 
 cli.command('config list', 'List all global configurations')
   .action(() => {
-    console.log(readGlobalConfig());
+    const config = readGlobalConfig();
+    console.log(config);
+    if (config.projectToken && Object.keys(config.projectToken).length > 0) {
+      console.log(chalk.gray('\nPer-project tokens:'));
+      for (const [pid, tok] of Object.entries(config.projectToken)) {
+        console.log(`  ${pid}: ${tok}`);
+      }
+    }
   });
 
 cli.command('home', 'Print Kite home directory')
@@ -153,8 +189,10 @@ cli.command('init', 'Create kite.config.json without writing token into source c
     if (options.token) {
       const tokenStore = options.tokenStore || await askTokenStore();
       if (tokenStore === 'global') {
-        setGlobalConfig('token', options.token);
-        console.log(chalk.green(`Saved token to ${getKiteHome()}/config.json`));
+        const config = readGlobalConfig();
+        config.projectToken = { ...config.projectToken, [projectId]: options.token };
+        writeGlobalConfig(config);
+        console.log(chalk.green(`Saved token for ${projectId} to ${getKiteHome()}/config.json`));
       } else if (tokenStore === 'local') {
         writeLocalEnvValue('KITE_DEPLOY_TOKEN', options.token);
         console.log(chalk.green('Saved token to .env.local'));
@@ -207,18 +245,18 @@ cli.command('push', 'Push and deploy project')
         projectConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
       }
 
-      const token = options.token || localEnv.KITE_DEPLOY_TOKEN || localEnv.KITE_TOKEN || config?.token;
-      const serverUrl = options.server || localEnv.KITE_SERVER_URL || config?.serverUrl;
-      
-      if (!token || !serverUrl) {
-        console.error(chalk.red('Missing token or serverUrl. Use CLI options, .env.local, or `kite config set`.'));
-        process.exit(1);
-      }
-
-      // 2. 合并部署配置：CLI > .env.local / kite.config.json > 服务端项目配置
+      // 2. 解析 projectId（token 查找需要依赖它）
       const projectId = options.project || localEnv.KITE_PROJECT_ID || projectConfig.projectId;
       if (!projectId) {
         console.error(chalk.red('Error: projectId is required. Pass --project or set projectId in kite.config.json.'));
+        process.exit(1);
+      }
+
+      const token = options.token || localEnv.KITE_DEPLOY_TOKEN || localEnv.KITE_TOKEN || config?.projectToken?.[projectId] || config?.token;
+      const serverUrl = options.server || localEnv.KITE_SERVER_URL || config?.serverUrl;
+
+      if (!token || !serverUrl) {
+        console.error(chalk.red('Missing token or serverUrl. Use CLI options, .env.local, or `kite config set`.'));
         process.exit(1);
       }
 
@@ -265,5 +303,6 @@ cli.command('push', 'Push and deploy project')
   });
 
 cli.help();
-cli.version('1.0.0');
+const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf-8'));
+cli.version(pkg.version);
 cli.parse();

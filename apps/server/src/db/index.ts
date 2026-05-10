@@ -51,6 +51,10 @@ const initDb = async () => {
     sql: `INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`,
     args: ['max_upload_size', '50']
   });
+  await client.execute({
+    sql: `INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`,
+    args: ['global_deploy_token', '']
+  });
 
   await client.execute(`
     CREATE TABLE IF NOT EXISTS deployments (
