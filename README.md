@@ -18,7 +18,7 @@ CLI 包内置 **Web 管理端静态产物** 和 **Server 代理后端**，基于
 安装 CLI：
 
 ```bash
-npm install -g @kite/cli
+npm install -g @kitecd/cli
 ```
 
 启动内置 Web + Server：

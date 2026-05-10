@@ -28,7 +28,7 @@ Kite 适合个人服务器、内网环境、小团队项目和测试环境的快
 
 典型流程：
 
-1. 安装 `@kite/cli`。
+1. 安装 `@kitecd/cli`。
 2. 运行 `kite serve` 打开内置管理后台。
 3. 在 Web 管理端创建项目，复制项目 ID 和 Deploy Token。
 4. 在待部署项目里创建 `kite.config.json`。

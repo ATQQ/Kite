@@ -7,9 +7,9 @@
 *前提：需要 Node.js (v18+)。如果你习惯 Bun，也可以用 Bun 运行 CLI 源码。*
 
 ```bash
-npm install -g @kite/cli
+npm install -g @kitecd/cli
 # 或者
-bun add -g @kite/cli
+bun add -g @kitecd/cli
 ```
 
 启动内置 Web 管理端和 Server 后端：

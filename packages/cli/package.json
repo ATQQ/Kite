@@ -1,5 +1,5 @@
 {
-  "name": "@kite/cli",
+  "name": "@kitecd/cli",
   "version": "1.0.0",
   "type": "module",
   "bin": {

@@ -53,7 +53,7 @@ const copyCommand = (key: string, value: string) => {
   setTimeout(() => copiedCommand.value = '', 2000)
 }
 
-const installCommand = 'npm install -g @kite/cli'
+const installCommand = 'npm install -g @kitecd/cli'
 const initCommand = computed(() => `kite init --project ${projectId} --out ./dist --server ${serverUrl.value}`)
 const globalTokenCommand = 'kite config set token <DEPLOY_TOKEN>'
 const localTokenCommand = 'printf "KITE_DEPLOY_TOKEN=<DEPLOY_TOKEN>\\n" >> .env.local'

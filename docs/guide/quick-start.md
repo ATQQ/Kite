@@ -3,7 +3,7 @@
 ## 1. 安装 CLI
 
 ```bash
-npm install -g @kite/cli
+npm install -g @kitecd/cli
 ```
 
 本地开发仓库内也可以先构建再直接使用源码 CLI：
