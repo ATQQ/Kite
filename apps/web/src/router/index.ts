@@ -31,6 +31,11 @@ const routes = [
         path: 'logs',
         name: 'LogBoard',
         component: () => import('../views/LogBoard.vue')
+      },
+      {
+        path: 'settings',
+        name: 'Settings',
+        component: () => import('../views/Settings.vue')
       }
     ]
   }

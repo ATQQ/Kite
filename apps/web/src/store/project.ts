@@ -144,6 +144,54 @@ export const useProjectStore = defineStore('project', () => {
     return ''
   }
 
+  async function fetchSettings() {
+    try {
+      return await apiFetch('/settings')
+    } catch (e) {
+      console.error('Failed to fetch settings', e)
+      return {}
+    }
+  }
+
+  async function updateSettings(payload: Record<string, string>) {
+    try {
+      const data = await apiFetch('/settings', {
+        method: 'PUT',
+        body: JSON.stringify(payload)
+      })
+      return data.success
+    } catch (e) {
+      console.error('Failed to update settings', e)
+      return false
+    }
+  }
+
+  async function changeAdminToken(oldToken: string, newToken: string) {
+    try {
+      const data = await apiFetch('/settings/token', {
+        method: 'POST',
+        body: JSON.stringify({ oldToken, newToken })
+      })
+      if (data.success) {
+        adminToken.value = newToken
+        localStorage.setItem('adminToken', newToken)
+      }
+      return data
+    } catch (e: any) {
+      console.error('Failed to change token', e)
+      return { error: e.message }
+    }
+  }
+
+  async function fetchSystemStatus() {
+    try {
+      return await apiFetch('/settings/status')
+    } catch (e) {
+      console.error('Failed to fetch system status', e)
+      return null
+    }
+  }
+
   async function login(token: string) {
     try {
       const data = await apiFetch('/auth/login', {
@@ -179,6 +227,10 @@ export const useProjectStore = defineStore('project', () => {
     updateProject,
     removeProject,
     generateToken,
+    fetchSettings,
+    updateSettings,
+    changeAdminToken,
+    fetchSystemStatus,
     login,
     logout
   }

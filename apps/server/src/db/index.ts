@@ -28,6 +28,31 @@ const initDb = async () => {
   `);
 
   await client.execute(`
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+  `);
+
+  // Seed default settings
+  await client.execute({
+    sql: `INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`,
+    args: ['webhook_url', '']
+  });
+  await client.execute({
+    sql: `INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`,
+    args: ['webhook_events', 'deploy_success,deploy_failure']
+  });
+  await client.execute({
+    sql: `INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`,
+    args: ['default_deploy_path', '.deployments']
+  });
+  await client.execute({
+    sql: `INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`,
+    args: ['max_upload_size', '50']
+  });
+
+  await client.execute(`
     CREATE TABLE IF NOT EXISTS deployments (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL REFERENCES projects(id),
@@ -86,6 +111,34 @@ export async function ensureDbReady() {
 }
 
 export const db = {
+  settings: {
+    async get(key: string) {
+      await ensureDbReady();
+      const result = await ormDb.select().from(schema.settings).where(eq(schema.settings.key, key)).limit(1);
+      return result[0]?.value ?? null;
+    },
+    async getAll() {
+      await ensureDbReady();
+      const rows = await ormDb.select().from(schema.settings);
+      return Object.fromEntries(rows.map(r => [r.key, r.value]));
+    },
+    async set(key: string, value: string) {
+      await ensureDbReady();
+      await client.execute({
+        sql: `INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+        args: [key, value]
+      });
+    },
+    async setMany(entries: Record<string, string>) {
+      await ensureDbReady();
+      for (const [key, value] of Object.entries(entries)) {
+        await client.execute({
+          sql: `INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+          args: [key, value]
+        });
+      }
+    }
+  },
   projects: {
     async findByToken(token: string) {
       await ensureDbReady();

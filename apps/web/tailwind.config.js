@@ -1,5 +1,6 @@
 /** @type {import('tailwindcss').Config} */
 export default {
+  darkMode: 'class',
   content: [
     "./index.html",
     "./src/**/*.{vue,js,ts,jsx,tsx}",
@@ -7,14 +8,14 @@ export default {
   theme: {
     extend: {
       colors: {
-        base: '#09090b',
-        panel: '#18181b',
-        border: '#27272a',
-        primary: '#3b82f6',
-        success: '#10b981',
-        danger: '#ef4444',
-        textMain: '#f4f4f5',
-        textMuted: '#a1a1aa'
+        base: 'var(--color-base)',
+        panel: 'var(--color-panel)',
+        border: 'var(--color-border)',
+        primary: 'var(--color-primary)',
+        success: 'var(--color-success)',
+        danger: 'var(--color-danger)',
+        textMain: 'var(--color-text-main)',
+        textMuted: 'var(--color-text-muted)'
       },
       fontFamily: {
         sans: ['Inter', 'system-ui', 'sans-serif'],

@@ -91,13 +91,13 @@ const removeProject = async () => {
     <div class="flex items-center space-x-4 mb-8">
       <button 
         @click="router.back()"
-        class="p-2 hover:bg-white/10 rounded-full transition-colors text-textMuted hover:text-white"
+        class="p-2 dark:hover:bg-white/10 hover:bg-black/10 rounded-full transition-colors text-textMuted hover:text-textMain"
       >
         <ArrowLeft class="w-5 h-5" />
       </button>
       <div>
         <div class="flex items-center space-x-3">
-          <h1 class="text-2xl font-bold text-white tracking-tight">{{ project.name }}</h1>
+          <h1 class="text-2xl font-bold text-textMain tracking-tight">{{ project.name }}</h1>
           <span 
             class="px-2.5 py-0.5 text-xs rounded-md border"
             :class="project.status === 'success' ? 'bg-success/10 border-success/20 text-success' : 'bg-primary/10 border-primary/20 text-primary'"
@@ -114,8 +114,8 @@ const removeProject = async () => {
       
       <!-- Token Management Card -->
       <div class="bg-panel border border-border rounded-xl shadow-sm overflow-hidden">
-        <div class="px-6 py-5 border-b border-border bg-white/[0.02]">
-          <h2 class="text-lg font-semibold text-white flex items-center">
+        <div class="px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02]">
+          <h2 class="text-lg font-semibold text-textMain flex items-center">
             <Key class="w-5 h-5 mr-2 text-primary" />
             鉴权 Token 管理
           </h2>
@@ -129,13 +129,13 @@ const removeProject = async () => {
                 :type="isTokenVisible ? 'text' : 'password'"
                 readonly
                 :value="project.token || '暂无 Token，请生成'"
-                class="w-full bg-base border border-border rounded-md pl-4 pr-12 py-3 text-white font-mono text-sm focus:outline-none focus:border-primary/50 transition-colors"
+                class="w-full bg-base border border-border rounded-md pl-4 pr-12 py-3 text-textMain font-mono text-sm focus:outline-none focus:border-primary/50 transition-colors"
                 :class="{'opacity-50 blur-[2px] select-none': !isTokenVisible && project.token}"
               />
               <button 
                 v-if="project.token"
                 @click="isTokenVisible = !isTokenVisible"
-                class="absolute right-3 top-1/2 -translate-y-1/2 text-textMuted hover:text-white text-xs font-medium px-2 py-1 rounded transition-colors"
+                class="absolute right-3 top-1/2 -translate-y-1/2 text-textMuted hover:text-textMain text-xs font-medium px-2 py-1 rounded transition-colors"
               >
                 {{ isTokenVisible ? '隐藏' : '显示' }}
               </button>
@@ -172,8 +172,8 @@ const removeProject = async () => {
 
       <!-- CLI Help Card -->
       <div class="bg-panel border border-border rounded-xl shadow-sm overflow-hidden">
-        <div class="px-6 py-5 border-b border-border bg-white/[0.02]">
-          <h2 class="text-lg font-semibold text-white flex items-center">
+        <div class="px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02]">
+          <h2 class="text-lg font-semibold text-textMain flex items-center">
             <TerminalSquare class="w-5 h-5 mr-2 text-primary" />
             CLI 快速部署指引
           </h2>
@@ -183,20 +183,20 @@ const removeProject = async () => {
         <div class="p-6 space-y-5">
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div class="rounded-lg border border-border bg-base p-4">
-              <p class="text-sm font-medium text-white mb-2">1. 安装 CLI</p>
+              <p class="text-sm font-medium text-textMain mb-2">1. 安装 CLI</p>
               <div class="flex items-center gap-2">
                 <code class="flex-1 text-xs text-success font-mono break-all">{{ installCommand }}</code>
-                <button @click="copyCommand('install', installCommand)" class="text-xs text-primary hover:text-white">
+                <button @click="copyCommand('install', installCommand)" class="text-xs text-primary hover:text-textMain">
                   {{ copiedCommand === 'install' ? '已复制' : '复制' }}
                 </button>
               </div>
             </div>
 
             <div class="rounded-lg border border-border bg-base p-4">
-              <p class="text-sm font-medium text-white mb-2">2. 初始化项目配置</p>
+              <p class="text-sm font-medium text-textMain mb-2">2. 初始化项目配置</p>
               <div class="flex items-center gap-2">
                 <code class="flex-1 text-xs text-success font-mono break-all">{{ initCommand }}</code>
-                <button @click="copyCommand('init', initCommand)" class="text-xs text-primary hover:text-white">
+                <button @click="copyCommand('init', initCommand)" class="text-xs text-primary hover:text-textMain">
                   {{ copiedCommand === 'init' ? '已复制' : '复制' }}
                 </button>
               </div>
@@ -204,19 +204,19 @@ const removeProject = async () => {
           </div>
 
           <div class="rounded-lg border border-border bg-base p-4">
-            <p class="text-sm font-medium text-white mb-3">3. 保存 Deploy Token（二选一）</p>
+            <p class="text-sm font-medium text-textMain mb-3">3. 保存 Deploy Token（二选一）</p>
             <div class="space-y-3">
               <div class="flex items-center gap-2">
                 <span class="text-xs text-textMuted w-24 shrink-0">全局配置</span>
                 <code class="flex-1 text-xs text-success font-mono break-all">{{ globalTokenCommand }}</code>
-                <button @click="copyCommand('global-token', globalTokenCommand)" class="text-xs text-primary hover:text-white">
+                <button @click="copyCommand('global-token', globalTokenCommand)" class="text-xs text-primary hover:text-textMain">
                   {{ copiedCommand === 'global-token' ? '已复制' : '复制' }}
                 </button>
               </div>
               <div class="flex items-center gap-2">
                 <span class="text-xs text-textMuted w-24 shrink-0">项目本地</span>
                 <code class="flex-1 text-xs text-success font-mono break-all">{{ localTokenCommand }}</code>
-                <button @click="copyCommand('local-token', localTokenCommand)" class="text-xs text-primary hover:text-white">
+                <button @click="copyCommand('local-token', localTokenCommand)" class="text-xs text-primary hover:text-textMain">
                   {{ copiedCommand === 'local-token' ? '已复制' : '复制' }}
                 </button>
               </div>
@@ -226,20 +226,20 @@ const removeProject = async () => {
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div class="rounded-lg border border-border bg-base p-4">
-              <p class="text-sm font-medium text-white mb-2">4. 使用默认配置部署</p>
+              <p class="text-sm font-medium text-textMain mb-2">4. 使用默认配置部署</p>
               <div class="flex items-center gap-2">
                 <code class="flex-1 text-xs text-success font-mono break-all">{{ pushCommand }}</code>
-                <button @click="copyCommand('push', pushCommand)" class="text-xs text-primary hover:text-white">
+                <button @click="copyCommand('push', pushCommand)" class="text-xs text-primary hover:text-textMain">
                   {{ copiedCommand === 'push' ? '已复制' : '复制' }}
                 </button>
               </div>
             </div>
 
             <div class="rounded-lg border border-border bg-base p-4">
-              <p class="text-sm font-medium text-white mb-2">直接通过 CLI 覆盖配置</p>
+              <p class="text-sm font-medium text-textMain mb-2">直接通过 CLI 覆盖配置</p>
               <div class="flex items-center gap-2">
                 <code class="flex-1 text-xs text-success font-mono break-all">{{ directPushCommand }}</code>
-                <button @click="copyCommand('direct-push', directPushCommand)" class="text-xs text-primary hover:text-white">
+                <button @click="copyCommand('direct-push', directPushCommand)" class="text-xs text-primary hover:text-textMain">
                   {{ copiedCommand === 'direct-push' ? '已复制' : '复制' }}
                 </button>
               </div>
@@ -248,8 +248,8 @@ const removeProject = async () => {
 
           <div class="rounded-lg border border-border bg-base p-4">
             <div class="flex items-center justify-between mb-2">
-              <p class="text-sm font-medium text-white">kite.config.json 示例（不包含 Token）</p>
-              <button @click="copyCommand('config', configExample)" class="text-xs text-primary hover:text-white">
+              <p class="text-sm font-medium text-textMain">kite.config.json 示例（不包含 Token）</p>
+              <button @click="copyCommand('config', configExample)" class="text-xs text-primary hover:text-textMain">
                 {{ copiedCommand === 'config' ? '已复制' : '复制' }}
               </button>
             </div>
@@ -266,8 +266,8 @@ const removeProject = async () => {
 
       <!-- Execution Scripts Card -->
       <div class="bg-panel border border-border rounded-xl shadow-sm overflow-hidden">
-        <div class="px-6 py-5 border-b border-border bg-white/[0.02]">
-          <h2 class="text-lg font-semibold text-white flex items-center">
+        <div class="px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02]">
+          <h2 class="text-lg font-semibold text-textMain flex items-center">
             <TerminalSquare class="w-5 h-5 mr-2 text-primary" />
             部署脚本配置 (云端默认)
           </h2>
@@ -276,18 +276,18 @@ const removeProject = async () => {
         
         <div class="p-6 space-y-6">
           <div>
-            <label class="block text-sm font-medium text-white mb-2">部署目录 (Destination Path)</label>
-            <input 
+            <label class="block text-sm font-medium text-textMain mb-2">部署目录 (Destination Path)</label>
+            <input
               v-model="formData.destPath"
-              type="text" 
-              class="w-full bg-base border border-border rounded-md px-4 py-3 text-white font-mono text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all"
+              type="text"
+              class="w-full bg-base border border-border rounded-md px-4 py-3 text-textMain font-mono text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all"
               placeholder="e.g. /var/www/my-project"
             />
             <p class="text-xs text-textMuted mt-2">在服务端解压和部署该项目文件的绝对路径。</p>
           </div>
 
           <div>
-            <label class="block text-sm font-medium text-white mb-2">前置脚本 (Pre-Deploy)</label>
+            <label class="block text-sm font-medium text-textMain mb-2">前置脚本 (Pre-Deploy)</label>
             <div class="relative">
               <div class="absolute left-0 top-0 bottom-0 w-8 bg-base border-r border-border rounded-l-md flex flex-col items-center py-3 text-textMuted font-mono text-xs select-none">
                 <span>1</span>
@@ -303,7 +303,7 @@ const removeProject = async () => {
           </div>
 
           <div>
-            <label class="block text-sm font-medium text-white mb-2">后置脚本 (Post-Deploy)</label>
+            <label class="block text-sm font-medium text-textMain mb-2">后置脚本 (Post-Deploy)</label>
             <div class="relative">
               <div class="absolute left-0 top-0 bottom-0 w-8 bg-base border-r border-border rounded-l-md flex flex-col items-center py-3 text-textMuted font-mono text-xs select-none">
                 <span>1</span>

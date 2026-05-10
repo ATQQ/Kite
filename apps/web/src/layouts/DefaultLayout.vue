@@ -2,6 +2,7 @@
 import { LayoutDashboard, FolderArchive, TerminalSquare, Settings, Rocket, LogOut } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { useProjectStore } from '../store/project'
+import { APP_VERSION } from '../constants'
 
 const route = useRoute()
 const router = useRouter()
@@ -25,8 +26,8 @@ const handleLogout = () => {
     <aside class="w-64 border-r border-border bg-panel flex flex-col hidden md:flex">
       <div class="h-16 flex items-center px-6 border-b border-border">
         <Rocket class="w-6 h-6 text-primary mr-2" />
-        <span class="text-lg font-bold text-white tracking-wide">KITE</span>
-        <span class="ml-2 text-xs bg-primary/20 text-primary px-2 py-0.5 rounded-full">v4.0</span>
+        <span class="text-lg font-bold text-textMain tracking-wide">KITE</span>
+        <span class="ml-2 text-xs bg-primary/20 text-primary px-2 py-0.5 rounded-full">v{{ APP_VERSION }}</span>
       </div>
       
       <nav class="flex-1 py-6 px-3 space-y-1">
@@ -38,7 +39,7 @@ const handleLogout = () => {
           :class="[
             route.path === menu.path || (menu.path !== '/' && route.path.startsWith(menu.path))
               ? 'bg-primary/10 text-primary shadow-[inset_2px_0_0_0_#3b82f6]' 
-              : 'text-textMuted hover:bg-white/5 hover:text-textMain'
+              : 'text-textMuted dark:hover:bg-white/5 hover:bg-black/5 hover:text-textMain'
           ]"
         >
           <component :is="menu.icon" class="w-5 h-5 mr-3" :class="route.path === menu.path || (menu.path !== '/' && route.path.startsWith(menu.path)) ? 'text-primary' : 'text-textMuted group-hover:text-textMain'" />
@@ -47,10 +48,16 @@ const handleLogout = () => {
       </nav>
       
       <div class="p-4 border-t border-border space-y-1">
-        <button class="flex items-center w-full px-3 py-2 text-sm text-textMuted hover:text-textMain hover:bg-white/5 rounded-md transition-colors">
-          <Settings class="w-5 h-5 mr-3" />
+        <router-link
+          to="/settings"
+          class="flex items-center w-full px-3 py-2 text-sm rounded-md transition-colors"
+          :class="route.path === '/settings'
+            ? 'bg-primary/10 text-primary shadow-[inset_2px_0_0_0_#3b82f6]'
+            : 'text-textMuted hover:text-textMain dark:hover:bg-white/5 hover:bg-black/5'"
+        >
+          <Settings class="w-5 h-5 mr-3" :class="route.path === '/settings' ? 'text-primary' : 'text-textMuted'" />
           系统设置
-        </button>
+        </router-link>
         <button @click="handleLogout" class="flex items-center w-full px-3 py-2 text-sm text-danger hover:bg-danger/10 rounded-md transition-colors">
           <LogOut class="w-5 h-5 mr-3" />
           退出登录
@@ -63,7 +70,7 @@ const handleLogout = () => {
       <!-- Mobile Header -->
       <header class="h-16 border-b border-border bg-panel flex items-center px-4 md:hidden">
         <Rocket class="w-6 h-6 text-primary mr-2" />
-        <span class="text-lg font-bold text-white">KITE</span>
+        <span class="text-lg font-bold text-textMain">KITE</span>
       </header>
       
       <!-- Content Scrollable Area -->
