@@ -233,7 +233,7 @@ const removeProject = async () => {
                   {{ copiedCommand === 'push' ? '已复制' : '复制' }}
                 </button>
               </div>
-              <p class="text-xs text-textMuted mt-2">需先通过 <code class="font-mono">kite config set token</code> 或 <code class="font-mono">--token-store global</code> 保存过 Token。</p>
+              <p class="text-xs text-textMuted mt-2">需先通过 <code class="font-mono">kite config:set token</code> 或 <code class="font-mono">--token-store global</code> 保存过 Token。</p>
             </div>
 
             <div class="rounded-lg border border-border bg-base p-4 space-y-3">
@@ -259,8 +259,8 @@ const removeProject = async () => {
           <div class="rounded-lg border border-primary/20 bg-primary/5 p-4 space-y-2">
             <p class="text-sm text-textMuted leading-relaxed">
               <strong class="text-primary font-medium">Token 设置方式：</strong>
-              <code class="font-mono text-xs bg-base px-1 py-0.5 rounded border border-border">kite config set token &lt;token&gt;</code> 按项目保存，
-              <code class="font-mono text-xs bg-base px-1 py-0.5 rounded border border-border">kite config set token &lt;token&gt; --global</code> 设置全局 fallback。
+              <code class="font-mono text-xs bg-base px-1 py-0.5 rounded border border-border">kite config:set token &lt;token&gt;</code> 按项目保存，
+              <code class="font-mono text-xs bg-base px-1 py-0.5 rounded border border-border">kite config:set token &lt;token&gt; --global</code> 设置全局 fallback。
               也可在 <code class="font-mono">.env.local</code> 中写入 <code class="font-mono">KITE_DEPLOY_TOKEN=&lt;token&gt;</code>。
             </p>
             <p class="text-sm text-textMuted leading-relaxed">

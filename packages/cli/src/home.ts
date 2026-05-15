@@ -48,9 +48,6 @@ export function writeGlobalConfig(config: KiteGlobalConfig) {
 
 export function setGlobalConfig(key: 'serverUrl' | 'token', value: string) {
   const config = readGlobalConfig();
-  console.log('config', config);
-  console.log('value', value);
-  
   config[key] = value;
   writeGlobalConfig(config);
 }

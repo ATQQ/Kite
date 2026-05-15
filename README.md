@@ -70,8 +70,8 @@ kite serve --host 0.0.0.0 --port 3000
 
 1. **设置全局服务器与 Token**
 ```bash
-kite config set serverUrl http://127.0.0.1:3000
-kite config set token <项目 Deploy Token>
+kite config:set serverUrl http://127.0.0.1:3000
+kite config:set token <项目 Deploy Token>
 ```
 
 2. **在项目根目录创建 `kite.config.json`**

@@ -89,7 +89,7 @@ kite push --server http://127.0.0.1:3000 --token test-token
 真实项目中不建议把 Deploy Token 写入 `kite.config.json`。可以保存到全局配置：
 
 ```bash
-kite config set token <DEPLOY_TOKEN>
+kite config:set token <DEPLOY_TOKEN>
 ```
 
 也可以保存到当前项目 `.env.local`：

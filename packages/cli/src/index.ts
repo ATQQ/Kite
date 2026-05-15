@@ -17,7 +17,7 @@ const cli = cac('kite');
 // ==========================
 // Config commands
 // ==========================
-cli.command('config set <key> <value>', 'Set global configuration')
+cli.command('config:set <key> <value>', 'Set global configuration')
   .option('--global', 'Set global fallback token instead of per-project token')
   .action((key: string, value: string, options: any) => {
     if (key === 'token' && !options.global) {
@@ -40,7 +40,7 @@ cli.command('config set <key> <value>', 'Set global configuration')
     console.log(chalk.green(`Set ${key} = ${value}`));
   });
 
-cli.command('config get <key>', 'Get global configuration')
+cli.command('config:get <key>', 'Get global configuration')
   .action((key: string) => {
     const config = readGlobalConfig();
     if (key === 'token') {
@@ -58,7 +58,7 @@ cli.command('config get <key>', 'Get global configuration')
     console.log((config as Record<string, string | undefined>)[key]);
   });
 
-cli.command('config list', 'List all global configurations')
+cli.command('config:list', 'List all global configurations')
   .action(() => {
     const config = readGlobalConfig();
     console.log(config);
@@ -197,7 +197,7 @@ cli.command('init', 'Create kite.config.json without writing token into source c
         writeLocalEnvValue('KITE_DEPLOY_TOKEN', options.token);
         console.log(chalk.green('Saved token to .env.local'));
       } else {
-        console.log(chalk.yellow('Token was not saved. Pass --token on push, or save it with `kite config set token <token>`.'));
+        console.log(chalk.yellow('Token was not saved. Pass --token on push, or save it with `kite config:set token <token>`.'));
       }
     }
   });
@@ -255,8 +255,16 @@ cli.command('push', 'Push and deploy project')
       const token = options.token || localEnv.KITE_DEPLOY_TOKEN || localEnv.KITE_TOKEN || config?.projectToken?.[projectId] || config?.token;
       const serverUrl = options.server || localEnv.KITE_SERVER_URL || config?.serverUrl;
 
-      if (!token || !serverUrl) {
-        console.error(chalk.red('Missing token or serverUrl. Use CLI options, .env.local, or `kite config set`.'));
+      if (!token && !serverUrl) {
+        console.error(chalk.red('Missing token and serverUrl. Run `kite config:set serverUrl <url>` and `kite config:set token <token>`.'));
+        process.exit(1);
+      }
+      if (!serverUrl) {
+        console.error(chalk.red('Missing serverUrl. Run `kite config:set serverUrl <url>`.'));
+        process.exit(1);
+      }
+      if (!token) {
+        console.error(chalk.red(`Missing token for project "${projectId}". Run \`kite config:set token <token>\` or pass --token.`));
         process.exit(1);
       }
 

@@ -41,7 +41,7 @@ CLI 会读取当前目录的 `kite.config.json`：
 Deploy Token 不应写入 `kite.config.json`。推荐二选一：
 
 ```bash
-kite config set token <DEPLOY_TOKEN>
+kite config:set token <DEPLOY_TOKEN>
 printf "KITE_DEPLOY_TOKEN=<DEPLOY_TOKEN>\n" >> .env.local
 ```
 

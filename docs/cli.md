@@ -78,13 +78,13 @@ kite reset-password --random
 
 ```bash
 # 配置部署服务器地址
-kite config set serverUrl http://127.0.0.1:3000
+kite config:set serverUrl http://127.0.0.1:3000
 
 # 将 Deploy Token 保存到 ~/.kite/config.json
-kite config set token kt_1a2b3c4d5e...
+kite config:set token kt_1a2b3c4d5e...
 
 # 查看当前全局配置
-kite config list
+kite config:list
 ```
 
 如果不希望 token 进入全局配置，可以放在当前项目的 `.env.local`：
