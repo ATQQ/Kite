@@ -56,7 +56,10 @@ const parseMultipart = (request: http.IncomingMessage): Promise<UploadForm> => {
     const fields: Record<string, string> = {};
     let filePath: string | undefined;
 
-    const busboy = Busboy({ headers: request.headers });
+    const busboy = Busboy({
+      headers: request.headers,
+      limits: { fileSize: 50 * 1024 * 1024, files: 1 }
+    });
 
     busboy.on('field', (name, value) => {
       fields[name] = value;
@@ -314,6 +317,7 @@ export async function startLocalServer(options: ServeOptions = {}) {
   };
 
   const server = http.createServer(async (request, response) => {
+    const start = performance.now();
     try {
       const url = new URL(request.url || '/', serverUrl);
       const result = url.pathname.startsWith('/api/')
@@ -322,9 +326,13 @@ export async function startLocalServer(options: ServeOptions = {}) {
 
       response.writeHead(result.status, result.headers);
       response.end(result.body);
+      const ms = (performance.now() - start).toFixed(0);
+      console.log(`${request.method} ${url.pathname} ${result.status} ${ms}ms`);
     } catch (error: any) {
       response.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
       response.end(JSON.stringify({ error: error.message }));
+      const ms = (performance.now() - start).toFixed(0);
+      console.log(`${request.method} ${request.url} 500 ${ms}ms`);
     }
   });
 

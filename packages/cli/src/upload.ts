@@ -43,6 +43,7 @@ export async function uploadZip(options: UploadOptions): Promise<void> {
       } catch {
         message = errorText;
       }
+
       throw new Error(`[${response.status}] ${message}`);
     }
 

@@ -5,7 +5,7 @@ import ora from 'ora';
 import chalk from 'chalk';
 import readline from 'readline/promises';
 import { stdin as input, stdout as output } from 'process';
-import { packProject } from './pack.js';
+import { packProject, type PackResult } from './pack.js';
 import { uploadZip } from './upload.js';
 import { getKiteHome, randomToken, readGlobalConfig, readLocalEnv, setGlobalConfig, writeGlobalConfig, writeLocalEnvValue } from './home.js';
 import { LocalStore } from './local-store.js';
@@ -223,6 +223,56 @@ cli.command('serve', 'Start bundled Kite Server and Web console')
   });
 
 // ==========================
+// Pack result display helper
+// ==========================
+const displayPackResult = (result: PackResult) => {
+  const sizeKB = (result.size / 1024).toFixed(1);
+  const sizeMB = (result.size / (1024 * 1024)).toFixed(2);
+  const sizeStr = result.size > 1024 * 1024 ? `${sizeMB} MB` : `${sizeKB} KB`;
+  console.log(chalk.gray(`  Archive size: ${sizeStr} (${result.fileCount} files)`));
+  console.log(chalk.gray('  Included:'));
+  for (const entry of result.entries) {
+    const isDir = entry.endsWith('/');
+    console.log(chalk.gray(`    ${isDir ? chalk.blue(entry) : entry}`));
+  }
+};
+
+// ==========================
+// Build command
+// ==========================
+cli.command('build', 'Pack project files and verify packaging (no upload)')
+  .option('--out <dir>', 'Output directory to pack')
+  .action(async (options: any) => {
+    try {
+      const configPath = path.resolve(process.cwd(), 'kite.config.json');
+      let projectConfig: any = {};
+      if (fs.existsSync(configPath)) {
+        projectConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      }
+
+      const outputDir = options.out || projectConfig.outputDir || './';
+      const files = projectConfig.files || [];
+      const sourceDir = path.resolve(process.cwd(), outputDir);
+
+      if (!fs.existsSync(sourceDir)) {
+        console.error(chalk.red(`Error: Output directory not found: ${sourceDir}`));
+        process.exit(1);
+      }
+
+      const spinner = ora('Packing files...').start();
+      const zipFilePath = path.resolve(process.cwd(), '.deploy-archive.zip');
+
+      const result = await packProject(sourceDir, zipFilePath, files.length > 0 ? files : undefined);
+      spinner.succeed(chalk.green('Pack successful!'));
+      displayPackResult(result);
+      console.log(chalk.gray(`  Archive: ${zipFilePath}`));
+    } catch (error: any) {
+      console.error(chalk.red(`\nBuild failed: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+// ==========================
 // Push command
 // ==========================
 cli.command('push', 'Push and deploy project')
@@ -283,8 +333,9 @@ cli.command('push', 'Push and deploy project')
       const spinner = ora('Packing files...').start();
       const zipFilePath = path.resolve(process.cwd(), '.deploy-archive.zip');
       
-      await packProject(sourceDir, zipFilePath, files.length > 0 ? files : undefined);
-      spinner.succeed(chalk.green(`Packed successfully: ${zipFilePath}`));
+      const packResult = await packProject(sourceDir, zipFilePath, files.length > 0 ? files : undefined);
+      spinner.succeed(chalk.green('Packed successfully'));
+      displayPackResult(packResult);
 
       // 5. 上传与部署
       spinner.start(`Uploading to ${serverUrl}...`);
