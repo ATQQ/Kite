@@ -249,4 +249,116 @@ export const deployRoutes = new Elysia()
       preDeploy: t.Optional(t.String()),
       postDeploy: t.Optional(t.String())
     })
+  })
+  .get('/api/projects/:id/files', async ({ headers, params, query, set }) => {
+    if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
+    const project = await db.projects.findById(params.id);
+    if (!project) { set.status = 404; return { error: 'Project not found' }; }
+
+    const basePath = path.resolve(process.cwd(), project.deployPath);
+    const subPath = query.path || '';
+    const targetPath = path.resolve(basePath, subPath);
+
+    // 防路径穿越
+    if (!targetPath.startsWith(basePath)) {
+      set.status = 403;
+      return { error: 'Access denied' };
+    }
+
+    try {
+      const entries = await fs.readdir(targetPath, { withFileTypes: true });
+      const items = await Promise.all(
+        entries
+          .filter(e => !e.name.startsWith('.'))
+          .map(async (entry) => {
+            const fullPath = path.join(targetPath, entry.name);
+            const relativePath = subPath ? `${subPath}/${entry.name}` : entry.name;
+            const stat = await fs.stat(fullPath);
+            return {
+              name: entry.name,
+              path: relativePath,
+              isDir: entry.isDirectory(),
+              size: stat.size,
+              mtime: stat.mtime.toISOString()
+            };
+          })
+      );
+
+      // 目录排前，文件排后，按名称排序
+      items.sort((a, b) => {
+        if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
+
+      return items;
+    } catch (err: any) {
+      if (err.code === 'ENOENT') {
+        set.status = 404;
+        return { error: 'Directory not found' };
+      }
+      set.status = 500;
+      return { error: err.message };
+    }
+  })
+  .get('/api/projects/:id/file', async ({ headers, params, query, set }) => {
+    if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
+    const project = await db.projects.findById(params.id);
+    if (!project) { set.status = 404; return { error: 'Project not found' }; }
+
+    const basePath = path.resolve(process.cwd(), project.deployPath);
+    const filePath = query.path || '';
+    const targetPath = path.resolve(basePath, filePath);
+
+    // 防路径穿越
+    if (!targetPath.startsWith(basePath)) {
+      set.status = 403;
+      return { error: 'Access denied' };
+    }
+
+    try {
+      const stat = await fs.stat(targetPath);
+      if (stat.isDirectory()) {
+        set.status = 400;
+        return { error: 'Path is a directory' };
+      }
+
+      // 超过 1MB 拒绝
+      if (stat.size > 1024 * 1024) {
+        return { type: 'binary', size: stat.size, message: 'File too large to preview' };
+      }
+
+      // 判断是否为二进制文件（简单检测前 8KB 是否有 null 字节）
+      const buffer = Buffer.alloc(Math.min(stat.size, 8192));
+      const fh = await fs.open(targetPath, 'r');
+      await fh.read(buffer, 0, buffer.length, 0);
+      await fh.close();
+
+      const isBinary = buffer.includes(0);
+      if (isBinary) {
+        return { type: 'binary', size: stat.size };
+      }
+
+      const content = await fs.readFile(targetPath, 'utf-8');
+      const ext = path.extname(targetPath).toLowerCase();
+      const langMap: Record<string, string> = {
+        '.js': 'javascript', '.ts': 'typescript', '.jsx': 'jsx', '.tsx': 'tsx',
+        '.json': 'json', '.html': 'html', '.htm': 'html', '.css': 'css',
+        '.scss': 'scss', '.less': 'less', '.vue': 'vue', '.svelte': 'svelte',
+        '.py': 'python', '.rb': 'ruby', '.go': 'go', '.rs': 'rust',
+        '.java': 'java', '.c': 'c', '.cpp': 'cpp', '.h': 'c',
+        '.sh': 'bash', '.bash': 'bash', '.zsh': 'bash', '.yml': 'yaml', '.yaml': 'yaml',
+        '.md': 'markdown', '.xml': 'xml', '.sql': 'sql', '.toml': 'toml',
+        '.env': 'bash', '.ini': 'ini', '.cfg': 'ini', '.conf': 'conf',
+      };
+      const language = langMap[ext] || 'text';
+
+      return { type: 'text', content, language };
+    } catch (err: any) {
+      if (err.code === 'ENOENT') {
+        set.status = 404;
+        return { error: 'File not found' };
+      }
+      set.status = 500;
+      return { error: err.message };
+    }
   });

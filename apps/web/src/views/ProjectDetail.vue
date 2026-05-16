@@ -2,7 +2,7 @@
 import { computed, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useProjectStore } from '../store/project'
-import { ArrowLeft, Save, Key, Copy, RefreshCw, Trash2, CheckCircle2, TerminalSquare } from 'lucide-vue-next'
+import { ArrowLeft, Save, Key, Copy, RefreshCw, Trash2, CheckCircle2, TerminalSquare, FolderOpen } from 'lucide-vue-next'
 
 const route = useRoute()
 const router = useRouter()
@@ -105,12 +105,19 @@ const removeProject = async () => {
       <div>
         <div class="flex items-center space-x-3">
           <h1 class="text-2xl font-bold text-textMain tracking-tight">{{ project.name }}</h1>
-          <span 
+          <span
             class="px-2.5 py-0.5 text-xs rounded-md border"
             :class="project.status === 'success' ? 'bg-success/10 border-success/20 text-success' : 'bg-primary/10 border-primary/20 text-primary'"
           >
             {{ project.status }}
           </span>
+          <router-link
+            :to="`/projects/${projectId}/files`"
+            class="inline-flex items-center px-3 py-1.5 text-xs font-medium bg-base border border-border hover:border-primary/50 hover:text-primary text-textMuted rounded-md transition-all"
+          >
+            <FolderOpen class="w-3.5 h-3.5 mr-1.5" />
+            查看文件
+          </router-link>
         </div>
         <p class="text-sm text-textMuted mt-1 font-mono">{{ project.id }}</p>
       </div>

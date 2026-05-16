@@ -23,6 +23,11 @@ const routes = [
         component: () => import('../views/ProjectList.vue')
       },
       {
+        path: 'projects/:id/files',
+        name: 'ProjectFiles',
+        component: () => import('../views/FileExplorer.vue')
+      },
+      {
         path: 'projects/:id',
         name: 'ProjectDetail',
         component: () => import('../views/ProjectDetail.vue')

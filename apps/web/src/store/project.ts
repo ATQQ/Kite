@@ -183,6 +183,24 @@ export const useProjectStore = defineStore('project', () => {
     }
   }
 
+  async function fetchFiles(projectId: string, dirPath: string = '') {
+    try {
+      return await apiFetch(`/projects/${projectId}/files?path=${encodeURIComponent(dirPath)}`)
+    } catch (e) {
+      console.error('Failed to fetch files', e)
+      return []
+    }
+  }
+
+  async function fetchFileContent(projectId: string, filePath: string) {
+    try {
+      return await apiFetch(`/projects/${projectId}/file?path=${encodeURIComponent(filePath)}`)
+    } catch (e) {
+      console.error('Failed to fetch file content', e)
+      return null
+    }
+  }
+
   async function fetchSystemStatus() {
     try {
       return await apiFetch('/settings/status')
@@ -231,6 +249,8 @@ export const useProjectStore = defineStore('project', () => {
     updateSettings,
     changeAdminToken,
     fetchSystemStatus,
+    fetchFiles,
+    fetchFileContent,
     login,
     logout
   }
