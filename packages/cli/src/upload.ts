@@ -9,7 +9,14 @@ interface UploadOptions {
   postDeploy?: string;
 }
 
-export async function uploadZip(options: UploadOptions): Promise<void> {
+interface UploadResult {
+  success: boolean;
+  deployId?: string;
+  duration?: string;
+  error?: string;
+}
+
+export async function uploadZip(options: UploadOptions): Promise<UploadResult> {
   const { serverUrl, token, zipFilePath, projectId, preDeploy, postDeploy } = options;
 
   const fileData = await fs.promises.readFile(zipFilePath);
@@ -29,7 +36,6 @@ export async function uploadZip(options: UploadOptions): Promise<void> {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,
-        // do not set Content-Type, fetch will set it with the boundary correctly
       },
       body: form as any,
     });
@@ -43,12 +49,54 @@ export async function uploadZip(options: UploadOptions): Promise<void> {
       } catch {
         message = errorText;
       }
-
       throw new Error(`[${response.status}] ${message}`);
     }
 
-    const data = await response.json();
-    console.log('Server response:', data);
+    // Stream NDJSON response — print log lines in real-time
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let result: UploadResult = { success: false };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop()!;
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const event = JSON.parse(line);
+          if (event.event === 'log') {
+            process.stdout.write(event.data + '\n');
+          } else if (event.event === 'status') {
+            result = {
+              success: event.status === 'success',
+              deployId: event.deployId,
+              duration: event.duration,
+            };
+          }
+        } catch {
+          // Skip malformed lines
+        }
+      }
+    }
+
+    // Process remaining buffer
+    if (buffer.trim()) {
+      try {
+        const event = JSON.parse(buffer);
+        if (event.event === 'log') process.stdout.write(event.data + '\n');
+        if (event.event === 'status') {
+          result = { success: event.status === 'success', deployId: event.deployId, duration: event.duration };
+        }
+      } catch {}
+    }
+
+    return result;
   } catch (error: any) {
     throw new Error(`Upload failed: ${error.message}`);
   }

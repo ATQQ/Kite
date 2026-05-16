@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { useProjectStore } from '../store/project'
+import { ansiToHtml } from '../utils/ansi'
+import { useDeployStream } from '../composables/useDeployStream'
 import { Terminal, CheckCircle2, XCircle, Clock, RefreshCw, AlertCircle } from 'lucide-vue-next'
 
 const projectStore = useProjectStore()
@@ -12,6 +14,34 @@ onMounted(() => {
 const logs = computed(() => projectStore.logs)
 
 const selectedLog = ref<any>(null)
+const selectedLogId = computed(() => selectedLog.value?.id || null)
+const isRunning = computed(() => selectedLog.value?.status === 'running')
+
+// SSE stream for running deployments
+const { lines: streamLines, status: streamStatus } = useDeployStream(
+  computed(() => isRunning.value ? selectedLog.value?.id : null),
+  computed(() => projectStore.adminToken)
+)
+
+// When stream reports a final status, refresh the log list
+watch(streamStatus, (s) => {
+  if (s) {
+    projectStore.fetchLogs().then(() => {
+      if (selectedLog.value) {
+        const updated = projectStore.logs.find(l => l.id === selectedLog.value.id)
+        if (updated) selectedLog.value = updated
+      }
+    })
+  }
+})
+
+// Display lines: use stream for running, stored output for finished
+const displayLines = computed(() => {
+  if (isRunning.value && streamLines.value.length > 0) {
+    return streamLines.value
+  }
+  return selectedLog.value?.output?.split('\n') || []
+})
 
 const selectLog = (log: any) => {
   selectedLog.value = log
@@ -22,6 +52,10 @@ const refreshLogs = async () => {
   if (selectedLog.value) {
     selectedLog.value = logs.value.find(l => l.id === selectedLog.value.id) || null
   }
+}
+
+function renderLine(line: string): string {
+  return ansiToHtml(line)
 }
 </script>
 
@@ -40,20 +74,20 @@ const refreshLogs = async () => {
 
     <!-- Layout: Left List, Right Terminal -->
     <div class="flex-1 flex flex-col lg:flex-row gap-6 min-h-0">
-      
+
       <!-- Log List -->
       <div class="w-full lg:w-1/3 bg-panel border border-border rounded-xl shadow-sm overflow-hidden flex flex-col h-[400px] lg:h-auto">
         <div class="p-4 border-b border-border bg-base/50 shrink-0">
-          <input 
-            type="text" 
+          <input
+            type="text"
             placeholder="搜索项目或记录 ID..."
             class="w-full bg-base border border-border rounded-md px-3 py-2 text-sm text-textMain focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all"
           />
         </div>
-        
+
         <div class="flex-1 overflow-y-auto p-2 space-y-1">
-          <div 
-            v-for="log in logs" 
+          <div
+            v-for="log in logs"
             :key="log.id"
             @click="selectLog(log)"
             class="p-3 rounded-lg cursor-pointer transition-all border border-transparent flex items-start space-x-3"
@@ -102,16 +136,14 @@ const refreshLogs = async () => {
         <!-- Terminal Content -->
         <div class="flex-1 p-4 overflow-y-auto bg-[#09090b] text-[#f4f4f5] leading-relaxed selection:bg-primary/30">
           <div v-if="selectedLog" class="space-y-1 whitespace-pre-wrap break-all">
-            <template v-for="(line, index) in selectedLog.output.split('\n')" :key="index">
+            <template v-for="(line, index) in displayLines" :key="index">
               <div class="flex dark:hover:bg-white/5 hover:bg-black/5 px-2 -mx-2 rounded transition-colors group">
                 <span class="w-8 text-right mr-4 text-textMuted/30 select-none group-hover:text-textMuted/50 transition-colors">{{ Number(index) + 1 }}</span>
-                <span :class="{'text-danger': line.includes('error') || line.includes('failed'), 'text-success': line.includes('success'), 'text-primary': line.includes('[Kite Deploy]')}">
-                  {{ line }}
-                </span>
+                <span v-html="renderLine(line)"></span>
               </div>
             </template>
             <div v-if="selectedLog.status === 'running'" class="flex px-2 -mx-2 mt-2">
-              <span class="w-8 text-right mr-4 text-textMuted/30 select-none">{{ selectedLog.output.split('\n').length + 1 }}</span>
+              <span class="w-8 text-right mr-4 text-textMuted/30 select-none">{{ displayLines.length + 1 }}</span>
               <span class="w-2 h-4 bg-textMain animate-pulse inline-block align-middle"></span>
             </div>
           </div>

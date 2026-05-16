@@ -339,7 +339,8 @@ cli.command('push', 'Push and deploy project')
 
       // 5. 上传与部署
       spinner.start(`Uploading to ${serverUrl}...`);
-      await uploadZip({
+      spinner.stop();
+      const result = await uploadZip({
         serverUrl: serverUrl as string,
         token: token as string,
         zipFilePath,
@@ -347,7 +348,12 @@ cli.command('push', 'Push and deploy project')
         preDeploy,
         postDeploy
       });
-      spinner.succeed(chalk.green('Deployed successfully!'));
+      if (result.success) {
+        console.log(chalk.green(`\nDeployed successfully! (${result.duration})`));
+      } else {
+        console.error(chalk.red('\nDeployment failed'));
+        process.exit(1);
+      }
 
     } catch (error: any) {
       console.error(chalk.red(`\nDeployment failed: ${error.message}`));

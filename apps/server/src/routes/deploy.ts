@@ -10,26 +10,60 @@ const verifyAdminToken = (headers: Record<string, string | undefined>) => {
   const authHeader = headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) return false;
   const token = authHeader.split(' ')[1];
-  
+
   // Verify against the ADMIN_TOKEN loaded via Bun env
   return token === process.env.ADMIN_TOKEN;
 };
 
-const runShellCommand = async (command: string, cwd: string) => {
+// SSE broadcast: deployId -> Set of controllers
+const deploySubscribers = new Map<string, Set<ReadableStreamDefaultController>>();
+
+function broadcastToSubscribers(deployId: string, event: string, data: string) {
+  const subs = deploySubscribers.get(deployId);
+  if (!subs || subs.size === 0) return;
+  const message = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  const encoded = new TextEncoder().encode(message);
+  for (const controller of subs) {
+    try { controller.enqueue(encoded); } catch { subs.delete(controller); }
+  }
+}
+
+// Streaming shell command: yields lines with raw ANSI codes
+async function* runShellCommand(command: string, cwd: string) {
   const proc = Bun.spawn(['sh', '-c', command], {
     cwd,
     stdout: 'pipe',
-    stderr: 'pipe'
+    stderr: 'pipe',
   });
 
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited
-  ]);
+  const decoder = new TextDecoder();
+  let buffer = '';
 
-  return { stdout, stderr, exitCode };
-};
+  // Read from a stream, yielding complete lines
+  async function* readLines(stream: ReadableStream<Uint8Array>) {
+    const reader = stream.getReader();
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop()!;
+        for (const line of lines) yield line;
+      }
+      if (buffer) { yield buffer; buffer = ''; }
+    } finally {
+      reader.releaseLock();
+    }
+  }
+
+  // Merge stdout and stderr
+  for await (const line of readLines(proc.stdout)) yield line;
+  for await (const line of readLines(proc.stderr)) yield line;
+
+  const exitCode = await proc.exited;
+  yield `\x00EXIT:${exitCode}`;
+}
 
 export const deployRoutes = new Elysia()
   .post('/api/auth/login', async ({ body, set }) => {
@@ -104,6 +138,42 @@ export const deployRoutes = new Elysia()
     if (!log) { set.status = 404; return { error: 'Deployment log not found' }; }
     return log;
   })
+  .get('/api/logs/:deployId/stream', async ({ headers, params, set }) => {
+    if (!verifyAdminToken(headers)) { set.status = 401; return new Response('Unauthorized', { status: 401 }); }
+    const deployId = params.deployId;
+    const log = await db.deployments.findById(deployId);
+    if (!log) { set.status = 404; return new Response('Not found', { status: 404 }); }
+
+    let controllerRef: ReadableStreamDefaultController;
+    const stream = new ReadableStream({
+      start(controller) {
+        controllerRef = controller;
+        if (!deploySubscribers.has(deployId)) deploySubscribers.set(deployId, new Set());
+        deploySubscribers.get(deployId)!.add(controller);
+        // Send existing output
+        if (log.output) {
+          controller.enqueue(new TextEncoder().encode(`event: log\ndata: ${JSON.stringify(log.output)}\n\n`));
+        }
+        // If already finished, send status and close
+        if (log.status !== 'running') {
+          controller.enqueue(new TextEncoder().encode(`event: status\ndata: ${JSON.stringify({ status: log.status, duration: log.duration })}\n\n`));
+          controller.close();
+          deploySubscribers.get(deployId)?.delete(controller);
+        }
+      },
+      cancel() {
+        deploySubscribers.get(deployId)?.delete(controllerRef);
+      }
+    });
+
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      }
+    });
+  })
   .post('/api/deploy/upload', async ({ body, headers, set }) => {
     try {
       const authHeader = headers.authorization;
@@ -111,22 +181,19 @@ export const deployRoutes = new Elysia()
         set.status = 401;
         return { error: 'Missing or invalid Authorization header' };
       }
-      
+
       const token = authHeader.split(' ')[1];
       let project = await db.projects.findByToken(token);
 
-      // 获取 body 中的字段
       const file = body.file as File;
       const projectId = body.projectId;
 
       if (!project) {
-        // Fallback: 检查全局部署 token
         const globalToken = await db.settings.get('global_deploy_token');
         if (!globalToken || token !== globalToken) {
           set.status = 403;
           return { error: 'Invalid Token' };
         }
-        // 全局 token 匹配，通过 projectId 查找项目
         project = await db.projects.findById(projectId);
         if (!project) {
           set.status = 404;
@@ -137,105 +204,131 @@ export const deployRoutes = new Elysia()
         return { error: 'Project ID mismatch' };
       }
 
-      // 覆盖指令：CLI > 平台
       const preDeployCmd = body.preDeploy || project.preDeployScript;
       const postDeployCmd = body.postDeploy || project.postDeployScript;
 
       console.log(`[Deploy] Received zip for project: ${projectId}`);
-      
+
       const deployLog = await db.deployments.insert({
         projectId: project.id,
         projectName: project.name,
         status: 'running',
         triggerSource: 'cli',
         startTime: new Date().toISOString(),
-        output: `[Kite Deploy] Starting deployment for ${project.name}...\n`
+        output: ''
       });
 
       await db.projects.update(project.id, { status: 'running' });
 
-      let fullOutput = deployLog.output;
+      let fullOutput = '';
       const appendLog = async (text: string) => {
         fullOutput += text + '\n';
         await db.deployments.update(deployLog.id, { output: fullOutput });
+        broadcastToSubscribers(deployLog.id, 'log', text);
       };
 
-      const startTime = Date.now();
+      // Stream NDJSON response to CLI
+      const encoder = new TextEncoder();
+      const sendEvent = (controller: ReadableStreamDefaultController, event: string, data: any) => {
+        controller.enqueue(encoder.encode(JSON.stringify({ event, ...data }) + '\n'));
+      };
 
-      try {
-        // 1. 保存 zip 到临时目录
-        const tempDir = path.join(process.cwd(), '.temp_deploy');
-        await fs.mkdir(tempDir, { recursive: true });
-        const tempZipPath = path.join(tempDir, `${Date.now()}.zip`);
-        
-        // bun 中直接读写 ArrayBuffer
-        await Bun.write(tempZipPath, await file.arrayBuffer());
-        await appendLog(`[Kite Deploy] Saved temp zip to: ${tempZipPath}`);
+      const stream = new ReadableStream({
+        async start(controller) {
+          const startTime = Date.now();
 
-        // 2. 准备解压目录
-        const destPath = path.resolve(process.cwd(), project.deployPath);
-        await fs.mkdir(destPath, { recursive: true });
-        await appendLog(`[Kite Deploy] Target deploy path: ${destPath}`);
+          try {
+            sendEvent(controller, 'log', { data: `[Kite Deploy] Starting deployment for ${project.name}...` });
+            await appendLog(`[Kite Deploy] Starting deployment for ${project.name}...`);
 
-        // 3. 执行前置脚本（在解压之前）
-        if (preDeployCmd) {
-          await appendLog(`[Kite Deploy] Running Pre-deploy: ${preDeployCmd}`);
-          const { stdout, stderr, exitCode } = await runShellCommand(preDeployCmd, destPath);
-          if (stdout) await appendLog(stdout.trimEnd());
-          if (exitCode !== 0) {
-             if (stderr) await appendLog(stderr.trimEnd());
-             throw new Error(`Pre-deploy failed`);
+            const tempDir = path.join(process.cwd(), '.temp_deploy');
+            await fs.mkdir(tempDir, { recursive: true });
+            const tempZipPath = path.join(tempDir, `${Date.now()}.zip`);
+
+            await Bun.write(tempZipPath, await file.arrayBuffer());
+            sendEvent(controller, 'log', { data: `[Kite Deploy] Saved temp zip` });
+            await appendLog(`[Kite Deploy] Saved temp zip`);
+
+            const destPath = path.resolve(process.cwd(), project.deployPath);
+            await fs.mkdir(destPath, { recursive: true });
+            sendEvent(controller, 'log', { data: `[Kite Deploy] Target deploy path: ${destPath}` });
+            await appendLog(`[Kite Deploy] Target deploy path: ${destPath}`);
+
+            // Pre-deploy
+            if (preDeployCmd) {
+              sendEvent(controller, 'log', { data: `[Kite Deploy] Running Pre-deploy: ${preDeployCmd}` });
+              await appendLog(`[Kite Deploy] Running Pre-deploy: ${preDeployCmd}`);
+              let failed = false;
+              for await (const line of runShellCommand(preDeployCmd, destPath)) {
+                if (line.startsWith('\x00EXIT:')) {
+                  const exitCode = parseInt(line.slice(6));
+                  if (exitCode !== 0) { failed = true; }
+                } else {
+                  sendEvent(controller, 'log', { data: line });
+                  await appendLog(line);
+                }
+              }
+              if (failed) throw new Error('Pre-deploy failed');
+            }
+
+            // Extract
+            sendEvent(controller, 'log', { data: `[Kite Deploy] Extracting files...` });
+            await appendLog(`[Kite Deploy] Extracting files...`);
+            new AdmZip(tempZipPath).extractAllTo(destPath, true);
+
+            // Post-deploy
+            if (postDeployCmd) {
+              sendEvent(controller, 'log', { data: `[Kite Deploy] Running Post-deploy: ${postDeployCmd}` });
+              await appendLog(`[Kite Deploy] Running Post-deploy: ${postDeployCmd}`);
+              let failed = false;
+              for await (const line of runShellCommand(postDeployCmd, destPath)) {
+                if (line.startsWith('\x00EXIT:')) {
+                  const exitCode = parseInt(line.slice(6));
+                  if (exitCode !== 0) { failed = true; }
+                } else {
+                  sendEvent(controller, 'log', { data: line });
+                  await appendLog(line);
+                }
+              }
+              if (failed) throw new Error('Post-deploy failed');
+            }
+
+            await fs.unlink(tempZipPath);
+
+            const durationStr = ((Date.now() - startTime) / 1000).toFixed(1) + 's';
+            const successMsg = `[Kite Deploy] Deployment completed successfully in ${durationStr}.`;
+            sendEvent(controller, 'log', { data: successMsg });
+            await appendLog(successMsg);
+
+            await db.deployments.update(deployLog.id, { status: 'success', duration: durationStr, endTime: new Date().toISOString() });
+            await db.projects.update(project.id, { status: 'success' });
+
+            sendEvent(controller, 'status', { status: 'success', duration: durationStr, deployId: deployLog.id });
+            broadcastToSubscribers(deployLog.id, 'status', JSON.stringify({ status: 'success', duration: durationStr }));
+
+          } catch (err: any) {
+            const durationStr = ((Date.now() - startTime) / 1000).toFixed(1) + 's';
+            const failMsg = `[Kite Deploy] Deployment failed: ${err.message}`;
+            sendEvent(controller, 'log', { data: failMsg });
+            await appendLog(failMsg);
+
+            await db.deployments.update(deployLog.id, { status: 'failed', duration: durationStr, endTime: new Date().toISOString() });
+            await db.projects.update(project.id, { status: 'failed' });
+
+            sendEvent(controller, 'status', { status: 'failed', duration: durationStr, deployId: deployLog.id });
+            broadcastToSubscribers(deployLog.id, 'status', JSON.stringify({ status: 'failed', duration: durationStr }));
+          } finally {
+            controller.close();
           }
         }
+      });
 
-        // 4. 解压
-        await appendLog(`[Kite Deploy] Extracting files...`);
-        const zip = new AdmZip(tempZipPath);
-        zip.extractAllTo(destPath, true); // true=覆盖文件
-
-        // 5. 执行后置脚本（解压之后）
-        if (postDeployCmd) {
-          await appendLog(`[Kite Deploy] Running Post-deploy: ${postDeployCmd}`);
-          const { stdout, stderr, exitCode } = await runShellCommand(postDeployCmd, destPath);
-          if (stdout) await appendLog(stdout.trimEnd());
-          if (exitCode !== 0) {
-            if (stderr) await appendLog(stderr.trimEnd());
-            throw new Error(`Post-deploy failed`);
-          }
+      return new Response(stream, {
+        headers: {
+          'Content-Type': 'application/x-ndjson',
+          'Transfer-Encoding': 'chunked',
         }
-
-        // 清理临时文件
-        await fs.unlink(tempZipPath);
-
-        const durationStr = ((Date.now() - startTime) / 1000).toFixed(1) + 's';
-        await appendLog(`[Kite Deploy] Deployment completed successfully in ${durationStr}.`);
-        
-        await db.deployments.update(deployLog.id, { 
-          status: 'success', 
-          duration: durationStr,
-          endTime: new Date().toISOString()
-        });
-        await db.projects.update(project.id, { status: 'success' });
-
-        return { 
-          success: true, 
-          message: 'Deployed successfully'
-        };
-
-      } catch (err: any) {
-        const durationStr = ((Date.now() - startTime) / 1000).toFixed(1) + 's';
-        await appendLog(`[Kite Deploy] Deployment failed: ${err.message}`);
-        
-        await db.deployments.update(deployLog.id, { 
-          status: 'failed', 
-          duration: durationStr,
-          endTime: new Date().toISOString()
-        });
-        await db.projects.update(project.id, { status: 'failed' });
-        
-        set.status = 500;
-        return { error: err.message };
-      }
+      });
 
     } catch (error: any) {
       console.error('[Deploy] Error:', error);
