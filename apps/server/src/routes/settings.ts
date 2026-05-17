@@ -12,7 +12,15 @@ const verifyAdminToken = (headers: Record<string, string | undefined>) => {
 
 const serverStartTime = Date.now();
 
-const serverPkg = JSON.parse(await fs.readFile(new URL('../../package.json', import.meta.url), 'utf-8'));
+let serverVersion = process.env.KITE_SERVER_VERSION;
+if (!serverVersion) {
+  try {
+    const pkg = JSON.parse(await fs.readFile(new URL('../../package.json', import.meta.url), 'utf-8'));
+    serverVersion = pkg.version;
+  } catch {
+    serverVersion = '0.0.0';
+  }
+}
 
 export const settingsRoutes = new Elysia()
   .get('/api/settings', async ({ headers, set }) => {
@@ -81,7 +89,7 @@ export const settingsRoutes = new Elysia()
     const uptimeHours = Math.floor(uptimeMs / 3600000);
     const uptimeMinutes = Math.floor((uptimeMs % 3600000) / 60000);
     return {
-      version: serverPkg.version,
+      version: serverVersion,
       uptime: uptimeHours > 0 ? `${uptimeHours}h ${uptimeMinutes}m` : `${uptimeMinutes}m`,
       projectCount: projects.length,
       deploymentCount: deployments.length,

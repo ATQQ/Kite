@@ -9,7 +9,7 @@ import { packProject, type PackResult } from './pack.js';
 import { uploadZip } from './upload.js';
 import { getKiteHome, randomToken, readGlobalConfig, readLocalEnv, setGlobalConfig, writeGlobalConfig, writeLocalEnvValue } from './home.js';
 import { LocalStore } from './local-store.js';
-import { startLocalServer } from './local-server.js';
+import { startServe } from './serve.js';
 
 // @ts-ignore
 const cli = cac('kite');
@@ -205,16 +205,18 @@ cli.command('init', 'Create kite.config.json without writing token into source c
 // ==========================
 // Local server command
 // ==========================
-cli.command('serve', 'Start bundled Kite Server and Web console')
+cli.command('serve', 'Start Kite Server and Web console')
   .option('--host <host>', 'Host to listen on', { default: '127.0.0.1' })
-  .option('--port <port>', 'Port to listen on', { default: 3000 })
-  .option('--runtime <runtime>', 'Runtime label: auto, node, bun', { default: 'auto' })
+  .option('--port <port>', 'Port to listen on', { default: 5431 })
+  .option('--pm2 [action]', 'Daemonize with pm2 (pass "stop" to stop)')
   .action(async (options: any) => {
     try {
-      await startLocalServer({
+      const pm2Action = typeof options.pm2 === 'string' ? options.pm2 : undefined;
+      await startServe({
         host: options.host,
         port: Number(options.port),
-        runtime: options.runtime
+        pm2: !!options.pm2,
+        pm2Action: pm2Action as 'stop' | undefined,
       });
     } catch (error: any) {
       console.error(chalk.red(`Failed to start Kite: ${error.message}`));

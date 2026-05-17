@@ -1,3 +1,8 @@
+/**
+ * @deprecated This module is superseded by the Elysia-based server in apps/server/.
+ * It is retained for backward compatibility and will be removed in a future version.
+ * Use `kite serve` which now starts the Elysia server via bun.
+ */
 import fs from 'fs';
 import fsp from 'fs/promises';
 import http from 'http';

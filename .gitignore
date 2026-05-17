@@ -3,3 +3,5 @@ dist
 build
 *.db
 .temp_deploy
+cache
+.env.local

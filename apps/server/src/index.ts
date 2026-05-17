@@ -1,9 +1,13 @@
 import { Elysia } from "elysia";
 import { deployRoutes } from "./routes/deploy.js";
 import { settingsRoutes } from "./routes/settings.js";
+import { staticPlugin } from "./static.js";
 import { ensureDbReady } from "./db/index.js";
 
 await ensureDbReady();
+
+const port = Number(process.env.PORT) || 5430;
+const host = process.env.HOST || '0.0.0.0';
 
 const app = new Elysia()
   .derive({ as: 'global' }, () => ({ _start: performance.now() }))
@@ -14,8 +18,8 @@ const app = new Elysia()
   })
   .use(deployRoutes)
   .use(settingsRoutes)
-  .get("/", () => "Deploy Server is running!")
-  .listen(5430);
+  .use(staticPlugin)
+  .listen({ port, hostname: host });
 
 console.log(`🦊 Server is running at http://${app.server?.hostname}:${app.server?.port}`);
 console.log(`🔑 Login Token: ${process.env.ADMIN_TOKEN || '未设置 (请通过 .env.local 配置)'}`);

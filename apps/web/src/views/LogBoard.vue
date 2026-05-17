@@ -14,7 +14,6 @@ onMounted(() => {
 const logs = computed(() => projectStore.logs)
 
 const selectedLog = ref<any>(null)
-const selectedLogId = computed(() => selectedLog.value?.id || null)
 const isRunning = computed(() => selectedLog.value?.status === 'running')
 
 // SSE stream for running deployments

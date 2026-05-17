@@ -6,7 +6,7 @@ import { eq, desc } from 'drizzle-orm';
 import path from 'path';
 
 // Initialize libSQL client (using local file for now, can be swapped to Turso URL)
-const dbPath = path.join(process.cwd(), 'kite.db');
+const dbPath = path.join(process.env.KITE_DB_DIR || process.cwd(), 'kite.db');
 const client = createClient({ url: `file:${dbPath}` });
 const ormDb = drizzle({ client, schema });
 
@@ -70,41 +70,36 @@ const initDb = async () => {
     );
   `);
 
+  // Seed a demo project on first run (no existing projects)
   if (process.env.KITE_SEED_DEMO_PROJECT !== 'false') {
-    const now = new Date().toISOString();
-    await client.execute({
-      sql: `
-        INSERT INTO projects (
-          id,
-          name,
-          description,
-          deploy_path,
-          token,
-          pre_deploy_script,
-          post_deploy_script,
-          status,
-          created_at,
-          updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET
-          token = excluded.token,
-          deploy_path = excluded.deploy_path,
-          post_deploy_script = excluded.post_deploy_script,
-          updated_at = excluded.updated_at;
-      `,
-      args: [
-        'proj_abc123',
-        'Kite Demo Project',
-        '本地开发演示项目，可配合 bun run deploy:test 验证 CLI 上传部署链路。',
-        '.deployments/proj_abc123',
-        'test-token',
-        '',
-        'echo "demo deployment finished"',
-        'idle',
-        now,
-        now
-      ]
-    });
+    const existing = await client.execute('SELECT COUNT(*) as count FROM projects');
+    const count = existing.rows[0]?.count ?? 0;
+    if (count === 0) {
+      const now = new Date().toISOString();
+      const demoId = 'proj_' + randomUUID().replace(/-/g, '').substring(0, 12);
+      const demoToken = 'kt_' + randomUUID().replace(/-/g, '');
+      await client.execute({
+        sql: `
+          INSERT INTO projects (
+            id, name, description, deploy_path, token,
+            pre_deploy_script, post_deploy_script, status,
+            created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        args: [
+          demoId,
+          'Kite Demo Project',
+          '本地开发演示项目',
+          `.deployments/${demoId}`,
+          demoToken,
+          '',
+          'echo "demo deployment finished"',
+          'idle',
+          now,
+          now
+        ]
+      });
+    }
   }
 };
 
