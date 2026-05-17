@@ -90,18 +90,42 @@ function startForeground(options: ServeOptions, env: Record<string, string>): vo
     cwd: process.cwd(),
   });
 
+  let shuttingDown = false;
+
   child.on('error', (err) => {
     console.error(chalk.red(`Failed to start server: ${err.message}`));
     process.exit(1);
   });
 
-  child.on('exit', (code) => {
+  child.on('exit', (code, signal) => {
+    if (!shuttingDown) {
+      shuttingDown = true;
+      if (signal) {
+        console.log(chalk.gray(`\nServer stopped by signal ${signal}`));
+      } else {
+        console.log(chalk.gray(`\nServer exited with code ${code}`));
+      }
+    }
     process.exit(code ?? 0);
   });
 
-  // Forward signals
-  process.on('SIGINT', () => child.kill('SIGINT'));
-  process.on('SIGTERM', () => child.kill('SIGTERM'));
+  // Graceful shutdown on SIGINT/SIGTERM
+  const shutdown = (signal: NodeJS.Signals) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(chalk.gray(`\nReceived ${signal}, shutting down server...`));
+    child.kill('SIGTERM');
+
+    // Force kill after 5s if child doesn't exit
+    setTimeout(() => {
+      console.log(chalk.yellow('Force killing server...'));
+      child.kill('SIGKILL');
+      process.exit(1);
+    }, 5000).unref();
+  };
+
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
 }
 
 function getPm2Dir(): string {
