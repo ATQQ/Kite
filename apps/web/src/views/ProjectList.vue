@@ -12,14 +12,14 @@ onMounted(() => {
 })
 
 const showCreateModal = ref(false)
-const newProject = ref({ name: '', description: '', destPath: '' })
+const newProject = ref({ name: '', description: '', destPath: '', env: '' })
 
 const createProject = async () => {
   if (!newProject.value.name || !newProject.value.destPath) return
   const success = await projectStore.addProject(newProject.value)
   if (success) {
     showCreateModal.value = false
-    newProject.value = { name: '', description: '', destPath: '' }
+    newProject.value = { name: '', description: '', destPath: '', env: '' }
   } else {
     alert('创建失败，请稍后重试')
   }
@@ -114,6 +114,21 @@ const goToDetail = (id: string) => {
               placeholder="e.g. /var/www/my-project"
             />
           </div>
+          <div>
+            <label class="block text-sm font-medium text-textMuted mb-1.5">部署环境标识 (可选)</label>
+            <input
+              v-model="newProject.env"
+              type="text"
+              class="w-full bg-base border border-border rounded-md px-3 py-2 text-textMain font-mono focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all text-sm"
+              placeholder="e.g. test, staging, prod"
+            />
+            <p class="text-xs text-textMuted mt-1.5">
+              用于区分同一项目的不同部署环境。设置后，CLI 会生成 <code class="font-mono text-textMain">kite.config.{`{env}`}.json</code> 配置文件，
+              <code class="font-mono text-textMain">kite push --env {`{name}`}</code> 可精准推送到对应环境。
+              <span class="text-primary/80">常见场景：同一项目部署到测试/预发/生产等不同机器。</span>
+            </p>
+          </div>
+
           <div>
             <label class="block text-sm font-medium text-textMuted mb-1.5">描述 (可选)</label>
             <textarea

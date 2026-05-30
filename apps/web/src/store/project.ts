@@ -12,6 +12,7 @@ export interface Project {
   preDeployScript?: string
   postDeployScript?: string
   token?: string
+  env?: string
   status: 'running' | 'success' | 'failed' | 'idle'
   updatedAt: string
 }
@@ -66,7 +67,8 @@ export const useProjectStore = defineStore('project', () => {
         ...p,
         destPath: p.deployPath,
         preDeploy: p.preDeployScript,
-        postDeploy: p.postDeployScript
+        postDeploy: p.postDeployScript,
+        env: p.env || ''
       }))
     } catch (e) {
       console.error('Failed to fetch projects', e)
@@ -92,7 +94,8 @@ export const useProjectStore = defineStore('project', () => {
         body: JSON.stringify({
           name: project.name,
           description: project.description,
-          deployPath: project.destPath || '/tmp/default-deploy'
+          deployPath: project.destPath || '/tmp/default-deploy',
+          env: project.env || undefined
         })
       })
       if (data.success) {

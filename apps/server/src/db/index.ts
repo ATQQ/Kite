@@ -21,11 +21,17 @@ const initDb = async () => {
       token TEXT NOT NULL UNIQUE,
       pre_deploy_script TEXT,
       post_deploy_script TEXT,
+      env TEXT,
       status TEXT DEFAULT 'idle',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
   `);
+
+  // Migration: add env column if missing (for existing databases)
+  try {
+    await client.execute(`ALTER TABLE projects ADD COLUMN env TEXT`);
+  } catch { /* column already exists */ }
 
   await client.execute(`
     CREATE TABLE IF NOT EXISTS settings (

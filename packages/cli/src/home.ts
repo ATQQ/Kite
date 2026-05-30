@@ -76,6 +76,56 @@ export function readLocalEnv(cwd = process.cwd()): KiteLocalEnv {
   return env as KiteLocalEnv;
 }
 
+export interface ResolvedProjectConfig {
+  env: string | undefined;        // undefined = default (kite.config.json)
+  config: Record<string, any>;
+  configPath: string;
+}
+
+/**
+ * Scan cwd for kite.config*.json files.
+ * Returns array sorted: default first, then alphabetical by env name.
+ */
+export function listProjectEnvs(cwd = process.cwd()): ResolvedProjectConfig[] {
+  const files = fs.readdirSync(cwd).filter(f => /^kite\.config(\.[a-zA-Z0-9_-]+)?\.json$/.test(f));
+  const results: ResolvedProjectConfig[] = [];
+  for (const file of files.sort()) {
+    const match = file.match(/^kite\.config(?:\.([a-zA-Z0-9_-]+))?\.json$/);
+    if (!match) continue;
+    const env = match[1]; // undefined for kite.config.json
+    const configPath = path.join(cwd, file);
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    results.push({ env, config, configPath });
+  }
+  // default (no env) first, then alphabetical
+  return results.sort((a, b) => {
+    if (!a.env && b.env) return -1;
+    if (a.env && !b.env) return 1;
+    return (a.env || '').localeCompare(b.env || '');
+  });
+}
+
+/**
+ * Resolve a single project config by env name.
+ * If env is undefined, returns the default config (kite.config.json).
+ */
+export function resolveProjectConfig(env?: string, cwd = process.cwd()): ResolvedProjectConfig | null {
+  const all = listProjectEnvs(cwd);
+  if (all.length === 0) return null;
+  if (env === undefined) {
+    return all.find(e => e.env === undefined) || null;
+  }
+  return all.find(e => e.env === env) || null;
+}
+
+/**
+ * Build the token lookup key for projectToken storage.
+ * With env: "projectId:env", without env: "projectId"
+ */
+export function envTokenKey(projectId: string, env?: string): string {
+  return env ? `${projectId}:${env}` : projectId;
+}
+
 export function writeLocalEnvValue(key: keyof KiteLocalEnv, value: string, cwd = process.cwd()) {
   const envPath = path.join(cwd, '.env.local');
   const lines = fs.existsSync(envPath)

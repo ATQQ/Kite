@@ -21,6 +21,7 @@ const isTokenVisible = ref(false)
 const isCopied = ref(false)
 const copiedCommand = ref('')
 const serverUrl = ref('http://127.0.0.1:3000')
+const cliEnv = ref('')
 
 onMounted(async () => {
   serverUrl.value = window.location.origin
@@ -29,6 +30,7 @@ onMounted(async () => {
     formData.value.destPath = project.value.destPath || ''
     formData.value.preDeploy = project.value.preDeploy || ''
     formData.value.postDeploy = project.value.postDeploy || ''
+    cliEnv.value = project.value.env || ''
   } else {
     router.replace('/projects')
   }
@@ -53,11 +55,14 @@ const copyCommand = (key: string, value: string) => {
   setTimeout(() => copiedCommand.value = '', 2000)
 }
 
+const envSuffix = computed(() => cliEnv.value.trim() ? ` --env ${cliEnv.value.trim()}` : '')
+const configFileName = computed(() => cliEnv.value.trim() ? `kite.config.${cliEnv.value.trim()}.json` : 'kite.config.json')
+
 const installCommand = 'npm install -g @kitecd/cli'
-const initCommand = computed(() => `kite init --project ${projectId} --out ./dist --server ${serverUrl.value} --token ${project.value?.token || '<DEPLOY_TOKEN>'}`)
-const pushCommand = 'kite push'
-const directPushCommand = computed(() => `kite push --server ${serverUrl.value} --project ${projectId} --out ./dist`)
-const directPushWithTokenCommand = computed(() => `kite push --server ${serverUrl.value} --project ${projectId} --token ${project.value?.token || '<DEPLOY_TOKEN>'} --out ./dist`)
+const initCommand = computed(() => `kite init --project ${projectId}${envSuffix.value} --out ./dist --server ${serverUrl.value} --token ${project.value?.token || '<DEPLOY_TOKEN>'}`)
+const pushCommand = computed(() => `kite push${envSuffix.value}`)
+const directPushCommand = computed(() => `kite push --server ${serverUrl.value} --project ${projectId}${envSuffix.value} --out ./dist`)
+const directPushWithTokenCommand = computed(() => `kite push --server ${serverUrl.value} --project ${projectId} --token ${project.value?.token || '<DEPLOY_TOKEN>'}${envSuffix.value} --out ./dist`)
 const configExample = computed(() => JSON.stringify({
   projectId,
   outputDir: './dist',
@@ -194,6 +199,24 @@ const removeProject = async () => {
         </div>
 
         <div class="p-6 space-y-5">
+          <!-- Env selector -->
+          <div class="rounded-lg border border-primary/20 bg-primary/5 p-4">
+            <label class="block text-sm font-medium text-textMain mb-2">部署环境 (可选)</label>
+            <div class="flex items-center gap-3">
+              <input
+                v-model="cliEnv"
+                type="text"
+                class="flex-1 bg-base border border-border rounded-md px-3 py-2 text-textMain font-mono text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all"
+                placeholder="留空为默认环境，或输入如 test、staging、prod"
+              />
+            </div>
+            <p class="text-xs text-textMuted mt-2">
+              填写后下方所有指令将自动带上 <code class="font-mono text-textMain">--env</code> 参数，生成的配置文件为
+              <code class="font-mono text-textMain">{{ configFileName }}</code>。
+              适用于同一项目需要部署到不同环境（测试/预发/生产）的场景。
+            </p>
+          </div>
+
           <!-- Step 1: 安装 CLI -->
           <div class="rounded-lg border border-border bg-base p-4">
             <p class="text-sm font-medium text-textMain mb-2">1. 安装 CLI</p>
@@ -214,7 +237,7 @@ const removeProject = async () => {
                 {{ copiedCommand === 'init' ? '已复制' : '复制' }}
               </button>
             </div>
-            <p class="text-xs text-textMuted mb-3">执行后会在当前目录生成 <code class="font-mono text-textMain bg-panel px-1 py-0.5 rounded border border-border">kite.config.json</code>，请确认生成的配置：</p>
+            <p class="text-xs text-textMuted mb-3">执行后会在当前目录生成 <code class="font-mono text-textMain bg-panel px-1 py-0.5 rounded border border-border">{{ configFileName }}</code>，请确认生成的配置：</p>
             <pre class="text-xs text-success font-mono whitespace-pre-wrap overflow-x-auto bg-panel rounded-md p-3 border border-border mb-3">{{ configExample }}</pre>
             <div class="space-y-2 text-xs text-textMuted">
               <p><code class="font-mono text-textMain">projectId</code> — 项目唯一标识，由服务端分配</p>

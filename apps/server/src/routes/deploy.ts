@@ -92,7 +92,8 @@ export const deployRoutes = new Elysia()
     body: t.Object({
       name: t.String(),
       description: t.Optional(t.String()),
-      deployPath: t.String()
+      deployPath: t.String(),
+      env: t.Optional(t.String())
     })
   })
   .get('/api/projects/:id', async ({ headers, params, set }) => {
