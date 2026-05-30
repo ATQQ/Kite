@@ -7,7 +7,7 @@ import readline from 'readline/promises';
 import { stdin as input, stdout as output } from 'process';
 import { packProject, type PackResult } from './pack.js';
 import { uploadZip } from './upload.js';
-import { getKiteHome, randomToken, readGlobalConfig, readLocalEnv, setGlobalConfig, writeGlobalConfig, writeLocalEnvValue } from './home.js';
+import { getConfigPath, getKiteHome, randomToken, readGlobalConfig, readLocalEnv, setGlobalConfig, writeGlobalConfig, writeLocalEnvValue } from './home.js';
 import { LocalStore } from './local-store.js';
 import { startServe } from './serve.js';
 
@@ -68,6 +68,42 @@ cli.command('config:list', 'List all global configurations')
         console.log(`  ${pid}: ${tok}`);
       }
     }
+  });
+
+cli.command('config', 'Show current effective configuration (merged from all sources)')
+  .action(() => {
+    const globalConfig = readGlobalConfig();
+    const localEnv = readLocalEnv();
+
+    const configPath = path.resolve(process.cwd(), 'kite.config.json');
+    let projectConfig: any = {};
+    if (fs.existsSync(configPath)) {
+      projectConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    }
+
+    const projectId = localEnv.KITE_PROJECT_ID || projectConfig.projectId;
+    const token = localEnv.KITE_DEPLOY_TOKEN || localEnv.KITE_TOKEN || globalConfig.projectToken?.[projectId || ''] || globalConfig.token;
+    const serverUrl = localEnv.KITE_SERVER_URL || globalConfig.serverUrl;
+    const outputDir = localEnv.KITE_OUTPUT_DIR || projectConfig.outputDir || './';
+    const preDeploy = localEnv.KITE_PRE_DEPLOY || projectConfig.preDeploy;
+    const postDeploy = localEnv.KITE_DEPLOY_COMMAND || localEnv.KITE_POST_DEPLOY || projectConfig.command || projectConfig.postDeploy;
+
+    console.log(chalk.bold('Effective config:'));
+    console.log(`  serverUrl:   ${serverUrl || chalk.gray('(not set)')}`);
+    console.log(`  projectId:   ${projectId || chalk.gray('(not set)')}`);
+    console.log(`  token:       ${token ? '****' + token.slice(-4) : chalk.gray('(not set)')}`);
+    console.log(`  outputDir:   ${outputDir}`);
+    console.log(`  preDeploy:   ${preDeploy || chalk.gray('(not set)')}`);
+    console.log(`  postDeploy:  ${postDeploy || chalk.gray('(not set)')}`);
+
+    if (projectConfig.files?.length) {
+      console.log(`  files:       ${projectConfig.files.join(', ')}`);
+    }
+
+    console.log(chalk.gray(`\nSources:`));
+    console.log(chalk.gray(`  global:  ${getConfigPath()}`));
+    console.log(chalk.gray(`  project: ${fs.existsSync(configPath) ? configPath : '(not found)'}`));
+    console.log(chalk.gray(`  env:     ${fs.existsSync(path.join(process.cwd(), '.env.local')) ? path.join(process.cwd(), '.env.local') : '(not found)'}`));
   });
 
 cli.command('home', 'Print Kite home directory')

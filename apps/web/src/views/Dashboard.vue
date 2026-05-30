@@ -62,7 +62,7 @@ const stats = computed(() => [
               </div>
             </div>
             <div class="text-right">
-              <p class="text-sm text-textMuted font-mono">{{ new Date(log.startTime).toLocaleTimeString() }}</p>
+              <p class="text-sm text-textMuted font-mono">{{ new Date(log.startTime).toLocaleString() }}</p>
               <p class="text-xs mt-1" :class="log.status === 'success' ? 'text-success' : 'text-danger'">{{ log.duration || '-' }}</p>
             </div>
           </li>

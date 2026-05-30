@@ -35,7 +35,7 @@ export const useProjectStore = defineStore('project', () => {
   const logs = ref<DeploymentLog[]>([])
 
   // Helper fetch function
-  async function apiFetch(endpoint: string, options: RequestInit = {}) {
+  async function apiFetch(endpoint: string, options: RequestInit & { silent401?: boolean } = {}) {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       ...(options.headers as any)
@@ -49,6 +49,11 @@ export const useProjectStore = defineStore('project', () => {
       headers
     })
     
+    if (res.status === 401 && !options.silent401) {
+      logout()
+      window.location.href = '/login'
+      throw new Error('Unauthorized')
+    }
     const data = await res.json()
     if (!res.ok) throw new Error(data.error || data.message || 'API request failed')
     return data
@@ -214,7 +219,8 @@ export const useProjectStore = defineStore('project', () => {
     try {
       const data = await apiFetch('/auth/login', {
         method: 'POST',
-        body: JSON.stringify({ token })
+        body: JSON.stringify({ token }),
+        silent401: true
       })
       if (data.success) {
         adminToken.value = token

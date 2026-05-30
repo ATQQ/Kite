@@ -100,7 +100,7 @@ function renderLine(line: string): string {
             <div class="flex-1 min-w-0">
               <div class="flex justify-between items-center mb-1">
                 <span class="font-medium text-textMain text-sm truncate">{{ log.projectName }}</span>
-                <span class="text-xs text-textMuted font-mono shrink-0">{{ new Date(log.startTime).toLocaleTimeString() }}</span>
+                <span class="text-xs text-textMuted font-mono shrink-0">{{ new Date(log.startTime).toLocaleString() }}</span>
               </div>
               <div class="flex items-center text-xs text-textMuted space-x-3">
                 <span class="flex items-center">
