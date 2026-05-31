@@ -12,8 +12,9 @@ export async function writeFile(filePath: string, data: ArrayBuffer | Uint8Array
     await Bun.write(filePath, data);
     return;
   }
-  const { writeFile } = await import('node:fs/promises');
-  await writeFile(filePath, Buffer.from(data));
+  const fs = await import('node:fs/promises');
+  // Buffer.from accepts ArrayBuffer at runtime despite strict types
+  await fs.writeFile(filePath, Buffer.from(data as ArrayBuffer));
 }
 
 export async function readFileBuffer(filePath: string): Promise<Uint8Array> {
