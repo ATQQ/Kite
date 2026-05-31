@@ -6,11 +6,12 @@
     "dev": "bun run --env-file=.env.local --watch src/index.ts"
   },
   "dependencies": {
+    "@elysiajs/node": "^1.4.5",
     "@libsql/client": "^0.17.2",
     "@tursodatabase/database": "^0.4.4",
     "adm-zip": "^0.5.17",
     "drizzle-orm": "^1.0.0-beta.15-859cf75",
-    "elysia": "latest"
+    "elysia": "^1.4.28"
   },
   "devDependencies": {
     "@types/adm-zip": "^0.5.8",

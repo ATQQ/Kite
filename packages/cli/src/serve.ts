@@ -23,29 +23,28 @@ function getWebDirPath(): string {
 }
 
 function detectRuntime(preferred?: string): { name: string; version: string } {
-  if (preferred === 'node') {
-    const result = spawnSync('node', ['--version'], { stdio: 'pipe' });
-    if (result.error) {
-      console.error(chalk.red('Node.js is not installed.'));
+  const checkRuntime = (name: string): { name: string; version: string } | null => {
+    const result = spawnSync(name, ['--version'], { stdio: 'pipe' });
+    if (result.error) return null;
+    const ver = result.stdout.toString().trim();
+    return { name, version: name === 'bun' ? `v${ver}` : ver };
+  };
+
+  if (preferred) {
+    const rt = checkRuntime(preferred);
+    if (!rt) {
+      console.error(chalk.red(`${preferred} is not installed.`));
       process.exit(1);
     }
-    return { name: 'node', version: result.stdout.toString().trim() };
+    return rt;
   }
 
   // Default: try bun first, fallback to node
-  const bunResult = spawnSync('bun', ['--version'], { stdio: 'pipe' });
-  if (!bunResult.error) {
-    return { name: 'bun', version: `v${bunResult.stdout.toString().trim()}` };
-  }
-
-  const nodeResult = spawnSync('node', ['--version'], { stdio: 'pipe' });
-  if (!nodeResult.error) {
-    return { name: 'node', version: nodeResult.stdout.toString().trim() };
-  }
-
-  console.error(chalk.red('Neither Bun nor Node.js is installed.'));
-  console.error(chalk.gray('Install Bun from https://bun.sh or Node.js from https://nodejs.org'));
-  process.exit(1);
+  return checkRuntime('bun') || checkRuntime('node') || (() => {
+    console.error(chalk.red('Neither Bun nor Node.js is installed.'));
+    console.error(chalk.gray('Install Bun from https://bun.sh or Node.js from https://nodejs.org'));
+    process.exit(1);
+  }) as never;
 }
 
 function ensureAdminToken(): string {
