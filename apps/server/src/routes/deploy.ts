@@ -4,6 +4,7 @@ import path from 'path';
 import AdmZip from 'adm-zip';
 import { db } from '../db/index.js';
 import { randomUUID } from 'crypto';
+import { spawn, writeFile } from '../runtime.js';
 
 // Token verification helper
 const verifyAdminToken = (headers: Record<string, string | undefined>) => {
@@ -30,11 +31,7 @@ function broadcastToSubscribers(deployId: string, event: string, data: string) {
 
 // Streaming shell command: yields lines with raw ANSI codes
 async function* runShellCommand(command: string, cwd: string) {
-  const proc = Bun.spawn(['sh', '-c', command], {
-    cwd,
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
+  const proc = await spawn('sh', ['-c', command], { cwd });
 
   const decoder = new TextDecoder();
   let buffer = '';
@@ -246,7 +243,7 @@ export const deployRoutes = new Elysia()
             await fs.mkdir(tempDir, { recursive: true });
             const tempZipPath = path.join(tempDir, `${Date.now()}.zip`);
 
-            await Bun.write(tempZipPath, await file.arrayBuffer());
+            await writeFile(tempZipPath, await file.arrayBuffer());
             sendEvent(controller, 'log', { data: `[Kite Deploy] Saved temp zip` });
             await appendLog(`[Kite Deploy] Saved temp zip`);
 

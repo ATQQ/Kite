@@ -1,5 +1,6 @@
 import { Elysia } from 'elysia';
 import path from 'path';
+import { readFileBuffer } from './runtime.js';
 
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -24,16 +25,6 @@ const MIME_TYPES: Record<string, string> = {
 function getMimeType(filePath: string): string {
   const ext = path.extname(filePath).toLowerCase();
   return MIME_TYPES[ext] || 'application/octet-stream';
-}
-
-async function readFileBuffer(filePath: string): Promise<Uint8Array> {
-  const isBun = typeof globalThis.Bun !== 'undefined';
-  if (isBun) {
-    const file = Bun.file(filePath);
-    return new Uint8Array(await file.arrayBuffer());
-  }
-  const { readFile } = await import('node:fs/promises');
-  return readFile(filePath);
 }
 
 export const staticPlugin = new Elysia()

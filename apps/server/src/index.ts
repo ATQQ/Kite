@@ -49,11 +49,19 @@ if (isBun) {
       }
     }
 
+    const hasBody = req.method !== 'GET' && req.method !== 'HEAD';
     const request = new Request(url.toString(), {
       method: req.method,
       headers,
-      body: req.method !== 'GET' && req.method !== 'HEAD' ? req as unknown as BodyInit : undefined,
-    });
+      body: hasBody ? new ReadableStream({
+        start(controller) {
+          req.on('data', (chunk: Buffer) => controller.enqueue(new Uint8Array(chunk)));
+          req.on('end', () => controller.close());
+          req.on('error', (err) => controller.error(err));
+        },
+      }) : undefined,
+      duplex: hasBody ? 'half' : undefined,
+    } as RequestInit);
 
     // Get response from Elysia
     const response = await fetchHandler(request);

@@ -1,6 +1,8 @@
 {
-  "projectId": "proj_abc123",
+  "projectId": "proj_50c343d70149",
   "outputDir": "./dist",
-  "files": ["**/*"],
-  "postDeploy": "echo backend-api deployed && ls"
+  "files": [
+    "**/*"
+  ],
+   "postDeploy": "echo backend-api deployed && ls"
 }
