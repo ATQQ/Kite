@@ -1,6 +1,7 @@
 {
-  "projectId": "proj_abc123",
+  "projectId": "proj_92ee1ab5b928",
   "outputDir": "./dist",
-  "files": ["**/*"],
-  "postDeploy": "echo frontend-basic deployed"
+  "files": [
+    "**/*"
+  ]
 }

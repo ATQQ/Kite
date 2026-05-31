@@ -298,15 +298,77 @@ const askEnvironment = async (envs: ResolvedProjectConfig[]): Promise<string | u
   });
 };
 
-const askTokenStore = async () => {
+const askTokenStore = async (): Promise<string> => {
   if (!process.stdin.isTTY) return 'none';
 
-  const rl = readline.createInterface({ input, output });
-  const answer = await rl.question('Save deploy token to global config or current .env.local? (global/local/none) ');
-  rl.close();
-  const normalized = answer.trim().toLowerCase();
-  if (normalized === 'global' || normalized === 'local') return normalized;
-  return 'none';
+  const options = [
+    { value: 'global' as const, label: 'Global config', desc: '~/.kite/config.json' },
+    { value: 'local' as const, label: 'Local .env.local', desc: 'current project directory' },
+    { value: 'none' as const, label: "Don't save", desc: 'save manually later' },
+  ];
+
+  let selected = 0;
+
+  const render = () => {
+    if ((render as any)._rendered) {
+      process.stdout.write(`\x1b[${(render as any)._rendered + 1}A`);
+    }
+    console.log(chalk.bold('Save deploy token to:'));
+    for (let i = 0; i < options.length; i++) {
+      const o = options[i];
+      const indicator = i === selected ? chalk.cyan('❯ ') : '  ';
+      const name = i === selected ? chalk.cyan.bold(o.label) : o.label;
+      const desc = chalk.gray(o.desc);
+      console.log(`${indicator}${name}  ${desc}`);
+    }
+    console.log(chalk.gray('  ↑↓ move  enter confirm'));
+    (render as any)._rendered = options.length + 1;
+  };
+
+  return new Promise<string>((resolve) => {
+    process.stdin.setRawMode!(true);
+    process.stdin.resume();
+    process.stdin.setEncoding('utf-8');
+
+    render();
+
+    const onData = (key: string) => {
+      if (key === '\r' || key === '\n') {
+        cleanup();
+        console.log();
+        resolve(options[selected].value);
+        return;
+      }
+      if (key === '\x03') {
+        cleanup();
+        process.exit(1);
+      }
+      if (key === '\x1b[A' || key === 'k') {
+        selected = (selected - 1 + options.length) % options.length;
+        render();
+        return;
+      }
+      if (key === '\x1b[B' || key === 'j') {
+        selected = (selected + 1) % options.length;
+        render();
+        return;
+      }
+      const num = parseInt(key, 10);
+      if (num >= 1 && num <= options.length) {
+        selected = num - 1;
+        render();
+        return;
+      }
+    };
+
+    const cleanup = () => {
+      process.stdin.removeListener('data', onData);
+      process.stdin.setRawMode!(false);
+      process.stdin.pause();
+    };
+
+    process.stdin.on('data', onData);
+  });
 };
 
 // ==========================
