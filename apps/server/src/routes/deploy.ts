@@ -1,9 +1,9 @@
 import { Elysia, t } from 'elysia';
-import fs from 'fs/promises';
-import path from 'path';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 import AdmZip from 'adm-zip';
 import { db } from '../db/index.js';
-import { randomUUID } from 'crypto';
+import { randomUUID } from 'node:crypto';
 import { spawn, writeFile } from '../runtime.js';
 
 // Token verification helper

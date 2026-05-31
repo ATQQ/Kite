@@ -1,5 +1,5 @@
 import { Elysia } from 'elysia';
-import path from 'path';
+import path from 'node:path';
 import { readFileBuffer } from './runtime.js';
 
 const MIME_TYPES: Record<string, string> = {

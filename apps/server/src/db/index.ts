@@ -1,9 +1,9 @@
-import { randomUUID } from 'crypto';
+import { randomUUID } from 'node:crypto';
 import { createClient } from '@libsql/client';
 import { drizzle } from 'drizzle-orm/libsql';
 import * as schema from './schema.js';
 import { eq, desc } from 'drizzle-orm';
-import path from 'path';
+import path from 'node:path';
 
 // Initialize libSQL client (using local file for now, can be swapped to Turso URL)
 const dbPath = path.join(process.env.KITE_DB_DIR || process.cwd(), 'kite.db');
