@@ -1,6 +1,5 @@
 import { Elysia } from 'elysia';
 import path from 'path';
-import fs from 'fs/promises';
 
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -27,6 +26,16 @@ function getMimeType(filePath: string): string {
   return MIME_TYPES[ext] || 'application/octet-stream';
 }
 
+async function readFileBuffer(filePath: string): Promise<Uint8Array> {
+  const isBun = typeof globalThis.Bun !== 'undefined';
+  if (isBun) {
+    const file = Bun.file(filePath);
+    return new Uint8Array(await file.arrayBuffer());
+  }
+  const { readFile } = await import('node:fs/promises');
+  return readFile(filePath);
+}
+
 export const staticPlugin = new Elysia()
   .get('/*', async ({ request, set }) => {
     const webDir = process.env.KITE_WEB_DIR;
@@ -49,14 +58,16 @@ export const staticPlugin = new Elysia()
       return { error: 'Access denied' };
     }
 
+    const { stat, access } = await import('node:fs/promises');
+
     // Try to serve the exact file
     try {
-      const stat = await fs.stat(filePath);
-      if (stat.isFile()) {
-        const file = Bun.file(filePath);
+      const fileStat = await stat(filePath);
+      if (fileStat.isFile()) {
+        const buffer = await readFileBuffer(filePath);
         set.headers['Content-Type'] = getMimeType(filePath);
         set.headers['Cache-Control'] = pathname.startsWith('/assets/') ? 'public, max-age=31536000, immutable' : 'no-cache';
-        return file;
+        return new Response(buffer as BodyInit);
       }
     } catch {
       // File not found, fall through to SPA fallback
@@ -65,10 +76,11 @@ export const staticPlugin = new Elysia()
     // SPA fallback: serve index.html for any unmatched route
     const indexPath = path.resolve(webDir, 'index.html');
     try {
-      await fs.access(indexPath);
+      await access(indexPath);
+      const buffer = await readFileBuffer(indexPath);
       set.headers['Content-Type'] = 'text/html; charset=utf-8';
       set.headers['Cache-Control'] = 'no-cache';
-      return Bun.file(indexPath);
+      return new Response(buffer as BodyInit);
     } catch {
       set.status = 404;
       return { error: 'Web console not found' };
