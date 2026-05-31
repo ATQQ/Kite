@@ -374,6 +374,7 @@ cli.command('init', 'Create kite.config.json without writing token into source c
 cli.command('serve', 'Start Kite Server and Web console')
   .option('--host <host>', 'Host to listen on', { default: '127.0.0.1' })
   .option('--port <port>', 'Port to listen on', { default: 5431 })
+  .option('--runtime <runtime>', 'Runtime to use: bun or node (default: bun)')
   .option('--pm2 [action]', 'Daemonize with pm2 (pass "stop" to stop)')
   .action(async (options: any) => {
     try {
@@ -381,6 +382,7 @@ cli.command('serve', 'Start Kite Server and Web console')
       await startServe({
         host: options.host,
         port: Number(options.port),
+        runtime: options.runtime,
         pm2: !!options.pm2,
         pm2Action: pm2Action as 'stop' | undefined,
       });

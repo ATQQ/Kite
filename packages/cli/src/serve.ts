@@ -7,6 +7,7 @@ import { randomToken, readLocalEnv, writeLocalEnvValue, ensureKiteHome, getKiteH
 interface ServeOptions {
   host: string;
   port: number;
+  runtime?: string;
   pm2?: boolean;
   pm2Action?: 'stop';
 }
@@ -21,13 +22,30 @@ function getWebDirPath(): string {
   return path.resolve(new URL('../dist/web', import.meta.url).pathname);
 }
 
-function checkBun(): void {
-  const result = spawnSync('bun', ['--version'], { stdio: 'pipe' });
-  if (result.error) {
-    console.error(chalk.red('Bun is required to run Kite Server.'));
-    console.error(chalk.gray('Install it from https://bun.sh'));
-    process.exit(1);
+function detectRuntime(preferred?: string): { name: string; version: string } {
+  if (preferred === 'node') {
+    const result = spawnSync('node', ['--version'], { stdio: 'pipe' });
+    if (result.error) {
+      console.error(chalk.red('Node.js is not installed.'));
+      process.exit(1);
+    }
+    return { name: 'node', version: result.stdout.toString().trim() };
   }
+
+  // Default: try bun first, fallback to node
+  const bunResult = spawnSync('bun', ['--version'], { stdio: 'pipe' });
+  if (!bunResult.error) {
+    return { name: 'bun', version: `v${bunResult.stdout.toString().trim()}` };
+  }
+
+  const nodeResult = spawnSync('node', ['--version'], { stdio: 'pipe' });
+  if (!nodeResult.error) {
+    return { name: 'node', version: nodeResult.stdout.toString().trim() };
+  }
+
+  console.error(chalk.red('Neither Bun nor Node.js is installed.'));
+  console.error(chalk.gray('Install Bun from https://bun.sh or Node.js from https://nodejs.org'));
+  process.exit(1);
 }
 
 function ensureAdminToken(): string {
@@ -67,7 +85,7 @@ function buildServerEnv(options: ServeOptions, adminToken: string): Record<strin
   };
 }
 
-function startForeground(options: ServeOptions, env: Record<string, string>): void {
+function startForeground(options: ServeOptions, env: Record<string, string>, runtime: { name: string; version: string }): void {
   const bundlePath = getServerBundlePath();
 
   if (!fs.existsSync(bundlePath)) {
@@ -77,6 +95,7 @@ function startForeground(options: ServeOptions, env: Record<string, string>): vo
   }
 
   console.log(chalk.green('Starting Kite Server...'));
+  console.log(chalk.gray(`  Runtime: ${runtime.name} ${runtime.version}`));
   console.log(chalk.gray(`  Host: ${options.host}`));
   console.log(chalk.gray(`  Port: ${options.port}`));
   console.log(chalk.gray(`  Web Dir: ${env.KITE_WEB_DIR}`));
@@ -84,7 +103,8 @@ function startForeground(options: ServeOptions, env: Record<string, string>): vo
   console.log(chalk.yellow(`  Admin Token: ${env.ADMIN_TOKEN}`));
   console.log();
 
-  const child = spawn('bun', ['run', bundlePath], {
+  const args = runtime.name === 'bun' ? ['run', bundlePath] : [bundlePath];
+  const child = spawn(runtime.name, args, {
     stdio: 'inherit',
     env,
     cwd: process.cwd(),
@@ -134,7 +154,7 @@ function getPm2Dir(): string {
   return dir;
 }
 
-function startPm2(options: ServeOptions, env: Record<string, string>): void {
+function startPm2(options: ServeOptions, env: Record<string, string>, runtime: { name: string; version: string }): void {
   const bundlePath = getServerBundlePath();
 
   if (!fs.existsSync(bundlePath)) {
@@ -158,11 +178,12 @@ function startPm2(options: ServeOptions, env: Record<string, string>): void {
   const pm2Dir = getPm2Dir();
   const configPath = path.join(pm2Dir, 'ecosystem.config.cjs');
 
+  const pm2Args = runtime.name === 'bun' ? `run ${bundlePath}` : bundlePath;
   const config = `module.exports = {
   apps: [{
     name: 'kite-server',
-    script: 'bun',
-    args: 'run ${bundlePath}',
+    script: '${runtime.name}',
+    args: '${pm2Args}',
     cwd: ${JSON.stringify(process.cwd())},
     env: ${JSON.stringify(env, null, 6)},
     max_restarts: 5,
@@ -185,6 +206,7 @@ function startPm2(options: ServeOptions, env: Record<string, string>): void {
   console.log();
   console.log(chalk.green('Kite Server started with pm2!'));
   console.log(chalk.gray(`  Name: kite-server`));
+  console.log(chalk.gray(`  Runtime: ${runtime.name} ${runtime.version}`));
   console.log(chalk.gray(`  Host: ${options.host}`));
   console.log(chalk.gray(`  Port: ${options.port}`));
   console.log(chalk.gray(`  Web Dir: ${env.KITE_WEB_DIR}`));
@@ -213,14 +235,14 @@ export async function startServe(options: ServeOptions): Promise<void> {
     return;
   }
 
-  checkBun();
+  const runtime = detectRuntime(options.runtime);
 
   const adminToken = ensureAdminToken();
   const env = buildServerEnv(options, adminToken);
 
   if (options.pm2) {
-    startPm2(options, env);
+    startPm2(options, env, runtime);
   } else {
-    startForeground(options, env);
+    startForeground(options, env, runtime);
   }
 }
