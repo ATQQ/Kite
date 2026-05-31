@@ -1,4 +1,8 @@
-# Kite - 自动化项目部署工具
+<p align="center">
+  <img src="docs/public/logo.svg" alt="Kite Logo" width="200">
+</p>
+
+<h1 align="center">Kite - 自动化项目部署工具</h1>
 
 这是一个“安装 CLI 即可体验”的云原生自动化部署工具。
 CLI 包内置 **Web 管理端静态产物** 和 **Server 代理后端**，基于 HTTP + Token 完成资源上传、目标目录解压和部署命令执行。

@@ -5,6 +5,14 @@ export default defineConfig({
   description: '轻量级 Web / Server / CLI 自动化部署工具',
   lang: 'zh-CN',
   cleanUrls: true,
+  head: [
+    ['link', { rel: 'icon', type: 'image/svg+xml', href: '/logo.svg' }]
+  ],
+  vite: {
+    server: {
+      port: 5440
+    }
+  },
   themeConfig: {
     logo: '/logo.svg',
     nav: [
@@ -19,7 +27,8 @@ export default defineConfig({
         items: [
           { text: '项目介绍', link: '/' },
           { text: '快速开始', link: '/guide/quick-start' },
-          { text: '部署流程', link: '/guide/deploy-flow' }
+          { text: '部署流程', link: '/guide/deploy-flow' },
+          { text: '源码开发', link: '/guide/source-dev' }
         ]
       },
       {
@@ -40,6 +49,8 @@ export default defineConfig({
         ]
       }
     ],
-    socialLinks: []
+    socialLinks: [
+      { icon: 'github', link: 'https://github.com/ATQQ/Kite' }
+    ]
   }
 })

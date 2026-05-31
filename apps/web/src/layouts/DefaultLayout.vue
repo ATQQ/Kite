@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { LayoutDashboard, FolderArchive, TerminalSquare, Settings, Rocket, LogOut } from 'lucide-vue-next'
+import { LayoutDashboard, FolderArchive, TerminalSquare, Settings, LogOut } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { useProjectStore } from '../store/project'
 import { APP_VERSION } from '../constants'
+import LogoSvg from '../assets/logo.svg'
 
 const route = useRoute()
 const router = useRouter()
@@ -25,7 +26,7 @@ const handleLogout = () => {
     <!-- Sidebar -->
     <aside class="w-64 border-r border-border bg-panel flex flex-col hidden md:flex">
       <div class="h-16 flex items-center px-6 border-b border-border">
-        <Rocket class="w-6 h-6 text-primary mr-2" />
+        <img :src="LogoSvg" alt="Kite Logo" class="w-6 h-6 mr-2" />
         <span class="text-lg font-bold text-textMain tracking-wide">KITE</span>
         <span class="ml-2 text-xs bg-primary/20 text-primary px-2 py-0.5 rounded-full">v{{ APP_VERSION }}</span>
       </div>
@@ -69,7 +70,7 @@ const handleLogout = () => {
     <main class="flex-1 flex flex-col h-screen overflow-hidden">
       <!-- Mobile Header -->
       <header class="h-16 border-b border-border bg-panel flex items-center px-4 md:hidden">
-        <Rocket class="w-6 h-6 text-primary mr-2" />
+        <img :src="LogoSvg" alt="Kite Logo" class="w-6 h-6 mr-2" />
         <span class="text-lg font-bold text-textMain">KITE</span>
       </header>
       

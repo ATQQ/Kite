@@ -6,14 +6,6 @@
 npm install -g @kitecd/cli
 ```
 
-本地开发仓库内也可以先构建再直接使用源码 CLI：
-
-```bash
-bun install
-bun run build
-node packages/cli/bin/kite.js --help
-```
-
 ## 2. 启动内置 Kite 服务
 
 ```bash
@@ -46,13 +38,6 @@ kite serve
 kite serve --runtime node
 kite serve --runtime bun
 kite serve --host 0.0.0.0 --port 3000
-```
-
-如果通过源码测试：
-
-```bash
-node packages/cli/bin/kite.js serve --runtime node
-bun packages/cli/bin/kite.js serve --runtime bun
 ```
 
 ## 4. 重置管理端密码
