@@ -1,0 +1,10 @@
+{
+  "name": "@kite/example-frontend-basic",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --hot src/dev-server.ts",
+    "build": "rm -rf dist && mkdir -p dist && cp src/index.html src/styles.css src/app.js dist/"
+  }
+}

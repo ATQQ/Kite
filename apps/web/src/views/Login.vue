@@ -49,13 +49,13 @@ const handleLogin = async () => {
         <div class="w-16 h-16 bg-primary/10 border border-primary/20 rounded-2xl flex items-center justify-center mb-4 shadow-[0_0_30px_rgba(59,130,246,0.15)]">
           <Rocket class="w-8 h-8 text-primary" />
         </div>
-        <h1 class="text-3xl font-bold text-white tracking-tight">Kite Deploy</h1>
+        <h1 class="text-3xl font-bold text-textMain tracking-tight">Kite Deploy</h1>
         <p class="text-textMuted text-sm mt-2">云原生极简部署管理面板</p>
       </div>
 
       <!-- Login Card -->
       <div class="bg-panel border border-border rounded-2xl p-8 shadow-xl">
-        <h2 class="text-lg font-medium text-white mb-6">管理员登录</h2>
+        <h2 class="text-lg font-medium text-textMain mb-6">管理员登录</h2>
         
         <form @submit.prevent="handleLogin" class="space-y-5">
           <div>
@@ -64,7 +64,7 @@ const handleLogin = async () => {
               v-model="token"
               type="password" 
               placeholder="请输入服务端生成的 ADMIN_TOKEN"
-              class="w-full bg-base border border-border rounded-lg px-4 py-3 text-white font-mono text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all placeholder:text-textMuted/50 placeholder:font-sans"
+              class="w-full bg-base border border-border rounded-lg px-4 py-3 text-textMain font-mono text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all placeholder:text-textMuted/50 placeholder:font-sans"
               :class="{'border-danger focus:border-danger focus:ring-danger/50': errorMsg}"
             />
             <p v-if="errorMsg" class="text-danger text-xs mt-2 flex items-center">

@@ -1,0 +1,10 @@
+{
+  "name": "@kite/example-ssr-basic",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --hot src/server.ts",
+    "build": "rm -rf dist && mkdir -p dist && cp src/server.ts dist/server.ts"
+  }
+}

@@ -23,6 +23,11 @@ const routes = [
         component: () => import('../views/ProjectList.vue')
       },
       {
+        path: 'projects/:id/files',
+        name: 'ProjectFiles',
+        component: () => import('../views/FileExplorer.vue')
+      },
+      {
         path: 'projects/:id',
         name: 'ProjectDetail',
         component: () => import('../views/ProjectDetail.vue')
@@ -31,6 +36,11 @@ const routes = [
         path: 'logs',
         name: 'LogBoard',
         component: () => import('../views/LogBoard.vue')
+      },
+      {
+        path: 'settings',
+        name: 'Settings',
+        component: () => import('../views/Settings.vue')
       }
     ]
   }
@@ -41,7 +51,7 @@ export const router = createRouter({
   routes
 })
 
-router.beforeEach((to, from, next) => {
+router.beforeEach((to, _from, next) => {
   const projectStore = useProjectStore()
   if (to.meta.requiresAuth && !projectStore.adminToken) {
     next('/login')

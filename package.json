@@ -11,10 +11,17 @@
     "dev:all": "concurrently \"bun run dev:server\" \"bun run dev:web\"",
     "dev:server": "cd apps/server && bun run dev",
     "dev:web": "cd apps/web && bun run dev",
+    "build": "bun run --cwd apps/web build && bun run build:server && bun run build:cli",
+    "build:server": "cd apps/server && bun build src/index.ts --outdir ../../packages/cli/dist/server --format esm --target node --external @libsql/client --external @libsql/* --external drizzle-orm --external drizzle-orm/*",
     "build:cli": "cd packages/cli && bun run build",
-    "deploy:test": "cd apps/web && bun run ../../packages/cli/bin/kite.js push --token test-token --server http://localhost:3000"
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs",
+    "deploy:test": "cd apps/web && bun run build && bun run ../../packages/cli/bin/kite.js push --token test-token --server http://localhost:5431",
+    "release": "bun run --cwd packages/cli release"
   },
   "devDependencies": {
-    "concurrently": "^8.2.2"
+    "concurrently": "^8.2.2",
+    "vitepress": "^1.6.4"
   }
 }

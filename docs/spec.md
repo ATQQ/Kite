@@ -16,11 +16,11 @@ CLI 需要管理两类配置：**全局/用户级配置**（用于连接服务�
 为了让开发者无需在每个项目中重复配置服务地址和 Token，CLI 提供专门的命令来管理这些信息，并将其持久化存储在用户的主目录。
 
 **涉及的 CLI 命令：**
-*   **`config set <key> <value>`**：设置全局配置。
-    *   示例：`my-deploy config set serverUrl https://deploy.yourdomain.com`
-    *   示例：`my-deploy config set token abcdef1234567890`
-*   **`config get <key>`**：读取全局配置。
-*   **`config list`**：查看当前所有全局配置。
+*   **`config:set <key> <value>`**：设置全局配置。
+    *   示例：`my-deploy config:set serverUrl https://deploy.yourdomain.com`
+    *   示例：`my-deploy config:set token abcdef1234567890`
+*   **`config:get <key>`**：读取全局配置。
+*   **`config:list`**：查看当前所有全局配置。
 
 ### 2. 项目级配置管理 (Project Config)
 
@@ -48,7 +48,7 @@ CLI 需要管理两类配置：**全局/用户级配置**（用于连接服务�
 ### 4. 完整的部署工作流 (CLI 视角)
 
 1.  **准备阶段**：
-    *   配置服务端环境：`my-deploy config set serverUrl http://...` 和 `my-deploy config set token xxxx`
+    *   配置服务端环境：`my-deploy config:set serverUrl http://...` 和 `my-deploy config:set token xxxx`
 2.  **执行部署 (`my-deploy push`)**：
     *   **读取配置**：合并全局配置、项目配置和命令行参数。
     *   **本地前置执行**：如果配置了 `preDeploy`，调用本地 Shell 执行（例如 `npm run build`）。

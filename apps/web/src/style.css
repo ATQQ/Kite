@@ -2,13 +2,36 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --color-base: #ffffff;
+  --color-panel: #f8f9fa;
+  --color-border: #e5e7eb;
+  --color-primary: #3b82f6;
+  --color-success: #10b981;
+  --color-danger: #ef4444;
+  --color-text-main: #18181b;
+  --color-text-muted: #71717a;
+  color-scheme: light;
+}
+
+.dark {
+  --color-base: #09090b;
+  --color-panel: #18181b;
+  --color-border: #27272a;
+  --color-primary: #3b82f6;
+  --color-success: #10b981;
+  --color-danger: #ef4444;
+  --color-text-main: #f4f4f5;
+  --color-text-muted: #a1a1aa;
+  color-scheme: dark;
+}
+
 @layer base {
   body {
     @apply bg-base text-textMain font-sans antialiased m-0 p-0 overflow-x-hidden;
   }
 }
 
-/* Custom scrollbar for dark theme */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;

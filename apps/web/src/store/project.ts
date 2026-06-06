@@ -12,6 +12,7 @@ export interface Project {
   preDeployScript?: string
   postDeployScript?: string
   token?: string
+  env?: string
   status: 'running' | 'success' | 'failed' | 'idle'
   updatedAt: string
 }
@@ -35,7 +36,7 @@ export const useProjectStore = defineStore('project', () => {
   const logs = ref<DeploymentLog[]>([])
 
   // Helper fetch function
-  async function apiFetch(endpoint: string, options: RequestInit = {}) {
+  async function apiFetch(endpoint: string, options: RequestInit & { silent401?: boolean } = {}) {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       ...(options.headers as any)
@@ -49,6 +50,11 @@ export const useProjectStore = defineStore('project', () => {
       headers
     })
     
+    if (res.status === 401 && !options.silent401) {
+      logout()
+      window.location.href = '/login'
+      throw new Error('Unauthorized')
+    }
     const data = await res.json()
     if (!res.ok) throw new Error(data.error || data.message || 'API request failed')
     return data
@@ -61,7 +67,8 @@ export const useProjectStore = defineStore('project', () => {
         ...p,
         destPath: p.deployPath,
         preDeploy: p.preDeployScript,
-        postDeploy: p.postDeployScript
+        postDeploy: p.postDeployScript,
+        env: p.env || ''
       }))
     } catch (e) {
       console.error('Failed to fetch projects', e)
@@ -87,7 +94,8 @@ export const useProjectStore = defineStore('project', () => {
         body: JSON.stringify({
           name: project.name,
           description: project.description,
-          deployPath: project.destPath || '/tmp/default-deploy'
+          deployPath: project.destPath || '/tmp/default-deploy',
+          env: project.env || undefined
         })
       })
       if (data.success) {
@@ -144,11 +152,78 @@ export const useProjectStore = defineStore('project', () => {
     return ''
   }
 
+  async function fetchSettings() {
+    try {
+      return await apiFetch('/settings')
+    } catch (e) {
+      console.error('Failed to fetch settings', e)
+      return {}
+    }
+  }
+
+  async function updateSettings(payload: Record<string, string>) {
+    try {
+      const data = await apiFetch('/settings', {
+        method: 'PUT',
+        body: JSON.stringify(payload)
+      })
+      return data.success
+    } catch (e) {
+      console.error('Failed to update settings', e)
+      return false
+    }
+  }
+
+  async function changeAdminToken(oldToken: string, newToken: string) {
+    try {
+      const data = await apiFetch('/settings/token', {
+        method: 'POST',
+        body: JSON.stringify({ oldToken, newToken })
+      })
+      if (data.success) {
+        adminToken.value = newToken
+        localStorage.setItem('adminToken', newToken)
+      }
+      return data
+    } catch (e: any) {
+      console.error('Failed to change token', e)
+      return { error: e.message }
+    }
+  }
+
+  async function fetchFiles(projectId: string, dirPath: string = '') {
+    try {
+      return await apiFetch(`/projects/${projectId}/files?path=${encodeURIComponent(dirPath)}`)
+    } catch (e) {
+      console.error('Failed to fetch files', e)
+      return []
+    }
+  }
+
+  async function fetchFileContent(projectId: string, filePath: string) {
+    try {
+      return await apiFetch(`/projects/${projectId}/file?path=${encodeURIComponent(filePath)}`)
+    } catch (e) {
+      console.error('Failed to fetch file content', e)
+      return null
+    }
+  }
+
+  async function fetchSystemStatus() {
+    try {
+      return await apiFetch('/settings/status')
+    } catch (e) {
+      console.error('Failed to fetch system status', e)
+      return null
+    }
+  }
+
   async function login(token: string) {
     try {
       const data = await apiFetch('/auth/login', {
         method: 'POST',
-        body: JSON.stringify({ token })
+        body: JSON.stringify({ token }),
+        silent401: true
       })
       if (data.success) {
         adminToken.value = token
@@ -179,6 +254,12 @@ export const useProjectStore = defineStore('project', () => {
     updateProject,
     removeProject,
     generateToken,
+    fetchSettings,
+    updateSettings,
+    changeAdminToken,
+    fetchSystemStatus,
+    fetchFiles,
+    fetchFileContent,
     login,
     logout
   }

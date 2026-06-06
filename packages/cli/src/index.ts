@@ -1,34 +1,524 @@
 import cac from 'cac';
-// @ts-ignore
-import Conf from 'conf';
 import path from 'path';
 import fs from 'fs';
 import ora from 'ora';
 import chalk from 'chalk';
-import { packProject } from './pack.js';
+import readline from 'readline/promises';
+import { stdin as input, stdout as output } from 'process';
+import { packProject, type PackResult } from './pack.js';
 import { uploadZip } from './upload.js';
+import { getConfigPath, getKiteHome, randomToken, readGlobalConfig, readLocalEnv, setGlobalConfig, writeGlobalConfig, writeLocalEnvValue, listProjectEnvs, resolveProjectConfig, envTokenKey, type ResolvedProjectConfig } from './home.js';
+import { LocalStore } from './local-store.js';
+import { startServe } from './serve.js';
 
 // @ts-ignore
 const cli = cac('kite');
-const config = new Conf({ projectName: 'kite-cli' });
 
 // ==========================
 // Config commands
 // ==========================
-cli.command('config set <key> <value>', 'Set global configuration')
-  .action((key: string, value: string) => {
-    config.set(key, value);
+cli.command('config:set <key> <value>', 'Set global configuration')
+  .option('--global', 'Set global fallback token instead of per-project token')
+  .option('--env <name>', 'Environment name (selects kite.config.<name>.json)')
+  .action((key: string, value: string, options: any) => {
+    if (key === 'token' && !options.global) {
+      const allEnvs = listProjectEnvs();
+      let resolved: ResolvedProjectConfig | null = null;
+
+      if (options.env) {
+        resolved = resolveProjectConfig(options.env);
+      } else if (allEnvs.length === 1) {
+        resolved = allEnvs[0];
+      } else if (allEnvs.length > 1) {
+        // 多环境时，非 TTY 提示传 --env
+        if (!process.stdin.isTTY) {
+          console.error(chalk.red('Multiple kite.config*.json found. Pass --env to specify environment.'));
+          process.exit(1);
+        }
+        // 同步场景不能用 async prompt，直接提示
+        console.error(chalk.red('Multiple kite.config*.json found. Pass --env to specify environment.'));
+        process.exit(1);
+      }
+
+      if (resolved && resolved.config.projectId) {
+        const tokenKey = envTokenKey(resolved.config.projectId, resolved.env);
+        const config = readGlobalConfig();
+        config.projectToken = { ...config.projectToken, [tokenKey]: value };
+        writeGlobalConfig(config);
+        console.log(chalk.green(`Set token for ${tokenKey}`));
+        return;
+      }
+      console.log(chalk.yellow('No kite.config*.json found, setting as global token.'));
+    }
+    setGlobalConfig(key as 'serverUrl' | 'token', value);
     console.log(chalk.green(`Set ${key} = ${value}`));
   });
 
-cli.command('config get <key>', 'Get global configuration')
-  .action((key: string) => {
-    console.log(config.get(key));
+cli.command('config:get <key>', 'Get global configuration')
+  .option('--env <name>', 'Environment name (selects kite.config.<name>.json)')
+  .action((key: string, options: any) => {
+    const config = readGlobalConfig();
+    if (key === 'token') {
+      const allEnvs = listProjectEnvs();
+      let resolved: ResolvedProjectConfig | null = null;
+
+      if (options.env) {
+        resolved = resolveProjectConfig(options.env);
+      } else if (allEnvs.length === 1) {
+        resolved = allEnvs[0];
+      } else if (allEnvs.length > 1) {
+        // 多环境非 TTY 时尝试 default
+        resolved = resolveProjectConfig();
+      }
+
+      if (resolved && resolved.config.projectId) {
+        const tokenKey = envTokenKey(resolved.config.projectId, resolved.env);
+        const projectToken = config.projectToken?.[tokenKey]
+          || (resolved.env ? config.projectToken?.[resolved.config.projectId] : undefined);
+        if (projectToken) {
+          console.log(projectToken);
+          return;
+        }
+      }
+    }
+    console.log((config as Record<string, string | undefined>)[key]);
   });
 
-cli.command('config list', 'List all global configurations')
+cli.command('config:list', 'List all global configurations')
   .action(() => {
-    console.log(config.store);
+    const config = readGlobalConfig();
+    console.log(config);
+    if (config.projectToken && Object.keys(config.projectToken).length > 0) {
+      console.log(chalk.gray('\nPer-project tokens:'));
+      for (const [pid, tok] of Object.entries(config.projectToken)) {
+        console.log(`  ${pid}: ${tok}`);
+      }
+    }
+  });
+
+cli.command('config', 'Show current effective configuration (merged from all sources)')
+  .option('--env <name>', 'Environment name (selects kite.config.<name>.json)')
+  .action((options: any) => {
+    const globalConfig = readGlobalConfig();
+    const localEnv = readLocalEnv();
+
+    // 列出所有可用环境
+    const allEnvs = listProjectEnvs();
+    let resolved: ResolvedProjectConfig | null = null;
+    if (options.env) {
+      resolved = resolveProjectConfig(options.env);
+    } else if (allEnvs.length === 1) {
+      resolved = allEnvs[0];
+    } else if (allEnvs.length > 1) {
+      resolved = resolveProjectConfig(); // default
+    }
+
+    const projectConfig = resolved?.config || {};
+    const envName = resolved?.env;
+    const configPath = resolved?.configPath;
+
+    const projectId = localEnv.KITE_PROJECT_ID || projectConfig.projectId;
+    const tokenKey = projectId ? envTokenKey(projectId, envName) : '';
+    const token = localEnv.KITE_DEPLOY_TOKEN || localEnv.KITE_TOKEN || globalConfig.projectToken?.[tokenKey] || (envName && projectId ? globalConfig.projectToken?.[projectId] : undefined) || globalConfig.token;
+    const serverUrl = localEnv.KITE_SERVER_URL || globalConfig.serverUrl;
+    const outputDir = localEnv.KITE_OUTPUT_DIR || projectConfig.outputDir || './';
+    const preDeploy = localEnv.KITE_PRE_DEPLOY || projectConfig.preDeploy;
+    const postDeploy = localEnv.KITE_DEPLOY_COMMAND || localEnv.KITE_POST_DEPLOY || projectConfig.command || projectConfig.postDeploy;
+
+    console.log(chalk.bold('Effective config:'));
+    if (allEnvs.length > 1) {
+      console.log(`  env:         ${envName || chalk.gray('default')}`);
+    }
+    console.log(`  serverUrl:   ${serverUrl || chalk.gray('(not set)')}`);
+    console.log(`  projectId:   ${projectId || chalk.gray('(not set)')}`);
+    console.log(`  token:       ${token ? '****' + token.slice(-4) : chalk.gray('(not set)')}`);
+    console.log(`  outputDir:   ${outputDir}`);
+    console.log(`  preDeploy:   ${preDeploy || chalk.gray('(not set)')}`);
+    console.log(`  postDeploy:  ${postDeploy || chalk.gray('(not set)')}`);
+
+    if (projectConfig.files?.length) {
+      console.log(`  files:       ${projectConfig.files.join(', ')}`);
+    }
+
+    if (allEnvs.length > 1) {
+      console.log(chalk.gray('\nAvailable environments:'));
+      for (const e of allEnvs) {
+        const label = e.env || 'default';
+        const marker = e.env === envName ? chalk.green(' (current)') : '';
+        console.log(chalk.gray(`  ${label}: ${e.configPath}`) + marker);
+      }
+    }
+
+    console.log(chalk.gray(`\nSources:`));
+    console.log(chalk.gray(`  global:  ${getConfigPath()}`));
+    console.log(chalk.gray(`  project: ${configPath || '(not found)'}`));
+    console.log(chalk.gray(`  env:     ${fs.existsSync(path.join(process.cwd(), '.env.local')) ? path.join(process.cwd(), '.env.local') : '(not found)'}`));
+  });
+
+cli.command('home', 'Print Kite home directory')
+  .action(() => {
+    console.log(getKiteHome());
+  });
+
+const askAdminToken = async () => {
+  if (!process.stdin.isTTY) {
+    return randomToken('admin');
+  }
+
+  const rl = readline.createInterface({ input, output });
+  const mode = (await rl.question('Reset admin password with random token or manual input? (random/manual) ')).trim().toLowerCase();
+  if (mode === 'manual') {
+    const manualToken = (await rl.question('Enter new admin password/token: ')).trim();
+    rl.close();
+    if (!manualToken) {
+      throw new Error('Admin password/token cannot be empty.');
+    }
+    return manualToken;
+  }
+
+  rl.close();
+  return randomToken('admin');
+};
+
+const resetAdminPassword = async (options: any) => {
+  try {
+    const nextToken = options.password
+      ? String(options.password)
+      : options.random
+        ? randomToken('admin')
+        : await askAdminToken();
+
+    if (!nextToken) {
+      throw new Error('Admin password/token cannot be empty.');
+    }
+
+    const store = new LocalStore();
+    store.updateAdminToken(nextToken);
+    console.log(chalk.green('Admin password/token has been reset.'));
+    console.log(chalk.gray(`Data home: ${store.home}`));
+    console.log(chalk.yellow(`New admin password/token: ${nextToken}`));
+    console.log(chalk.gray('Running `kite serve` instances read this file on each request, so restart is not required.'));
+  } catch (error: any) {
+    console.error(chalk.red(`Failed to reset admin password/token: ${error.message}`));
+    process.exit(1);
+  }
+};
+
+cli.command('admin <action>', 'Admin operations')
+  .option('--random', 'Generate a random admin password/token')
+  .option('--password <password>', 'Set admin password/token manually')
+  .action(async (action: string, options: any) => {
+    if (action !== 'reset-password') {
+      console.error(chalk.red(`Unknown admin action: ${action}`));
+      console.log('Available actions: reset-password');
+      process.exit(1);
+    }
+    await resetAdminPassword(options);
+  });
+
+cli.command('reset-password', 'Reset Web admin password without restarting Kite server')
+  .option('--random', 'Generate a random admin password/token')
+  .option('--password <password>', 'Set admin password/token manually')
+  .action(resetAdminPassword);
+
+const askEnvironment = async (envs: ResolvedProjectConfig[]): Promise<string | undefined> => {
+  if (!process.stdin.isTTY) {
+    console.error(chalk.red('Multiple kite.config*.json files found. Pass --env to specify environment.'));
+    process.exit(1);
+  }
+
+  let selected = 0;
+
+  const render = () => {
+    // Move cursor up to overwrite previous render
+    if ((render as any)._rendered) {
+      process.stdout.write(`\x1b[${(render as any)._rendered + 1}A`);
+    }
+    console.log(chalk.bold('Select environment:'));
+    for (let i = 0; i < envs.length; i++) {
+      const e = envs[i];
+      const label = e.env || 'default';
+      const indicator = i === selected ? chalk.cyan('❯ ') : '  ';
+      const name = i === selected ? chalk.cyan.bold(label) : label;
+      const file = chalk.gray(path.basename(e.configPath));
+      console.log(`${indicator}${name}  ${file}`);
+    }
+    console.log(chalk.gray('  ↑↓ move  enter confirm'));
+    (render as any)._rendered = envs.length + 1; // lines printed (header + items + footer)
+  };
+
+  return new Promise<string | undefined>((resolve) => {
+    process.stdin.setRawMode!(true);
+    process.stdin.resume();
+    process.stdin.setEncoding('utf-8');
+
+    render();
+
+    const onData = (key: string) => {
+      // Enter
+      if (key === '\r' || key === '\n') {
+        cleanup();
+        console.log(); // newline after selection
+        resolve(envs[selected].env);
+        return;
+      }
+      // Ctrl-C
+      if (key === '') {
+        cleanup();
+        process.exit(1);
+      }
+      // Up arrow or k
+      if (key === '[A' || key === 'k') {
+        selected = (selected - 1 + envs.length) % envs.length;
+        render();
+        return;
+      }
+      // Down arrow or j
+      if (key === '[B' || key === 'j') {
+        selected = (selected + 1) % envs.length;
+        render();
+        return;
+      }
+      // Number keys 1-9 for quick jump
+      const num = parseInt(key, 10);
+      if (num >= 1 && num <= envs.length) {
+        selected = num - 1;
+        render();
+        return;
+      }
+    };
+
+    const cleanup = () => {
+      process.stdin.removeListener('data', onData);
+      process.stdin.setRawMode!(false);
+      process.stdin.pause();
+    };
+
+    process.stdin.on('data', onData);
+  });
+};
+
+const askTokenStore = async (): Promise<string> => {
+  if (!process.stdin.isTTY) return 'none';
+
+  const options = [
+    { value: 'global' as const, label: 'Global config', desc: '~/.kite/config.json' },
+    { value: 'local' as const, label: 'Local .env.local', desc: 'current project directory' },
+    { value: 'none' as const, label: "Don't save", desc: 'save manually later' },
+  ];
+
+  let selected = 0;
+
+  const render = () => {
+    if ((render as any)._rendered) {
+      process.stdout.write(`\x1b[${(render as any)._rendered + 1}A`);
+    }
+    console.log(chalk.bold('Save deploy token to:'));
+    for (let i = 0; i < options.length; i++) {
+      const o = options[i];
+      const indicator = i === selected ? chalk.cyan('❯ ') : '  ';
+      const name = i === selected ? chalk.cyan.bold(o.label) : o.label;
+      const desc = chalk.gray(o.desc);
+      console.log(`${indicator}${name}  ${desc}`);
+    }
+    console.log(chalk.gray('  ↑↓ move  enter confirm'));
+    (render as any)._rendered = options.length + 1;
+  };
+
+  return new Promise<string>((resolve) => {
+    process.stdin.setRawMode!(true);
+    process.stdin.resume();
+    process.stdin.setEncoding('utf-8');
+
+    render();
+
+    const onData = (key: string) => {
+      if (key === '\r' || key === '\n') {
+        cleanup();
+        console.log();
+        resolve(options[selected].value);
+        return;
+      }
+      if (key === '\x03') {
+        cleanup();
+        process.exit(1);
+      }
+      if (key === '\x1b[A' || key === 'k') {
+        selected = (selected - 1 + options.length) % options.length;
+        render();
+        return;
+      }
+      if (key === '\x1b[B' || key === 'j') {
+        selected = (selected + 1) % options.length;
+        render();
+        return;
+      }
+      const num = parseInt(key, 10);
+      if (num >= 1 && num <= options.length) {
+        selected = num - 1;
+        render();
+        return;
+      }
+    };
+
+    const cleanup = () => {
+      process.stdin.removeListener('data', onData);
+      process.stdin.setRawMode!(false);
+      process.stdin.pause();
+    };
+
+    process.stdin.on('data', onData);
+  });
+};
+
+// ==========================
+// Init command
+// ==========================
+cli.command('init', 'Create kite.config.json without writing token into source config')
+  .option('--project <projectId>', 'Project ID')
+  .option('--env <name>', 'Environment name (creates kite.config.<name>.json)')
+  .option('--out <dir>', 'Output directory', { default: './dist' })
+  .option('--files <patterns>', 'Comma separated upload file patterns', { default: '**/*' })
+  .option('--server <server>', 'Server URL to save globally')
+  .option('--token <token>', 'Deploy token to save globally or in .env.local')
+  .option('--token-store <target>', 'Where to save token: global, local, none')
+  .option('--pre <script>', 'Pre-deploy script')
+  .option('--post <script>', 'Post-deploy script')
+  .option('--command <script>', 'Deploy command alias, same as --post')
+  .action(async (options: any) => {
+    const projectId = options.project;
+    if (!projectId) {
+      console.error(chalk.red('Error: --project is required.'));
+      process.exit(1);
+    }
+
+    const env: string | undefined = options.env || undefined;
+    const configFileName = env ? `kite.config.${env}.json` : 'kite.config.json';
+    const configPath = path.resolve(process.cwd(), configFileName);
+    const projectConfig: Record<string, unknown> = {
+      projectId,
+      outputDir: options.out || './dist',
+      files: String(options.files || '**/*').split(',').map(item => item.trim()).filter(Boolean)
+    };
+
+    if (options.pre) projectConfig.preDeploy = options.pre;
+    if (options.command || options.post) projectConfig.postDeploy = options.command || options.post;
+
+    fs.writeFileSync(configPath, `${JSON.stringify(projectConfig, null, 2)}\n`);
+    console.log(chalk.green(`Created ${configPath}`));
+    console.log(chalk.gray('Deploy token is intentionally not written to kite config file.'));
+
+    if (options.server) {
+      setGlobalConfig('serverUrl', options.server);
+      console.log(chalk.green(`Saved serverUrl to ${getKiteHome()}/config.json`));
+    }
+
+    if (options.token) {
+      const tokenStore = options.tokenStore || await askTokenStore();
+      const tokenKey = envTokenKey(projectId, env);
+      if (tokenStore === 'global') {
+        const config = readGlobalConfig();
+        config.projectToken = { ...config.projectToken, [tokenKey]: options.token };
+        writeGlobalConfig(config);
+        console.log(chalk.green(`Saved token for ${tokenKey} to ${getKiteHome()}/config.json`));
+      } else if (tokenStore === 'local') {
+        writeLocalEnvValue('KITE_DEPLOY_TOKEN', options.token);
+        console.log(chalk.green('Saved token to .env.local'));
+      } else {
+        console.log(chalk.yellow('Token was not saved. Pass --token on push, or save it with `kite config:set token <token>`.'));
+      }
+    }
+  });
+
+// ==========================
+// Local server command
+// ==========================
+cli.command('serve', 'Start Kite Server and Web console')
+  .option('--host <host>', 'Host to listen on', { default: '127.0.0.1' })
+  .option('--port <port>', 'Port to listen on', { default: 5431 })
+  .option('--runtime <runtime>', 'Runtime to use: bun or node (default: auto, prefer bun)')
+  .option('--pm2 [action]', 'Daemonize with pm2 (pass "stop" to stop)')
+  .action(async (options: any) => {
+    try {
+      const pm2Action = typeof options.pm2 === 'string' ? options.pm2 : undefined;
+      await startServe({
+        host: options.host,
+        port: Number(options.port),
+        runtime: options.runtime,
+        pm2: !!options.pm2,
+        pm2Action: pm2Action as 'stop' | undefined,
+      });
+    } catch (error: any) {
+      console.error(chalk.red(`Failed to start Kite: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+// ==========================
+// Pack result display helper
+// ==========================
+const displayPackResult = (result: PackResult) => {
+  const sizeKB = (result.size / 1024).toFixed(1);
+  const sizeMB = (result.size / (1024 * 1024)).toFixed(2);
+  const sizeStr = result.size > 1024 * 1024 ? `${sizeMB} MB` : `${sizeKB} KB`;
+  console.log(chalk.gray(`  Archive size: ${sizeStr} (${result.fileCount} files)`));
+  console.log(chalk.gray('  Included:'));
+  for (const entry of result.entries) {
+    const isDir = entry.endsWith('/');
+    console.log(chalk.gray(`    ${isDir ? chalk.blue(entry) : entry}`));
+  }
+};
+
+// ==========================
+// Build command
+// ==========================
+cli.command('build', 'Pack project files and verify packaging (no upload)')
+  .option('--env <name>', 'Environment name (selects kite.config.<name>.json)')
+  .option('--out <dir>', 'Output directory to pack')
+  .action(async (options: any) => {
+    try {
+      const allEnvs = listProjectEnvs();
+      if (allEnvs.length === 0) {
+        console.error(chalk.red('No kite.config*.json found. Run `kite init` first.'));
+        process.exit(1);
+      }
+
+      let resolved: ResolvedProjectConfig;
+      if (options.env) {
+        const found = resolveProjectConfig(options.env);
+        if (!found) {
+          console.error(chalk.red(`kite.config.${options.env}.json not found.`));
+          process.exit(1);
+        }
+        resolved = found;
+      } else if (allEnvs.length === 1) {
+        resolved = allEnvs[0];
+      } else {
+        const selectedEnv = await askEnvironment(allEnvs);
+        resolved = allEnvs.find(e => e.env === selectedEnv)!;
+      }
+
+      const projectConfig = resolved.config;
+      const outputDir = options.out || projectConfig.outputDir || './';
+      const files = projectConfig.files || [];
+      const sourceDir = path.resolve(process.cwd(), outputDir);
+
+      if (!fs.existsSync(sourceDir)) {
+        console.error(chalk.red(`Error: Output directory not found: ${sourceDir}`));
+        process.exit(1);
+      }
+
+      const spinner = ora('Packing files...').start();
+      const zipFilePath = path.resolve(process.cwd(), '.deploy-archive.zip');
+
+      const result = await packProject(sourceDir, zipFilePath, files.length > 0 ? files : undefined);
+      spinner.succeed(chalk.green('Pack successful!'));
+      displayPackResult(result);
+      console.log(chalk.gray(`  Archive: ${zipFilePath}`));
+    } catch (error: any) {
+      console.error(chalk.red(`\nBuild failed: ${error.message}`));
+      process.exit(1);
+    }
   });
 
 // ==========================
@@ -37,38 +527,81 @@ cli.command('config list', 'List all global configurations')
 cli.command('push', 'Push and deploy project')
   .option('--token <token>', 'Deployment token')
   .option('--server <server>', 'Server URL')
+  .option('--project <projectId>', 'Project ID')
+  .option('--env <name>', 'Environment name (selects kite.config.<name>.json)')
   .option('--out <dir>', 'Output directory to pack')
   .option('--pre <script>', 'Pre-deploy script (Server side)')
   .option('--post <script>', 'Post-deploy script (Server side)')
+  .option('--command <script>', 'Deploy command alias, same as --post')
   .action(async (options: any) => {
     try {
-      // 1. 读取全局配置
-      const token = options.token || config.get('token');
-      const serverUrl = options.server || config.get('serverUrl');
-      
-      if (!token || !serverUrl) {
-        console.error(chalk.red('Missing token or serverUrl. Please set them via CLI options or config set.'));
+      // 1. 解析环境配置
+      const allEnvs = listProjectEnvs();
+      if (allEnvs.length === 0) {
+        console.error(chalk.red('No kite.config*.json found. Run `kite init` first.'));
         process.exit(1);
       }
 
-      // 2. 读取项目配置
-      const configPath = path.resolve(process.cwd(), 'kite.config.json');
-      let projectConfig: any = {};
-      if (fs.existsSync(configPath)) {
-        projectConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      let resolved: ResolvedProjectConfig;
+      if (options.env) {
+        const found = resolveProjectConfig(options.env);
+        if (!found) {
+          console.error(chalk.red(`kite.config.${options.env}.json not found.`));
+          process.exit(1);
+        }
+        resolved = found;
+      } else if (allEnvs.length === 1) {
+        resolved = allEnvs[0];
+      } else {
+        const selectedEnv = await askEnvironment(allEnvs);
+        resolved = allEnvs.find(e => e.env === selectedEnv)!;
       }
 
-      // 3. 合并配置优先级 (CLI > kite.config.json)
-      const projectId = projectConfig.projectId;
+      const projectConfig = resolved.config;
+      const envName = resolved.env;
+
+      if (envName) {
+        console.log(chalk.gray(`Environment: ${envName}`));
+      }
+
+      // 2. 读取全局配置与本地密钥
+      const globalConfig = options.token && options.server ? null : readGlobalConfig();
+      const localEnv = readLocalEnv();
+
+      // 3. 解析 projectId（token 查找需要依赖它）
+      const projectId = options.project || localEnv.KITE_PROJECT_ID || projectConfig.projectId;
       if (!projectId) {
-        console.error(chalk.red('Error: projectId is required in kite.config.json'));
+        console.error(chalk.red('Error: projectId is required. Pass --project or set projectId in kite config.'));
         process.exit(1);
       }
 
-      const outputDir = options.out || projectConfig.outputDir || './';
-      const files = projectConfig.files || []; // 获取配置的要上传的文件/目录列表
-      const preDeploy = options.pre || projectConfig.preDeploy;
-      const postDeploy = options.post || projectConfig.postDeploy;
+      // 4. 解析 token：env-specific key 优先，再 fallback 到 default key
+      const tokenKey = envTokenKey(projectId, envName);
+      const token = options.token
+        || localEnv.KITE_DEPLOY_TOKEN
+        || localEnv.KITE_TOKEN
+        || globalConfig?.projectToken?.[tokenKey]
+        || (envName ? globalConfig?.projectToken?.[projectId] : undefined)
+        || globalConfig?.token;
+      const serverUrl = options.server || localEnv.KITE_SERVER_URL || globalConfig?.serverUrl;
+
+      if (!token && !serverUrl) {
+        console.error(chalk.red('Missing token and serverUrl. Run `kite config:set serverUrl <url>` and `kite config:set token <token>`.'));
+        process.exit(1);
+      }
+      if (!serverUrl) {
+        console.error(chalk.red('Missing serverUrl. Run `kite config:set serverUrl <url>`.'));
+        process.exit(1);
+      }
+      if (!token) {
+        console.error(chalk.red(`Missing token for "${tokenKey}". Run \`kite config:set token <token>\` or pass --token.`));
+        process.exit(1);
+      }
+
+      const outputDir = options.out || localEnv.KITE_OUTPUT_DIR || projectConfig.outputDir || './';
+      const files = projectConfig.files || [];
+      const preDeploy = options.pre || localEnv.KITE_PRE_DEPLOY || projectConfig.preDeploy;
+      const postDeploy = options.command || options.post || localEnv.KITE_DEPLOY_COMMAND || localEnv.KITE_POST_DEPLOY || projectConfig.command || projectConfig.postDeploy;
 
       const sourceDir = path.resolve(process.cwd(), outputDir);
       if (!fs.existsSync(sourceDir)) {
@@ -76,16 +609,18 @@ cli.command('push', 'Push and deploy project')
         process.exit(1);
       }
 
-      // 4. 打包文件
+      // 5. 打包文件
       const spinner = ora('Packing files...').start();
       const zipFilePath = path.resolve(process.cwd(), '.deploy-archive.zip');
-      
-      await packProject(sourceDir, zipFilePath, files.length > 0 ? files : undefined);
-      spinner.succeed(chalk.green(`Packed successfully: ${zipFilePath}`));
 
-      // 5. 上传与部署
+      const packResult = await packProject(sourceDir, zipFilePath, files.length > 0 ? files : undefined);
+      spinner.succeed(chalk.green('Packed successfully'));
+      displayPackResult(packResult);
+
+      // 6. 上传与部署
       spinner.start(`Uploading to ${serverUrl}...`);
-      await uploadZip({
+      spinner.stop();
+      const result = await uploadZip({
         serverUrl: serverUrl as string,
         token: token as string,
         zipFilePath,
@@ -93,13 +628,18 @@ cli.command('push', 'Push and deploy project')
         preDeploy,
         postDeploy
       });
-      spinner.succeed(chalk.green('Deployed successfully!'));
+      if (result.success) {
+        console.log(chalk.green(`\nDeployed successfully! (${result.duration})`));
+      } else {
+        console.error(chalk.red('\nDeployment failed'));
+        process.exit(1);
+      }
 
     } catch (error: any) {
       console.error(chalk.red(`\nDeployment failed: ${error.message}`));
       process.exit(1);
     } finally {
-      // 6. 清理临时文件
+      // 7. 清理临时文件
       const zipFilePath = path.resolve(process.cwd(), '.deploy-archive.zip');
       if (fs.existsSync(zipFilePath)) {
         fs.unlinkSync(zipFilePath);
@@ -108,5 +648,6 @@ cli.command('push', 'Push and deploy project')
   });
 
 cli.help();
-cli.version('1.0.0');
+const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf-8'));
+cli.version(pkg.version);
 cli.parse();

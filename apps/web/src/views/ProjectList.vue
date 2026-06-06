@@ -2,7 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useProjectStore } from '../store/project'
-import { Plus, MoreVertical, Server, Clock, GitBranch } from 'lucide-vue-next'
+import { Plus, MoreVertical, Server, Clock } from 'lucide-vue-next'
 
 const projectStore = useProjectStore()
 const router = useRouter()
@@ -12,14 +12,14 @@ onMounted(() => {
 })
 
 const showCreateModal = ref(false)
-const newProject = ref({ name: '', description: '', destPath: '' })
+const newProject = ref({ name: '', description: '', destPath: '', env: '' })
 
 const createProject = async () => {
   if (!newProject.value.name || !newProject.value.destPath) return
   const success = await projectStore.addProject(newProject.value)
   if (success) {
     showCreateModal.value = false
-    newProject.value = { name: '', description: '', destPath: '' }
+    newProject.value = { name: '', description: '', destPath: '', env: '' }
   } else {
     alert('创建失败，请稍后重试')
   }
@@ -34,7 +34,7 @@ const goToDetail = (id: string) => {
   <div class="max-w-7xl mx-auto space-y-6">
     <div class="flex justify-between items-center mb-8">
       <div>
-        <h1 class="text-2xl font-bold text-white tracking-tight">项目管理</h1>
+        <h1 class="text-2xl font-bold text-textMain tracking-tight">项目管理</h1>
         <p class="text-textMuted text-sm mt-1">管理所有可部署的应用服务与脚本配置</p>
       </div>
       <button 
@@ -62,11 +62,11 @@ const goToDetail = (id: string) => {
               <Server class="w-5 h-5 text-textMain group-hover:text-primary transition-colors" />
             </div>
             <div>
-              <h3 class="font-semibold text-white text-base">{{ project.name }}</h3>
+              <h3 class="font-semibold text-textMain text-base">{{ project.name }}</h3>
               <p class="text-xs text-textMuted font-mono mt-0.5">{{ project.id }}</p>
             </div>
           </div>
-          <button class="p-1 hover:bg-white/10 rounded-md transition-colors text-textMuted hover:text-white" @click.stop>
+          <button class="p-1 dark:hover:bg-white/10 hover:bg-black/10 rounded-md transition-colors text-textMuted hover:text-textMain" @click.stop>
             <MoreVertical class="w-4 h-4" />
           </button>
         </div>
@@ -93,7 +93,7 @@ const goToDetail = (id: string) => {
     <!-- Create Modal -->
     <div v-if="showCreateModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
       <div class="bg-panel border border-border rounded-xl w-full max-w-md p-6 shadow-2xl transform transition-all">
-        <h2 class="text-xl font-bold text-white mb-6">新建部署项目</h2>
+        <h2 class="text-xl font-bold text-textMain mb-6">新建部署项目</h2>
         
         <div class="space-y-4">
           <div>
@@ -101,24 +101,39 @@ const goToDetail = (id: string) => {
             <input 
               v-model="newProject.name"
               type="text" 
-              class="w-full bg-base border border-border rounded-md px-3 py-2 text-white focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all text-sm"
+              class="w-full bg-base border border-border rounded-md px-3 py-2 text-textMain focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all text-sm"
               placeholder="e.g. Kite Web Frontend"
             />
           </div>
           <div>
             <label class="block text-sm font-medium text-textMuted mb-1.5">部署目录绝对路径 (Destination Path)</label>
-            <input 
+            <input
               v-model="newProject.destPath"
-              type="text" 
-              class="w-full bg-base border border-border rounded-md px-3 py-2 text-white font-mono focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all text-sm"
+              type="text"
+              class="w-full bg-base border border-border rounded-md px-3 py-2 text-textMain font-mono focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all text-sm"
               placeholder="e.g. /var/www/my-project"
             />
           </div>
           <div>
+            <label class="block text-sm font-medium text-textMuted mb-1.5">部署环境标识 (可选)</label>
+            <input
+              v-model="newProject.env"
+              type="text"
+              class="w-full bg-base border border-border rounded-md px-3 py-2 text-textMain font-mono focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all text-sm"
+              placeholder="e.g. test, staging, prod"
+            />
+            <p class="text-xs text-textMuted mt-1.5">
+              用于区分同一项目的不同部署环境。设置后，CLI 会生成 <code class="font-mono text-textMain">kite.config.{`{env}`}.json</code> 配置文件，
+              <code class="font-mono text-textMain">kite push --env {`{name}`}</code> 可精准推送到对应环境。
+              <span class="text-primary/80">常见场景：同一项目部署到测试/预发/生产等不同机器。</span>
+            </p>
+          </div>
+
+          <div>
             <label class="block text-sm font-medium text-textMuted mb-1.5">描述 (可选)</label>
-            <textarea 
+            <textarea
               v-model="newProject.description"
-              class="w-full bg-base border border-border rounded-md px-3 py-2 text-white focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all text-sm h-24 resize-none"
+              class="w-full bg-base border border-border rounded-md px-3 py-2 text-textMain focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all text-sm h-24 resize-none"
               placeholder="简要描述项目的用途..."
             ></textarea>
           </div>
@@ -127,7 +142,7 @@ const goToDetail = (id: string) => {
         <div class="mt-8 flex justify-end space-x-3">
           <button 
             @click="showCreateModal = false"
-            class="px-4 py-2 text-sm font-medium text-textMuted hover:text-white hover:bg-white/5 rounded-md transition-colors"
+            class="px-4 py-2 text-sm font-medium text-textMuted hover:text-textMain dark:hover:bg-white/5 hover:bg-black/5 rounded-md transition-colors"
           >
             取消
           </button>

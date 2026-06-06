@@ -9,9 +9,16 @@ export const projects = sqliteTable('projects', {
   token: text('token').notNull().unique(),
   preDeployScript: text('pre_deploy_script'),
   postDeployScript: text('post_deploy_script'),
+  env: text('env'),                          // optional environment label, e.g. 'test', 'prod'
   status: text('status').default('idle'), // 'idle' | 'success' | 'failed' | 'running'
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
+});
+
+// 系统设置表
+export const settings = sqliteTable('settings', {
+  key: text('key').primaryKey(),
+  value: text('value').notNull(),
 });
 
 // 部署历史表
