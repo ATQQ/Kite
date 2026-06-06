@@ -5,13 +5,17 @@
   "bin": {
     "kite": "./bin/kite.js"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "files": [
     "bin",
     "dist"
   ],
   "scripts": {
     "build": "tsc && rm -rf dist/web && mkdir -p dist/web && cp -R ../../apps/web/dist/. dist/web/",
-    "dev": "tsc -w"
+    "dev": "tsc -w",
+    "release": "bumpp --execute=\"cd ../.. && bun run build\" --tag --push"
   },
   "dependencies": {
     "adm-zip": "^0.5.17",
@@ -25,6 +29,7 @@
     "drizzle-orm": "^1.0.0-beta.15-859cf75"
   },
   "devDependencies": {
+    "bumpp": "^11.1.0",
     "typescript": "^5.0.0",
     "@types/node": "^20.0.0",
     "@types/adm-zip": "^0.5.8",
