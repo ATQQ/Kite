@@ -1,8 +1,9 @@
 # Changelog
 
 
-## ...feature/v1
+## v1.0.0
 
+[compare changes](https://github.com/ATQQ/Kite/compare/v1.0.0)
 
 ### 🚀 Enhancements
 
@@ -28,7 +29,7 @@
 
 - Serve 终止异常的问题 ([ad306eb](https://github.com/ATQQ/Kite/commit/ad306eb))
 - Node serve run error ([6d9a284](https://github.com/ATQQ/Kite/commit/6d9a284))
-- Static source  404 ([525dbd7](https://github.com/ATQQ/Kite/commit/525dbd7))
+- Static source 404 ([525dbd7](https://github.com/ATQQ/Kite/commit/525dbd7))
 - Serve kite push error ([7622198](https://github.com/ATQQ/Kite/commit/7622198))
 - Type error ([959b953](https://github.com/ATQQ/Kite/commit/959b953))
 - **server, build:** 修复 Node.js 核心模块导入并更新构建配置 ([6874497](https://github.com/ATQQ/Kite/commit/6874497))
@@ -47,10 +48,8 @@
 
 ### 🏡 Chore
 
-- 更新 .gitignore 文件以排除 数据库文件 ([a9d88a6](https://github.com/ATQQ/Kite/commit/a9d88a6))
-- Release v1.0.0 ([1859591](https://github.com/ATQQ/Kite/commit/1859591))
+- 更新 .gitignore 文件以排除数据库文件 ([a9d88a6](https://github.com/ATQQ/Kite/commit/a9d88a6))
 
 ### ❤️ Contributors
 
 - Sugar ([@ATQQ](https://github.com/ATQQ))
-
