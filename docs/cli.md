@@ -142,16 +142,19 @@ Sources:
   env:     /path/to/.env.local
 ```
 
-## 七、全局配置
+## 七、配置管理
 
 首次使用前，建议配置服务端的访问地址。Deploy Token 可以保存到全局配置，也可以保存到当前项目的 `.env.local`。
 
 ```bash
-# 配置部署服务器地址
+# 配置部署服务器地址（项目目录下优先写入 kite.config.json，否则写入全局配置）
 kite config:set serverUrl http://127.0.0.1:5431
 
-# 将 Deploy Token 保存到 ~/.kite/config.json
+# 将 Deploy Token 保存到 ~/.kite/config.json（项目目录下按项目存储）
 kite config:set token kt_1a2b3c4d5e...
+
+# 强制写入全局配置
+kite config:set serverUrl http://127.0.0.1:5431 --global
 
 # 查看当前全局配置
 kite config:list
@@ -190,6 +193,10 @@ kite init --project proj_1a2b3c4d5e --token <DEPLOY_TOKEN> --token-store local
   "outputDir": "./dist",
   "files": ["index.html", "assets"],
   "serverUrl": "https://deploy.example.com",
+  "env": {
+    "NODE_ENV": "production",
+    "API_URL": "https://api.example.com"
+  },
   "preDeploy": "npm run build",
   "postDeploy": "pm2 restart kite-web"
 }
@@ -200,6 +207,7 @@ kite init --project proj_1a2b3c4d5e --token <DEPLOY_TOKEN> --token-store local
 *   `outputDir` (可选): 要打包的根目录（相对路径），默认是 `./`。如果是前端项目通常是 `./dist`。
 *   `files` (可选): 字符串数组。指定**仅上传**该目录下的哪些特定文件或子目录。如果为空或不传，默认打包 `outputDir` 下所有文件（自动忽略 `.git` 和 `node_modules` 等）。
 *   `serverUrl` (可选): 部署服务地址。优先级：CLI `--server` > `.env.local` `KITE_SERVER_URL` > **`kite.config.json`** > 全局配置。
+*   `env` (可选): 键值对对象，部署时注入到 `preDeploy` / `postDeploy` 脚本的环境变量。CLI `--set-env` 可覆盖。
 *   `preDeploy` (可选): 在**服务端**解压前执行的前置脚本（注意：不是本地构建）。适合做清理、备份等准备工作。
 *   `postDeploy` (可选): 在**服务端**解压完成后，在目标部署目录执行的后置脚本（例如重启服务、构建、nginx reload 等）。
 

@@ -34,10 +34,13 @@ export interface SpawnResult {
   exited: Promise<number>;
 }
 
-export async function spawn(cmd: string, args: string[], options: { cwd?: string }): Promise<SpawnResult> {
+export async function spawn(cmd: string, args: string[], options: { cwd?: string; env?: Record<string, string> }): Promise<SpawnResult> {
+  const mergedEnv = options.env ? { ...process.env, ...options.env } : undefined;
+
   if (isBun) {
     const proc = Bun.spawn([cmd, ...args], {
       cwd: options.cwd,
+      env: mergedEnv,
       stdout: 'pipe',
       stderr: 'pipe',
     });
@@ -52,6 +55,7 @@ export async function spawn(cmd: string, args: string[], options: { cwd?: string
   const nodeCp = await import('node:child_process');
   const proc = nodeCp.spawn(cmd, args, {
     cwd: options.cwd,
+    env: mergedEnv,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 

@@ -32,6 +32,9 @@ CLI 需要管理两类配置：**全局/用户级配置**（用于连接服务�
   "projectId": "proj_abc123",  // 对应 Web 平台上创建的项目 ID（必填）
   "outputDir": "./dist",       // 要打包上传的目录
   "serverUrl": "https://deploy.example.com", // 部署服务地址（可选）
+  "env": {                     // 部署时注入的环境变量（可选）
+    "NODE_ENV": "production"
+  },
   "preDeploy": "npm run build", // 部署前本地执行的构建命令（可选）
   "postDeploy": "pm2 restart api-server" // 部署后服务端执行的命令（可选，覆盖平台配置）
 }

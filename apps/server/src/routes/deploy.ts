@@ -30,8 +30,8 @@ function broadcastToSubscribers(deployId: string, event: string, data: string) {
 }
 
 // Streaming shell command: yields lines with raw ANSI codes
-async function* runShellCommand(command: string, cwd: string) {
-  const proc = await spawn('sh', ['-c', command], { cwd });
+async function* runShellCommand(command: string, cwd: string, env?: Record<string, string>) {
+  const proc = await spawn('sh', ['-c', command], { cwd, env });
 
   const decoder = new TextDecoder();
   let buffer = '';
@@ -204,6 +204,13 @@ export const deployRoutes = new Elysia()
 
       const preDeployCmd = body.preDeploy || project.preDeployScript;
       const postDeployCmd = body.postDeploy || project.postDeployScript;
+      // env 通过 FormData 传输为 JSON 字符串，需手动解析
+      let deployEnv: Record<string, string> | undefined;
+      if (body.env) {
+        try {
+          deployEnv = typeof body.env === 'string' ? JSON.parse(body.env) : body.env;
+        } catch { /* ignore invalid env */ }
+      }
 
       console.log(`[Deploy] Received zip for project: ${projectId}`);
 
@@ -257,7 +264,7 @@ export const deployRoutes = new Elysia()
               sendEvent(controller, 'log', { data: `[Kite Deploy] Running Pre-deploy: ${preDeployCmd}` });
               await appendLog(`[Kite Deploy] Running Pre-deploy: ${preDeployCmd}`);
               let failed = false;
-              for await (const line of runShellCommand(preDeployCmd, destPath)) {
+              for await (const line of runShellCommand(preDeployCmd, destPath, deployEnv)) {
                 if (line.startsWith('\x00EXIT:')) {
                   const exitCode = parseInt(line.slice(6));
                   if (exitCode !== 0) { failed = true; }
@@ -279,7 +286,7 @@ export const deployRoutes = new Elysia()
               sendEvent(controller, 'log', { data: `[Kite Deploy] Running Post-deploy: ${postDeployCmd}` });
               await appendLog(`[Kite Deploy] Running Post-deploy: ${postDeployCmd}`);
               let failed = false;
-              for await (const line of runShellCommand(postDeployCmd, destPath)) {
+              for await (const line of runShellCommand(postDeployCmd, destPath, deployEnv)) {
                 if (line.startsWith('\x00EXIT:')) {
                   const exitCode = parseInt(line.slice(6));
                   if (exitCode !== 0) { failed = true; }
@@ -338,7 +345,8 @@ export const deployRoutes = new Elysia()
       file: t.File(),
       projectId: t.String(),
       preDeploy: t.Optional(t.String()),
-      postDeploy: t.Optional(t.String())
+      postDeploy: t.Optional(t.String()),
+      env: t.Optional(t.Any())
     })
   })
   .get('/api/projects/:id/files', async ({ headers, params, query, set }) => {

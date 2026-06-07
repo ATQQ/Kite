@@ -50,6 +50,34 @@ cli.command('config:set <key> <value>', 'Set global configuration')
       }
       console.log(chalk.yellow('No kite.config*.json found, setting as global token.'));
     }
+
+    // serverUrl: 优先写入项目配置
+    if (key === 'serverUrl' && !options.global) {
+      const allEnvs = listProjectEnvs();
+      let resolved: ResolvedProjectConfig | null = null;
+
+      if (options.env) {
+        resolved = resolveProjectConfig(options.env);
+      } else if (allEnvs.length === 1) {
+        resolved = allEnvs[0];
+      } else if (allEnvs.length > 1) {
+        if (!process.stdin.isTTY) {
+          console.error(chalk.red('Multiple kite.config*.json found. Pass --env to specify environment.'));
+          process.exit(1);
+        }
+        console.error(chalk.red('Multiple kite.config*.json found. Pass --env to specify environment.'));
+        process.exit(1);
+      }
+
+      if (resolved) {
+        resolved.config.serverUrl = value;
+        fs.writeFileSync(resolved.configPath, `${JSON.stringify(resolved.config, null, 2)}\n`);
+        console.log(chalk.green(`Set serverUrl in ${resolved.configPath}`));
+        return;
+      }
+      console.log(chalk.yellow('No kite.config*.json found, setting as global serverUrl.'));
+    }
+
     setGlobalConfig(key as 'serverUrl' | 'token', value);
     console.log(chalk.green(`Set ${key} = ${value}`));
   });
@@ -120,7 +148,7 @@ cli.command('config', 'Show current effective configuration (merged from all sou
     const projectId = localEnv.KITE_PROJECT_ID || projectConfig.projectId;
     const tokenKey = projectId ? envTokenKey(projectId, envName) : '';
     const token = localEnv.KITE_DEPLOY_TOKEN || localEnv.KITE_TOKEN || globalConfig.projectToken?.[tokenKey] || (envName && projectId ? globalConfig.projectToken?.[projectId] : undefined) || globalConfig.token;
-    const serverUrl = localEnv.KITE_SERVER_URL || globalConfig.serverUrl;
+    const serverUrl = localEnv.KITE_SERVER_URL || projectConfig.serverUrl || globalConfig.serverUrl;
     const outputDir = localEnv.KITE_OUTPUT_DIR || projectConfig.outputDir || './';
     const preDeploy = localEnv.KITE_PRE_DEPLOY || projectConfig.preDeploy;
     const postDeploy = localEnv.KITE_DEPLOY_COMMAND || localEnv.KITE_POST_DEPLOY || projectConfig.command || projectConfig.postDeploy;
@@ -138,6 +166,10 @@ cli.command('config', 'Show current effective configuration (merged from all sou
 
     if (projectConfig.files?.length) {
       console.log(`  files:       ${projectConfig.files.join(', ')}`);
+    }
+    if (projectConfig.env && Object.keys(projectConfig.env).length > 0) {
+      const entries = Object.entries(projectConfig.env).map(([k, v]) => `${k}=${v}`).join(', ');
+      console.log(`  env:         ${entries}`);
     }
 
     if (allEnvs.length > 1) {
@@ -385,6 +417,7 @@ cli.command('init', 'Create kite.config.json without writing token into source c
   .option('--pre <script>', 'Pre-deploy script')
   .option('--post <script>', 'Post-deploy script')
   .option('--command <script>', 'Deploy command alias, same as --post')
+  .option('--set-env <vars>', 'Environment variables as JSON or KEY=VALUE')
   .action(async (options: any) => {
     const projectId = options.project;
     if (!projectId) {
@@ -401,17 +434,26 @@ cli.command('init', 'Create kite.config.json without writing token into source c
       files: String(options.files || '**/*').split(',').map(item => item.trim()).filter(Boolean)
     };
 
+    if (options.server) projectConfig.serverUrl = options.server;
     if (options.pre) projectConfig.preDeploy = options.pre;
     if (options.command || options.post) projectConfig.postDeploy = options.command || options.post;
+    if (options.setEnv) {
+      const envVars: Record<string, string> = {};
+      const raw = options.setEnv as string;
+      if (raw.trimStart().startsWith('{')) {
+        Object.assign(envVars, JSON.parse(raw));
+      } else {
+        for (const pair of raw.split(',')) {
+          const eq = pair.indexOf('=');
+          if (eq > 0) envVars[pair.slice(0, eq).trim()] = pair.slice(eq + 1).trim();
+        }
+      }
+      if (Object.keys(envVars).length > 0) projectConfig.env = envVars;
+    }
 
     fs.writeFileSync(configPath, `${JSON.stringify(projectConfig, null, 2)}\n`);
     console.log(chalk.green(`Created ${configPath}`));
     console.log(chalk.gray('Deploy token is intentionally not written to kite config file.'));
-
-    if (options.server) {
-      setGlobalConfig('serverUrl', options.server);
-      console.log(chalk.green(`Saved serverUrl to ${getKiteHome()}/config.json`));
-    }
 
     if (options.token) {
       const tokenStore = options.tokenStore || await askTokenStore();
@@ -533,6 +575,7 @@ cli.command('push', 'Push and deploy project')
   .option('--pre <script>', 'Pre-deploy script (Server side)')
   .option('--post <script>', 'Post-deploy script (Server side)')
   .option('--command <script>', 'Deploy command alias, same as --post')
+  .option('--set-env <vars>', 'Environment variables as JSON or KEY=VALUE (overrides config)')
   .action(async (options: any) => {
     try {
       // 1. 解析环境配置
@@ -603,6 +646,22 @@ cli.command('push', 'Push and deploy project')
       const preDeploy = options.pre || localEnv.KITE_PRE_DEPLOY || projectConfig.preDeploy;
       const postDeploy = options.command || options.post || localEnv.KITE_DEPLOY_COMMAND || localEnv.KITE_POST_DEPLOY || projectConfig.command || projectConfig.postDeploy;
 
+      // 解析 env: 项目配置 + CLI --set-env 覆盖
+      let deployEnv: Record<string, string> | undefined = projectConfig.env || undefined;
+      if (options.setEnv) {
+        const cliEnv: Record<string, string> = {};
+        const raw = options.setEnv as string;
+        if (raw.trimStart().startsWith('{')) {
+          Object.assign(cliEnv, JSON.parse(raw));
+        } else {
+          for (const pair of raw.split(',')) {
+            const eq = pair.indexOf('=');
+            if (eq > 0) cliEnv[pair.slice(0, eq).trim()] = pair.slice(eq + 1).trim();
+          }
+        }
+        deployEnv = { ...deployEnv, ...cliEnv };
+      }
+
       const sourceDir = path.resolve(process.cwd(), outputDir);
       if (!fs.existsSync(sourceDir)) {
         console.error(chalk.red(`Error: Output directory not found: ${sourceDir}`));
@@ -626,7 +685,8 @@ cli.command('push', 'Push and deploy project')
         zipFilePath,
         projectId,
         preDeploy,
-        postDeploy
+        postDeploy,
+        env: deployEnv
       });
       if (result.success) {
         console.log(chalk.green(`\nDeployed successfully! (${result.duration})`));

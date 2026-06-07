@@ -7,6 +7,7 @@ interface UploadOptions {
   projectId: string;
   preDeploy?: string;
   postDeploy?: string;
+  env?: Record<string, string>;
 }
 
 interface UploadResult {
@@ -17,7 +18,7 @@ interface UploadResult {
 }
 
 export async function uploadZip(options: UploadOptions): Promise<UploadResult> {
-  const { serverUrl, token, zipFilePath, projectId, preDeploy, postDeploy } = options;
+  const { serverUrl, token, zipFilePath, projectId, preDeploy, postDeploy, env } = options;
 
   const fileData = await fs.promises.readFile(zipFilePath);
   const blob = new Blob([fileData], { type: 'application/zip' });
@@ -28,6 +29,7 @@ export async function uploadZip(options: UploadOptions): Promise<UploadResult> {
 
   if (preDeploy) form.append('preDeploy', preDeploy);
   if (postDeploy) form.append('postDeploy', postDeploy);
+  if (env && Object.keys(env).length > 0) form.append('env', JSON.stringify(env));
 
   const endpoint = `${serverUrl.replace(/\/$/, '')}/api/deploy/upload`;
 
