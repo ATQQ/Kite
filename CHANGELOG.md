@@ -1,6 +1,22 @@
 # Changelog
 
 
+## v1.1.0
+
+[compare changes](https://github.com/ATQQ/Kite/compare/v1.0.0...v1.1.0)
+
+### 🚀 Enhancements
+
+- 添加项目级 serverUrl 配置支持并更新相关文档 ([129674c](https://github.com/ATQQ/Kite/commit/129674c))
+
+### 📖 Documentation
+
+- 优化全站文档，调整默认配置并移除示例文档 ([66d9ebd](https://github.com/ATQQ/Kite/commit/66d9ebd))
+
+### ❤️ Contributors
+
+- Sugar ([@ATQQ](https://github.com/ATQQ))
+
 ## v1.0.0
 
 [compare changes](https://github.com/ATQQ/Kite/compare/v1.0.0)
