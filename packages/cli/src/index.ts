@@ -583,7 +583,7 @@ cli.command('push', 'Push and deploy project')
         || globalConfig?.projectToken?.[tokenKey]
         || (envName ? globalConfig?.projectToken?.[projectId] : undefined)
         || globalConfig?.token;
-      const serverUrl = options.server || localEnv.KITE_SERVER_URL || globalConfig?.serverUrl;
+      const serverUrl = options.server || localEnv.KITE_SERVER_URL || projectConfig.serverUrl || globalConfig?.serverUrl;
 
       if (!token && !serverUrl) {
         console.error(chalk.red('Missing token and serverUrl. Run `kite config:set serverUrl <url>` and `kite config:set token <token>`.'));

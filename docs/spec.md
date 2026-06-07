@@ -31,6 +31,7 @@ CLI 需要管理两类配置：**全局/用户级配置**（用于连接服务�
 {
   "projectId": "proj_abc123",  // 对应 Web 平台上创建的项目 ID（必填）
   "outputDir": "./dist",       // 要打包上传的目录
+  "serverUrl": "https://deploy.example.com", // 部署服务地址（可选）
   "preDeploy": "npm run build", // 部署前本地执行的构建命令（可选）
   "postDeploy": "pm2 restart api-server" // 部署后服务端执行的命令（可选，覆盖平台配置）
 }
@@ -41,7 +42,7 @@ CLI 需要管理两类配置：**全局/用户级配置**（用于连接服务�
 当执行部署命令 `kite push` 时，CLI 会按照以下优先级合并配置并发起请求：
 
 1.  **服务端连接信息 (Server URL & Token)**：
-    *   优先级：CLI 参数 (`--server`, `--token`) > 全局配置 > 环境变量。
+    *   优先级：CLI 参数 (`--server`, `--token`) > `.env.local` > 项目配置 (`kite.config.json`) > 全局配置 (`~/.kite/config.json`)。
 2.  **部署相关指令 (Output Dir, Pre/Post Scripts)**：
     *   优先级：CLI 参数 (`--out`, `--pre`, `--post`) > 项目级配置 (`kite.config.json`) > 平台云端默认配置。
 

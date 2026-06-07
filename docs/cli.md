@@ -189,6 +189,7 @@ kite init --project proj_1a2b3c4d5e --token <DEPLOY_TOKEN> --token-store local
   "projectId": "proj_1a2b3c4d5e", 
   "outputDir": "./dist",
   "files": ["index.html", "assets"],
+  "serverUrl": "https://deploy.example.com",
   "preDeploy": "npm run build",
   "postDeploy": "pm2 restart kite-web"
 }
@@ -198,6 +199,7 @@ kite init --project proj_1a2b3c4d5e --token <DEPLOY_TOKEN> --token-store local
 *   `projectId` (必填): 对应 Web 管理面板中生成的项目唯一 ID。
 *   `outputDir` (可选): 要打包的根目录（相对路径），默认是 `./`。如果是前端项目通常是 `./dist`。
 *   `files` (可选): 字符串数组。指定**仅上传**该目录下的哪些特定文件或子目录。如果为空或不传，默认打包 `outputDir` 下所有文件（自动忽略 `.git` 和 `node_modules` 等）。
+*   `serverUrl` (可选): 部署服务地址。优先级：CLI `--server` > `.env.local` `KITE_SERVER_URL` > **`kite.config.json`** > 全局配置。
 *   `preDeploy` (可选): 在**服务端**解压前执行的前置脚本（注意：不是本地构建）。适合做清理、备份等准备工作。
 *   `postDeploy` (可选): 在**服务端**解压完成后，在目标部署目录执行的后置脚本（例如重启服务、构建、nginx reload 等）。
 
@@ -264,8 +266,9 @@ kite push --token "YOUR_TEMP_TOKEN" --server "http://test-env:5431" --out "./bui
 部署配置优先级为：
 
 1. CLI 参数：`--token`、`--server`、`--project`、`--out`、`--pre`、`--post`、`--command`
-2. 本地配置：`.env.local` 和 `kite.config.json`
-3. 服务端项目默认配置：Web 管理端保存的默认部署目录与脚本
+2. 本地环境变量：`.env.local`（`KITE_SERVER_URL`、`KITE_TOKEN` 等）
+3. 项目配置：`kite.config.json`（`serverUrl`、`projectId`、`outputDir` 等）
+4. 全局配置：`~/.kite/config.json`（`serverUrl`、`token`、`projectToken`）
 
 ## 十二、部署流程示例
 
