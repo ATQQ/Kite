@@ -31,14 +31,14 @@ npm install -g @kitecd/cli
 kite serve
 ```
 
-默认访问 `http://127.0.0.1:3000`。启动日志会打印 Admin Token。
+默认访问 `http://127.0.0.1:5431`。启动日志会打印 Admin Token。
 
 CLI 会把持久化数据放在用户目录：
 
 ```txt
 ~/.kite/
   config.json
-  kite.db.json
+  kite.db
   deployments/
   tmp/
 ```
@@ -65,7 +65,7 @@ bun packages/cli/bin/kite.js serve --runtime bun
 kite serve --runtime auto
 kite serve --runtime node
 kite serve --runtime bun
-kite serve --host 0.0.0.0 --port 3000
+kite serve --host 0.0.0.0 --port 5431
 ```
 
 ## 🛠️ CLI 使用示例
@@ -74,7 +74,7 @@ kite serve --host 0.0.0.0 --port 3000
 
 1. **设置全局服务器与 Token**
 ```bash
-kite config:set serverUrl http://127.0.0.1:3000
+kite config:set serverUrl http://127.0.0.1:5431
 kite config:set token <项目 Deploy Token>
 ```
 
@@ -97,7 +97,7 @@ kite push
 也可以直接通过参数覆盖配置：
 
 ```bash
-kite push --server http://127.0.0.1:3000 --token <项目 Deploy Token> --project <项目 ID> --out ./dist --command "pm2 restart api-server"
+kite push --server http://127.0.0.1:5431 --token <项目 Deploy Token> --project <项目 ID> --out ./dist --command "pm2 restart api-server"
 ```
 
 ## 📖 更多文档

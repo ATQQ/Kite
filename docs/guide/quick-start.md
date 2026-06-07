@@ -18,12 +18,12 @@ kite serve
 - Server API
 - CLI 上传接收与部署执行服务
 
-默认地址是 `http://127.0.0.1:3000`。首次启动会自动创建 `~/.kite`：
+默认地址是 `http://127.0.0.1:5431`。首次启动会自动创建 `~/.kite`：
 
 ```txt
 ~/.kite/
   config.json        # CLI 全局配置
-  kite.db.json       # 项目、Token、部署日志
+  kite.db            # 项目、Token、部署日志 (SQLite)
   deployments/       # 默认部署目录
   tmp/               # 上传临时文件
 ```
@@ -37,7 +37,7 @@ kite serve
 ```bash
 kite serve --runtime node
 kite serve --runtime bun
-kite serve --host 0.0.0.0 --port 3000
+kite serve --host 0.0.0.0 --port 5431
 ```
 
 ## 4. 重置管理端密码
@@ -68,7 +68,7 @@ Deploy Token: test-token
 
 ```bash
 bun run build
-kite push --server http://127.0.0.1:3000 --token test-token
+kite push --server http://127.0.0.1:5431 --token test-token
 ```
 
 真实项目中不建议把 Deploy Token 写入 `kite.config.json`。可以保存到全局配置：

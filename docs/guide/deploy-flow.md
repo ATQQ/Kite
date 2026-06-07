@@ -9,7 +9,7 @@ Kite 的部署链路由 CLI 内置的 Web、Server 和上传命令协作完成�
 ```txt
 ~/.kite/
   config.json
-  kite.db.json
+  kite.db
   deployments/
   tmp/
 ```

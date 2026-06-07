@@ -18,13 +18,13 @@ bun add -g @kitecd/cli
 kite serve
 ```
 
-默认地址是 `http://127.0.0.1:3000`。终端会打印 Admin Token，用于登录 Web 管理端。
+默认地址是 `http://127.0.0.1:5431`。终端会打印 Admin Token，用于登录 Web 管理端。
 
 CLI 会把持久化数据保存到 `~/.kite`：
 
 ```txt
 ~/.kite/config.json
-~/.kite/kite.db.json
+~/.kite/kite.db
 ~/.kite/deployments/
 ~/.kite/tmp/
 ```
@@ -39,12 +39,31 @@ CLI 会把持久化数据保存到 `~/.kite`：
 kite serve --runtime auto
 kite serve --runtime node
 kite serve --runtime bun
-kite serve --host 0.0.0.0 --port 3000
+kite serve --host 0.0.0.0 --port 5431
+```
+
+### 后台运行 (pm2)
+
+`kite serve` 支持通过 pm2 实现后台守护运行：
+
+```bash
+# 使用 pm2 启动
+kite serve --pm2
+
+# 停止 pm2 守护的 Kite 服务
+kite serve --pm2 stop
+```
+
+使用 pm2 后，可以查看日志和状态：
+
+```bash
+pm2 logs kite-server    # 查看日志
+pm2 status              # 查看状态
 ```
 
 ## 三、重置管理端密码
 
-管理端登录密码本质上是 `~/.kite/kite.db.json` 中的 Admin Token。运行中的 `kite serve` 会在每次请求时读取该文件，因此修改后无需重启后端服务。
+管理端登录密码本质上是存储在 `~/.kite/kite.db` 中的 Admin Token。运行中的 `kite serve` 会在每次请求时读取该文件，因此修改后无需重启后端服务。
 
 交互式重置：
 
@@ -72,13 +91,64 @@ kite reset-password --random
 
 重置后，用命令输出的新 Admin Token 重新登录 Web 管理端即可。
 
-## 四、全局配置
+## 四、打包验证 (kite build)
+
+`kite build` 命令可以打包项目文件但不上传，用于验证打包结果是否符合预期：
+
+```bash
+kite build
+kite build --env staging
+kite build --out ./build
+```
+
+`--env` 参数用于多环境场景，指定使用哪个环境的配置文件。`--out` 可临时覆盖输出目录。
+
+## 五、查看 Kite 目录 (kite home)
+
+打印 Kite 数据目录路径：
+
+```bash
+kite home
+# 输出: /Users/yourname/.kite
+```
+
+可通过环境变量 `KITE_HOME` 自定义数据目录。
+
+## 六、查看当前生效配置 (kite config)
+
+`kite config` 命令（不带子命令）会显示当前项目合并后的生效配置，包括来自全局配置、`.env.local` 和 `kite.config.json` 的所有值：
+
+```bash
+kite config
+kite config --env staging
+```
+
+输出示例：
+
+```
+Effective config:
+  env:         staging
+  serverUrl:   http://127.0.0.1:5431
+  projectId:   proj_abc123
+  token:       ****a2b3
+  outputDir:   ./dist
+  preDeploy:   npm run build
+  postDeploy:  pm2 restart my-service
+  files:       **/*
+
+Sources:
+  global:  /Users/yourname/.kite/config.json
+  project: /path/to/kite.config.staging.json
+  env:     /path/to/.env.local
+```
+
+## 七、全局配置
 
 首次使用前，建议配置服务端的访问地址。Deploy Token 可以保存到全局配置，也可以保存到当前项目的 `.env.local`。
 
 ```bash
 # 配置部署服务器地址
-kite config:set serverUrl http://127.0.0.1:3000
+kite config:set serverUrl http://127.0.0.1:5431
 
 # 将 Deploy Token 保存到 ~/.kite/config.json
 kite config:set token kt_1a2b3c4d5e...
@@ -93,12 +163,12 @@ kite config:list
 printf "KITE_DEPLOY_TOKEN=<DEPLOY_TOKEN>\n" >> .env.local
 ```
 
-## 五、初始化项目配置
+## 八、初始化项目配置
 
 推荐使用 `kite init` 创建不包含 Token 的 `kite.config.json`：
 
 ```bash
-kite init --project proj_1a2b3c4d5e --out ./dist --server http://127.0.0.1:3000
+kite init --project proj_1a2b3c4d5e --out ./dist --server http://127.0.0.1:5431
 ```
 
 如果需要在初始化时保存 Token，可以显式指定保存位置：
@@ -110,7 +180,7 @@ kite init --project proj_1a2b3c4d5e --token <DEPLOY_TOKEN> --token-store local
 
 `--token-store global` 会写入 `~/.kite/config.json`，`--token-store local` 会写入当前项目 `.env.local`。
 
-## 六、项目级配置
+## 九、项目级配置
 
 在你要部署的前端或后端项目的根目录，创建一个 `kite.config.json` 文件：
 
@@ -144,7 +214,30 @@ kite init --project proj_1a2b3c4d5e --token <DEPLOY_TOKEN> --token-store local
 
 *注：`kite.config.json` 不应包含 Deploy Token。*
 
-## 七、执行部署
+### 多环境配置
+
+Kite 支持多环境部署。在项目根目录下创建多个配置文件即可：
+
+```
+kite.config.json          # 默认环境
+kite.config.staging.json  # staging 环境
+kite.config.prod.json     # production 篰境
+```
+
+使用 `--env` 参数指定环境：
+
+```bash
+kite push --env staging
+kite push --env prod
+kite build --env staging
+kite init --project proj_abc --env staging
+```
+
+当项目中存在多个环境配置文件时，如果不传 `--env`，CLI 会弹出交互式选择器让你选择目标环境。
+
+Token 也可以按环境存储。`kite config:set token <token> --env staging` 会将 token 存储为 `projectId:staging` 的 key，部署时自动匹配。
+
+## 十、执行部署
 
 在包含 `kite.config.json` 的项目根目录下执行：
 
@@ -163,10 +256,10 @@ CLI 默认读取：
 你可以通过附加参数临时覆盖配置（这在 CI/CD 流水线中非常有用）：
 
 ```bash
-kite push --token "YOUR_TEMP_TOKEN" --server "http://test-env:3000" --out "./build" --post "npm run reload"
+kite push --token "YOUR_TEMP_TOKEN" --server "http://test-env:5431" --out "./build" --post "npm run reload"
 ```
 
-## 八、配置优先级
+## 十一、配置优先级
 
 部署配置优先级为：
 
@@ -174,7 +267,7 @@ kite push --token "YOUR_TEMP_TOKEN" --server "http://test-env:3000" --out "./bui
 2. 本地配置：`.env.local` 和 `kite.config.json`
 3. 服务端项目默认配置：Web 管理端保存的默认部署目录与脚本
 
-## 九、部署流程示例
+## 十二、部署流程示例
 
 1.  运行 `kite push`。
 2.  CLI 自动读取当前目录的 `.env.local` 和 `kite.config.json`。

@@ -41,7 +41,8 @@ bun packages/cli/bin/kite.js serve --runtime bun
 ```
 kite/
 ├── packages/
-│   ├── cli/          # CLI 命令行工具
+│   └── cli/          # CLI 命令行工具
+├── apps/
 │   ├── server/       # 后端 API 服务
 │   └── web/          # Web 管理端
 ├── examples/         # 示例项目

@@ -9,9 +9,6 @@ hero:
     - theme: brand
       text: 快速开始
       link: /guide/quick-start
-    - theme: alt
-      text: 查看示例
-      link: /examples/
 
 features:
   - title: 一条命令启动

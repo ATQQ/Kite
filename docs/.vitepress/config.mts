@@ -17,7 +17,6 @@ export default defineConfig({
     logo: '/logo.svg',
     nav: [
       { text: '快速开始', link: '/guide/quick-start' },
-      { text: '示例项目', link: '/examples/' },
       { text: 'API', link: '/api' },
       { text: 'CLI', link: '/cli' }
     ],
@@ -29,15 +28,6 @@ export default defineConfig({
           { text: '快速开始', link: '/guide/quick-start' },
           { text: '部署流程', link: '/guide/deploy-flow' },
           { text: '源码开发', link: '/guide/source-dev' }
-        ]
-      },
-      {
-        text: '示例',
-        items: [
-          { text: '示例总览', link: '/examples/' },
-          { text: '前端项目', link: '/examples/frontend' },
-          { text: '后端项目', link: '/examples/backend' },
-          { text: 'SSR 项目', link: '/examples/ssr' }
         ]
       },
       {

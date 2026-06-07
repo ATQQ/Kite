@@ -17,16 +17,16 @@ CLI 需要管理两类配置：**全局/用户级配置**（用于连接服务�
 
 **涉及的 CLI 命令：**
 *   **`config:set <key> <value>`**：设置全局配置。
-    *   示例：`my-deploy config:set serverUrl https://deploy.yourdomain.com`
-    *   示例：`my-deploy config:set token abcdef1234567890`
+    *   示例：`kite config:set serverUrl https://deploy.yourdomain.com`
+    *   示例：`kite config:set token abcdef1234567890`
 *   **`config:get <key>`**：读取全局配置。
 *   **`config:list`**：查看当前所有全局配置。
 
 ### 2. 项目级配置管理 (Project Config)
 
-在要部署的本地项目根目录下，使用 `deploy.config.json` 来管理项目特有的配置。
+在要部署的本地项目根目录下，使用 `kite.config.json` 来管理项目特有的配置。
 
-**配置文件结构示例 (`deploy.config.json`)：**
+**配置文件结构示例 (`kite.config.json`)：**
 ```json
 {
   "projectId": "proj_abc123",  // 对应 Web 平台上创建的项目 ID（必填）
@@ -38,18 +38,18 @@ CLI 需要管理两类配置：**全局/用户级配置**（用于连接服务�
 
 ### 3. 配置优先级合并策略
 
-当执行部署命令 `my-deploy push` 时，CLI 会按照以下优先级合并配置并发起请求：
+当执行部署命令 `kite push` 时，CLI 会按照以下优先级合并配置并发起请求：
 
 1.  **服务端连接信息 (Server URL & Token)**：
     *   优先级：CLI 参数 (`--server`, `--token`) > 全局配置 > 环境变量。
 2.  **部署相关指令 (Output Dir, Pre/Post Scripts)**：
-    *   优先级：CLI 参数 (`--out`, `--pre`, `--post`) > 项目级配置 (`deploy.config.json`) > 平台云端默认配置。
+    *   优先级：CLI 参数 (`--out`, `--pre`, `--post`) > 项目级配置 (`kite.config.json`) > 平台云端默认配置。
 
 ### 4. 完整的部署工作流 (CLI 视角)
 
 1.  **准备阶段**：
-    *   配置服务端环境：`my-deploy config:set serverUrl http://...` 和 `my-deploy config:set token xxxx`
-2.  **执行部署 (`my-deploy push`)**：
+    *   配置服务端环境：`kite config:set serverUrl http://...` 和 `kite config:set token xxxx`
+2.  **执行部署 (`kite push`)**：
     *   **读取配置**：合并全局配置、项目配置和命令行参数。
     *   **本地前置执行**：如果配置了 `preDeploy`，调用本地 Shell 执行（例如 `npm run build`）。
     *   **打包压缩**：使用 `archiver` 将 `outputDir` 打包为 `.zip`（忽略 `.git`, `node_modules` 等）。
