@@ -49,10 +49,12 @@ Authorization: Bearer <YOUR_ADMIN_TOKEN>
       "name": "Kite Web",
       "description": "The frontend panel...",
       "deployPath": "/var/www/kite-web",
-      "token": "test-token",
+      "token": "kt_xxxxxxxx",
       "preDeployScript": "bun run build",
       "postDeployScript": "pm2 restart kite-web",
+      "env": "production",
       "status": "success",
+      "createdAt": "2026-04-12T10:00:00Z",
       "updatedAt": "2026-04-12T10:45:00Z"
     }
   ]
@@ -193,6 +195,7 @@ Authorization: Bearer <YOUR_ADMIN_TOKEN>
       "status": "failed",
       "triggerSource": "cli",
       "startTime": "2026-04-12T10:45:00Z",
+      "endTime": "2026-04-12T10:45:01.2Z",
       "duration": "1.2s",
       "output": "[Kite Deploy] Starting deployment..."
     }
@@ -225,6 +228,7 @@ Authorization: Bearer <YOUR_ADMIN_TOKEN>
   * `projectId`: 项目 ID (String)
   * `preDeploy`: CLI 覆盖的前置脚本 (String, 可选)
   * `postDeploy`: CLI 覆盖的后置脚本 (String, 可选)
+  * `env`: 部署时注入到 pre/post 脚本的环境变量，**JSON 字符串** 形式 (String, 可选)
 * **Response**: NDJSON 流（`Content-Type: application/x-ndjson`），每行一个 JSON 对象：
 
   ```json

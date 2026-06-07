@@ -6,7 +6,7 @@
 
 ```bash
 git clone https://github.com/ATQQ/Kite.git
-cd kite
+cd Kite
 bun install
 bun run build
 ```
@@ -32,9 +32,9 @@ bun packages/cli/bin/kite.js serve --runtime bun
 
 ## 3. 本地开发建议
 
-- 使用 `bun run dev` 启动开发模式，代码变更会自动重新构建
-- 测试部署流程时，可以使用内置的示例项目（`examples/` 目录）
-- 提交 PR 前请确保所有测试通过：`bun run test`
+- 使用 `bun run dev` 启动开发模式，同时拉起 Server 与 Web，代码变更会自动重新构建
+- 提交 PR 前请确保在对应工作区执行 `bun run build` 能成功构建：根目录 `bun run build` 会依次构建 Web、Server、CLI
+- 调试一次完整部署链路可使用仓库内置脚本 `bun run deploy:test`（在 `apps/web` 中构建后用 `packages/cli/bin/kite.js push` 推到本地服务）
 
 ## 4. 项目结构
 
