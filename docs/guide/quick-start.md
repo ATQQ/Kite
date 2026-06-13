@@ -38,6 +38,8 @@ kite serve --pm2                        # 由 pm2 守护到后台
 kite serve --pm2 stop                   # 停止 pm2 守护的实例
 ```
 
+> `--pm2` 模式依赖系统里**全局安装的 pm2**（`@kitecd/cli` 不会自动安装）。使用前请执行 `npm install -g pm2`，否则会报错退出。详细说明见 [CLI 文档 - 后台运行 (pm2)](/cli#后台运行-pm2)。
+
 ## 3. 数据目录
 
 CLI 与 Server 的所有状态都保存在 `~/.kite`，**升级 CLI 不会覆盖**：

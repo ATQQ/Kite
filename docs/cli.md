@@ -44,22 +44,120 @@ kite serve --host 0.0.0.0 --port 5431
 
 ### 后台运行 (pm2)
 
-`kite serve` 支持通过 pm2 实现后台守护运行：
+`kite serve` 支持通过 pm2 实现后台守护运行，适合部署在内网/云服务器上长期提供服务。
+
+#### 前置条件：需要全局安装 pm2
+
+`@kitecd/cli` **不会把 pm2 打包进 CLI**，也不会在安装时自动安装。`--pm2` 模式依赖系统里全局可用的 `pm2` 命令，使用前请先手动安装：
 
 ```bash
-# 使用 pm2 启动
+# 推荐：用 Node 自带的 npm 全局安装
+npm install -g pm2
+
+# 或用 yarn / pnpm
+yarn global add pm2
+pnpm add -g pm2
+```
+
+安装后可以验证一下：
+
+```bash
+pm2 --version    # 能输出版本号即说明 PATH 正常
+```
+
+如果提示 `command not found`，通常是 npm 全局 bin 目录没加入 `PATH`
+
+> 如果没装 pm2 就直接运行 `kite serve --pm2`，CLI 会主动检测并报错退出：
+>
+> ```
+> pm2 is not installed.
+> Install it with: npm install -g pm2
+> Or run without --pm2 for foreground mode.
+> ```
+
+#### 启动与停止
+
+```bash
+# 启动（由 pm2 守护到后台，关闭终端也不退出）
 kite serve --pm2
 
 # 停止 pm2 守护的 Kite 服务
 kite serve --pm2 stop
 ```
 
-使用 pm2 后，可以查看日志和状态：
+> 注意 `--pm2` 和 `--pm2 stop` 含义不同：
+>
+> - `kite serve --pm2`：**启用** pm2 守护
+> - `kite serve --pm2 stop`：**停止** pm2 守护的实例（内部调用 `pm2 delete kite-server`）
+
+#### 查看日志与状态
+
+启动成功后，Kite Server 会以名称 `kite-server` 注册到 pm2 进程列表。可以执行：
 
 ```bash
-pm2 logs kite-server    # 查看日志
-pm2 status              # 查看状态
+pm2 ls                       # 或 pm2 status，列出所有 pm2 进程
+pm2 logs kite-server         # 实时跟踪输出日志和错误日志
+pm2 logs kite-server --lines 200   # 查看最近 200 行
+pm2 info kite-server         # 查看进程详情（重启次数、内存占用、cwd、日志路径等）
+pm2 monit                    # 实时监控 CPU / 内存曲线
 ```
+
+`pm2 ls` 输出中 `kite-server` 这一行的字段含义：
+
+| 字段 | 含义 |
+| --- | --- |
+| `id` | pm2 给进程分配的自增 id |
+| `mode` | 进程模式，Kite Server **固定运行在 `fork` 模式**（pm2 默认值），详见下方 |
+| `↺` / `restarts` | 累计重启次数。CLI 配置中限制了 `max_restarts: 5`、`min_uptime: 10s`，超过后会停止自动拉起 |
+| `status` | `online` 正常运行；`errored` 异常；`stopped` 已停止 |
+| `cpu` / `memory` | 实时 CPU 与内存占用 |
+
+**关于 `fork` 模式**：pm2 有两种 `exec_mode`——`fork`（默认，单实例）和 `cluster`（按 CPU 核数起多 worker）。Kite Server 走 fork 是有意为之，因为：
+
+1. 它监听固定端口 `5431`，cluster 多 worker 会端口冲突
+2. 持久化用的是本地 libSQL 文件锁 (`~/.kite/kite.db`)，多实例并发写会锁竞争
+3. 它是管理控制面，不是 CPU 密集型业务，不需要多核利用
+
+**日志文件位置**（在 pm2 生成的 `ecosystem.config.cjs` 中指定）：
+
+```
+~/.kite/pm2/error.log     # 错误输出
+~/.kite/pm2/out.log       # 标准输出
+~/.kite/pm2/ecosystem.config.cjs   # pm2 启动配置（CLI 自动生成）
+```
+
+#### 常用维护命令
+
+```bash
+pm2 restart kite-server    # 重启
+pm2 reload kite-server     # 0-downtime 重载（fork 模式下等同于 restart）
+pm2 delete kite-server     # 从 pm2 列表移除
+```
+
+> 重新执行 `kite serve --pm2` 时，CLI 会先调用 `pm2 delete kite-server` 清理旧实例，再写入新配置并启动，所以反复运行是安全的。
+
+#### 与前台模式的对比
+
+| 维度 | 前台 `kite serve` | pm2 守护 `kite serve --pm2` |
+| --- | --- | --- |
+| 关闭终端后 | 进程退出 | 继续运行 |
+| 崩溃自动重启 | 否 | 是（最多 5 次，10s 内稳定） |
+| 日志 | 终端直显 | 落到 `~/.kite/pm2/*.log` |
+| 适用场景 | 本地调试、临时测试 | 服务器长期运行 |
+
+#### 完全卸载
+
+```bash
+kite serve --pm2 stop    # 停止 Kite Server
+pm2 delete kite-server   # 清理 pm2 列表条目（可省略）
+pm2 unstartup            # 取消开机自启（如果之前配过）
+pm2 kill                 # 杀掉 pm2 守护进程本身
+
+# 可选：卸载 pm2 本身
+npm uninstall -g pm2
+```
+
+> pm2 配置和日志保留在 `~/.kite/pm2/` 目录下，删除 Kite 数据目录（`rm -rf ~/.kite`）时才会一并清理。
 
 ## 三、重置管理端密码
 
