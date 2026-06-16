@@ -1,6 +1,7 @@
 import archiver from 'archiver';
 import fs from 'fs';
 import path from 'path';
+import { mergeIgnore } from './ignore.js';
 
 export interface PackResult {
   size: number;
@@ -8,7 +9,11 @@ export interface PackResult {
   fileCount: number;
 }
 
-const IGNORED = ['node_modules/**', '.git/**', '*.zip', '.env*'];
+export interface PackOptions {
+  files?: string[];
+  ignore?: string[];
+  ignoreBuiltin?: boolean;
+}
 
 /**
  * 将路径列表折叠：如果一个目录下的所有文件都在列表中，则只展示目录
@@ -83,9 +88,24 @@ function collapseEntries(rawEntries: string[]): string[] {
  * 将指定目录或文件打包为 zip 文件
  * @param sourceDir 要打包的源目录
  * @param destZip 目标 zip 文件的路径
- * @param files 允许上传的特定文件或目录列表（可选，如果提供则仅打包这些内容）
+ * @param filesOrOptions 兼容旧签名 string[]，或新版 PackOptions
+ *
+ * 忽略规则语义：
+ *   - 显式 files 条目命中真实路径（archive.file / archive.directory）→ 不应用 ignore，
+ *     用户明确指定即表示需要。
+ *   - glob 通配（archive.glob 含默认全量）→ 应用 mergeIgnore({ custom, ignoreBuiltin })。
  */
-export async function packProject(sourceDir: string, destZip: string, files?: string[]): Promise<PackResult> {
+export async function packProject(
+  sourceDir: string,
+  destZip: string,
+  filesOrOptions?: string[] | PackOptions
+): Promise<PackResult> {
+  const opts: PackOptions = Array.isArray(filesOrOptions)
+    ? { files: filesOrOptions }
+    : (filesOrOptions || {});
+  const files = opts.files;
+  const ignoreList = mergeIgnore({ custom: opts.ignore, ignoreBuiltin: opts.ignoreBuiltin });
+
   return new Promise((resolve, reject) => {
     const output = fs.createWriteStream(destZip);
     const archive = archiver('zip', {
@@ -134,11 +154,11 @@ export async function packProject(sourceDir: string, destZip: string, files?: st
             archive.file(fullPath, { name: pattern });
           }
         } else {
-          archive.glob(pattern, { cwd: sourceDir, ignore: IGNORED });
+          archive.glob(pattern, { cwd: sourceDir, ignore: ignoreList });
         }
       });
     } else {
-      archive.glob('**/*', { cwd: sourceDir, ignore: IGNORED });
+      archive.glob('**/*', { cwd: sourceDir, ignore: ignoreList });
     }
 
     archive.finalize();
