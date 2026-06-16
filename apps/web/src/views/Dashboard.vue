@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { onMounted, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { useProjectStore } from '../store/project'
 import { Activity, Server, Clock, AlertCircle } from 'lucide-vue-next'
 import { APP_VERSION } from '../constants'
 
 const projectStore = useProjectStore()
+const router = useRouter()
 
 onMounted(() => {
   projectStore.fetchProjects()
@@ -13,12 +15,39 @@ onMounted(() => {
 
 const recentLogs = computed(() => projectStore.logs.slice(0, 5))
 
+function formatDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return '-'
+  if (ms < 1000) return `${ms}ms`
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`
+  const m = Math.floor(ms / 60_000)
+  const s = Math.round((ms % 60_000) / 1000)
+  return `${m}m ${s}s`
+}
+
+function elapsedMs(log: { startTime: string; endTime?: string }): number | null {
+  if (!log.endTime || !log.startTime) return null
+  const ms = new Date(log.endTime).getTime() - new Date(log.startTime).getTime()
+  return Number.isFinite(ms) && ms >= 0 ? ms : null
+}
+
+const avgDurationText = computed(() => {
+  const finished = projectStore.logs.filter(l => l.status !== 'running')
+  const samples = finished.map(elapsedMs).filter((n): n is number => n !== null)
+  if (samples.length === 0) return '-'
+  const totalMs = samples.reduce((sum, n) => sum + n, 0)
+  return formatDuration(Math.round(totalMs / samples.length))
+})
+
 const stats = computed(() => [
   { label: '总计项目数', value: projectStore.projects.length, icon: Server, color: 'text-primary' },
   { label: '成功部署', value: projectStore.logs.filter(l => l.status === 'success').length, icon: Activity, color: 'text-success' },
   { label: '失败任务', value: projectStore.logs.filter(l => l.status === 'failed').length, icon: AlertCircle, color: 'text-danger' },
-  { label: '平均耗时', value: '-', icon: Clock, color: 'text-blue-400' },
+  { label: '平均耗时', value: avgDurationText.value, icon: Clock, color: 'text-blue-400' },
 ])
+
+function goToLog(id: string) {
+  router.push({ name: 'LogBoard', query: { id } })
+}
 </script>
 
 <template>
@@ -53,7 +82,7 @@ const stats = computed(() => [
       <div class="bg-panel border border-border rounded-xl overflow-hidden shadow-sm">
         <ul class="divide-y divide-border">
           <li v-if="recentLogs.length === 0" class="px-6 py-8 text-center text-textMuted">暂无部署活动</li>
-          <li v-for="log in recentLogs" :key="log.id" class="px-6 py-4 flex items-center justify-between dark:hover:bg-white/5 hover:bg-black/5 transition-colors cursor-pointer">
+          <li v-for="log in recentLogs" :key="log.id" @click="goToLog(log.id)" class="px-6 py-4 flex items-center justify-between dark:hover:bg-white/5 hover:bg-black/5 transition-colors cursor-pointer">
             <div class="flex items-center space-x-4">
               <div class="w-2 h-2 rounded-full shadow-[0_0_8px_currentColor]" :class="log.status === 'success' ? 'bg-success text-success' : log.status === 'failed' ? 'bg-danger text-danger' : 'bg-primary text-primary'"></div>
               <div>
@@ -63,7 +92,7 @@ const stats = computed(() => [
             </div>
             <div class="text-right">
               <p class="text-sm text-textMuted font-mono">{{ new Date(log.startTime).toLocaleString() }}</p>
-              <p class="text-xs mt-1" :class="log.status === 'success' ? 'text-success' : 'text-danger'">{{ log.duration || '-' }}</p>
+              <p class="text-xs mt-1" :class="log.status === 'success' ? 'text-success' : log.status === 'failed' ? 'text-danger' : 'text-primary'">{{ formatDuration(elapsedMs(log) ?? NaN) }}</p>
             </div>
           </li>
         </ul>

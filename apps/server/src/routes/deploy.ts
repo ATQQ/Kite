@@ -214,12 +214,22 @@ export const deployRoutes = new Elysia()
 
       console.log(`[Deploy] Received zip for project: ${projectId}`);
 
+      // 优先使用 CLI push 时间作为 startTime；非法或缺失时回退到 server 当前时间
+      let startTimeIso = new Date().toISOString();
+      if (typeof body.startedAt === 'string' && body.startedAt) {
+        const t = new Date(body.startedAt).getTime();
+        const now = Date.now();
+        if (!Number.isNaN(t) && t <= now + 10_000 && t >= now - 24 * 60 * 60 * 1000) {
+          startTimeIso = new Date(t).toISOString();
+        }
+      }
+
       const deployLog = await db.deployments.insert({
         projectId: project.id,
         projectName: project.name,
         status: 'running',
         triggerSource: 'cli',
-        startTime: new Date().toISOString(),
+        startTime: startTimeIso,
         output: ''
       });
 
@@ -346,7 +356,8 @@ export const deployRoutes = new Elysia()
       projectId: t.String(),
       preDeploy: t.Optional(t.String()),
       postDeploy: t.Optional(t.String()),
-      env: t.Optional(t.Any())
+      env: t.Optional(t.Any()),
+      startedAt: t.Optional(t.String())
     })
   })
   .get('/api/projects/:id/files', async ({ headers, params, query, set }) => {

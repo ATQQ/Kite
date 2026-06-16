@@ -577,6 +577,7 @@ cli.command('push', 'Push and deploy project')
   .option('--command <script>', 'Deploy command alias, same as --post')
   .option('--set-env <vars>', 'Environment variables as JSON or KEY=VALUE (overrides config)')
   .action(async (options: any) => {
+    const pushStartedAt = new Date().toISOString();
     try {
       // 1. 解析环境配置
       const allEnvs = listProjectEnvs();
@@ -686,7 +687,8 @@ cli.command('push', 'Push and deploy project')
         projectId,
         preDeploy,
         postDeploy,
-        env: deployEnv
+        env: deployEnv,
+        startedAt: pushStartedAt
       });
       if (result.success) {
         console.log(chalk.green(`\nDeployed successfully! (${result.duration})`));

@@ -1,20 +1,45 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch } from 'vue'
+import { ref, onMounted, computed, watch, nextTick } from 'vue'
+import { useRoute } from 'vue-router'
 import { useProjectStore } from '../store/project'
 import { ansiToHtml } from '../utils/ansi'
 import { useDeployStream } from '../composables/useDeployStream'
 import { Terminal, CheckCircle2, XCircle, Clock, RefreshCw, AlertCircle } from 'lucide-vue-next'
 
 const projectStore = useProjectStore()
-
-onMounted(() => {
-  projectStore.fetchLogs()
-})
+const route = useRoute()
 
 const logs = computed(() => projectStore.logs)
 
 const selectedLog = ref<any>(null)
 const isRunning = computed(() => selectedLog.value?.status === 'running')
+
+const listItemRefs = ref<Record<string, HTMLElement | null>>({})
+const setItemRef = (id: string) => (el: any) => {
+  listItemRefs.value[id] = el as HTMLElement | null
+}
+
+async function selectById(id: string | null) {
+  if (!id) return
+  const matched = logs.value.find(l => l.id === id)
+  if (!matched) return
+  selectedLog.value = matched
+  await nextTick()
+  const el = listItemRefs.value[id]
+  if (el && typeof el.scrollIntoView === 'function') {
+    el.scrollIntoView({ block: 'nearest' })
+  }
+}
+
+onMounted(async () => {
+  await projectStore.fetchLogs()
+  const id = typeof route.query.id === 'string' ? route.query.id : null
+  await selectById(id)
+})
+
+watch(() => route.query.id, async (id) => {
+  if (typeof id === 'string') await selectById(id)
+})
 
 // SSE stream for running deployments
 const { lines: streamLines, status: streamStatus } = useDeployStream(
@@ -88,6 +113,7 @@ function renderLine(line: string): string {
           <div
             v-for="log in logs"
             :key="log.id"
+            :ref="setItemRef(log.id)"
             @click="selectLog(log)"
             class="p-3 rounded-lg cursor-pointer transition-all border border-transparent flex items-start space-x-3"
             :class="selectedLog?.id === log.id ? 'bg-primary/10 border-primary/20 shadow-[inset_2px_0_0_0_#3b82f6]' : 'dark:hover:bg-white/5 hover:bg-black/5'"
