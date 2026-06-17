@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { LayoutDashboard, FolderArchive, TerminalSquare, Settings, LogOut } from 'lucide-vue-next'
+import { LayoutDashboard, FolderArchive, TerminalSquare, Database, Settings, LogOut } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { useProjectStore } from '../store/project'
 import { APP_VERSION } from '../constants'
@@ -13,6 +13,7 @@ const menus = [
   { name: '概览', path: '/', icon: LayoutDashboard },
   { name: '项目管理', path: '/projects', icon: FolderArchive },
   { name: '部署日志', path: '/logs', icon: TerminalSquare },
+  { name: '数据迁移', path: '/migration', icon: Database },
 ]
 
 const handleLogout = () => {

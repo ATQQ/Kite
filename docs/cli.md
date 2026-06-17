@@ -527,3 +527,12 @@ kite push
 - 导入时若目标机器上某 project 的 `deployPath` 与源机器不同，请用 `--strategy overwrite --yes` 或先手动调整目标机器的项目配置后再重新导入。
 - artifacts 还原**只覆盖同名文件，不删除目标目录多余文件**，避免误删。如需完全镜像，请先手动清空 `deployPath`。
 - `manifest.schemaVersion` 当前为 `1`。未来若 schema 升级，旧 CLI 拒绝导入更高版本的包，请升级 CLI 后重试。
+
+### Web 端数据迁移
+
+除了 CLI，Web 管理端也内置了导入/导出面板，入口在左侧菜单 **数据迁移**（路由 `/migration`）。适合不想登录服务器执行命令的场景：
+
+- **导出**：勾选要迁移的项目，可选择是否包含 artifacts、是否包含部署日志，日志多时还能设置"每项目最近 N 条"。点击"导出选中项目"即可下载 `kite-export-<timestamp>.zip`。
+- **导入**：选择本地 zip，选择冲突策略（`skip-existing` / `merge` / `overwrite`）和是否还原 artifacts；`overwrite` 会触发二次确认并要求请求头带 `X-Confirm-Overwrite: yes`。导入完成后面板会展示项目 / 设置 / 部署日志 / artifacts 的逐项摘要。
+
+Web 端与 CLI 共用 `manifest.schemaVersion=1` 的 zip 格式，因此 CLI 导出的包可以从 Web 导入，反之亦然。与 CLI `kite import` 不同的是，Web 导入不会改写 `~/.kite/config.json`（server 本身就是目标端），开发机的 `kite push` 仍按现有 token 工作。

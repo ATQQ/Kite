@@ -41,6 +41,11 @@ const routes = [
         path: 'settings',
         name: 'Settings',
         component: () => import('../views/Settings.vue')
+      },
+      {
+        path: 'migration',
+        name: 'Migration',
+        component: () => import('../views/Migration.vue')
       }
     ]
   }
