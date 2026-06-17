@@ -2,7 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useProjectStore } from '../store/project'
-import { Plus, MoreVertical, Server, Clock } from 'lucide-vue-next'
+import { Plus, MoreVertical, Server, Clock, ScrollText } from 'lucide-vue-next'
 
 const projectStore = useProjectStore()
 const router = useRouter()
@@ -27,6 +27,10 @@ const createProject = async () => {
 
 const goToDetail = (id: string) => {
   router.push(`/projects/${id}`)
+}
+
+const goToLogs = (id: string) => {
+  router.push({ path: '/logs', query: { projectId: id } })
 }
 </script>
 
@@ -80,7 +84,15 @@ const goToDetail = (id: string) => {
             <Clock class="w-3.5 h-3.5 mr-1.5" />
             <span>{{ new Date(project.updatedAt).toLocaleDateString() }}</span>
           </div>
-          <div class="flex items-center space-x-2">
+          <div class="flex items-center space-x-3">
+            <button
+              @click.stop="goToLogs(project.id)"
+              class="flex items-center text-textMuted hover:text-primary transition-colors"
+              title="查看部署日志"
+            >
+              <ScrollText class="w-3.5 h-3.5 mr-1" />
+              <span>日志</span>
+            </button>
             <span class="flex items-center" :class="project.status === 'success' ? 'text-success' : project.status === 'failed' ? 'text-danger' : 'text-primary'">
               <span class="w-2 h-2 rounded-full mr-1.5" :class="project.status === 'success' ? 'bg-success shadow-[0_0_8px_#10b981]' : project.status === 'failed' ? 'bg-danger' : 'bg-primary'"></span>
               {{ project.status === 'success' ? '正常' : project.status === 'failed' ? '异常' : '空闲' }}

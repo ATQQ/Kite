@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch, nextTick } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useProjectStore } from '../store/project'
 import { ansiToHtml } from '../utils/ansi'
 import { useDeployStream } from '../composables/useDeployStream'
@@ -8,8 +8,34 @@ import { Terminal, CheckCircle2, XCircle, Clock, RefreshCw, AlertCircle } from '
 
 const projectStore = useProjectStore()
 const route = useRoute()
+const router = useRouter()
 
-const logs = computed(() => projectStore.logs)
+const searchKeyword = ref('')
+const selectedProjectId = ref<string>('')
+
+const projectOptions = computed(() => {
+  const fromStore = projectStore.projects.map(p => ({ id: p.id, name: p.name }))
+  const seen = new Set(fromStore.map(p => p.id))
+  for (const log of projectStore.logs) {
+    if (!seen.has(log.projectId)) {
+      seen.add(log.projectId)
+      fromStore.push({ id: log.projectId, name: log.projectName })
+    }
+  }
+  return fromStore
+})
+
+const logs = computed(() => {
+  const kw = searchKeyword.value.trim().toLowerCase()
+  return projectStore.logs.filter(log => {
+    if (selectedProjectId.value && log.projectId !== selectedProjectId.value) return false
+    if (!kw) return true
+    return (
+      log.projectName.toLowerCase().includes(kw) ||
+      log.id.toLowerCase().includes(kw)
+    )
+  })
+})
 
 const selectedLog = ref<any>(null)
 const isRunning = computed(() => selectedLog.value?.status === 'running')
@@ -21,7 +47,7 @@ const setItemRef = (id: string) => (el: any) => {
 
 async function selectById(id: string | null) {
   if (!id) return
-  const matched = logs.value.find(l => l.id === id)
+  const matched = projectStore.logs.find(l => l.id === id)
   if (!matched) return
   selectedLog.value = matched
   await nextTick()
@@ -32,13 +58,34 @@ async function selectById(id: string | null) {
 }
 
 onMounted(async () => {
+  if (projectStore.projects.length === 0) {
+    projectStore.fetchProjects()
+  }
   await projectStore.fetchLogs()
+  const pid = typeof route.query.projectId === 'string' ? route.query.projectId : ''
+  if (pid) selectedProjectId.value = pid
   const id = typeof route.query.id === 'string' ? route.query.id : null
   await selectById(id)
 })
 
 watch(() => route.query.id, async (id) => {
   if (typeof id === 'string') await selectById(id)
+})
+
+watch(() => route.query.projectId, (pid) => {
+  selectedProjectId.value = typeof pid === 'string' ? pid : ''
+})
+
+watch(selectedProjectId, (pid) => {
+  const currentPid = typeof route.query.projectId === 'string' ? route.query.projectId : ''
+  if (pid === currentPid) return
+  const nextQuery = { ...route.query }
+  if (pid) nextQuery.projectId = pid
+  else delete nextQuery.projectId
+  router.replace({ query: nextQuery })
+  if (selectedLog.value && pid && selectedLog.value.projectId !== pid) {
+    selectedLog.value = null
+  }
 })
 
 // SSE stream for running deployments
@@ -101,12 +148,27 @@ function renderLine(line: string): string {
 
       <!-- Log List -->
       <div class="w-full lg:w-1/3 bg-panel border border-border rounded-xl shadow-sm overflow-hidden flex flex-col h-[400px] lg:h-auto">
-        <div class="p-4 border-b border-border bg-base/50 shrink-0">
+        <div class="p-4 border-b border-border bg-base/50 shrink-0 space-y-2">
+          <select
+            v-model="selectedProjectId"
+            class="w-full bg-base border border-border rounded-md px-3 py-2 text-sm text-textMain focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all"
+          >
+            <option value="">全部项目</option>
+            <option v-for="p in projectOptions" :key="p.id" :value="p.id">{{ p.name }}</option>
+          </select>
           <input
+            v-model="searchKeyword"
             type="text"
             placeholder="搜索项目或记录 ID..."
             class="w-full bg-base border border-border rounded-md px-3 py-2 text-sm text-textMain focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all"
           />
+          <div v-if="selectedProjectId || searchKeyword" class="flex items-center justify-between text-xs text-textMuted">
+            <span>已过滤 {{ logs.length }} 条记录</span>
+            <button
+              @click="selectedProjectId = ''; searchKeyword = ''"
+              class="text-primary hover:underline"
+            >清除过滤</button>
+          </div>
         </div>
 
         <div class="flex-1 overflow-y-auto p-2 space-y-1">
@@ -139,6 +201,10 @@ function renderLine(line: string): string {
                 </span>
               </div>
             </div>
+          </div>
+          <div v-if="logs.length === 0" class="flex flex-col items-center justify-center py-10 text-textMuted text-sm">
+            <AlertCircle class="w-8 h-8 mb-2 opacity-50" />
+            <p>暂无匹配的部署记录</p>
           </div>
         </div>
       </div>
