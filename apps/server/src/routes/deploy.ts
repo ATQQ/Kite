@@ -5,6 +5,7 @@ import AdmZip from 'adm-zip';
 import { db } from '../db/index.js';
 import { randomUUID } from 'node:crypto';
 import { spawn, writeFile } from '../runtime.js';
+import { writeAudit, diffFields, sanitize } from '../lib/audit.js';
 
 // Token verification helper
 const verifyAdminToken = (headers: Record<string, string | undefined>) => {
@@ -63,11 +64,18 @@ async function* runShellCommand(command: string, cwd: string, env?: Record<strin
 }
 
 export const deployRoutes = new Elysia()
-  .post('/api/auth/login', async ({ body, set }) => {
+  .post('/api/auth/login', async ({ body, headers, set }) => {
     const { token } = body;
     if (token === process.env.ADMIN_TOKEN) {
       return { success: true, message: 'Login successful' };
     }
+    await writeAudit({ headers }, {
+      action: 'auth.login_failed',
+      targetType: 'auth',
+      summary: 'Admin 登录失败',
+      status: 'failed',
+      errorMessage: 'Invalid token',
+    });
     set.status = 401;
     return { success: false, message: 'Invalid token' };
   }, {
@@ -83,6 +91,15 @@ export const deployRoutes = new Elysia()
       ...body,
       id: 'proj_' + randomUUID().replace(/-/g, '').substring(0, 12),
       token: 'kt_' + randomUUID().replace(/-/g, ''),
+    });
+    await writeAudit({ headers }, {
+      action: 'project.create',
+      targetType: 'project',
+      targetId: project.id,
+      targetName: project.name,
+      before: null,
+      after: sanitize(project),
+      summary: `创建项目 ${project.name}`,
     });
     return { success: true, project };
   }, {
@@ -101,9 +118,23 @@ export const deployRoutes = new Elysia()
   })
   .put('/api/projects/:id', async ({ headers, params, body, set }) => {
     if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
-    const project = await db.projects.update(params.id, body);
-    if (!project) { set.status = 404; return { error: 'Project not found' }; }
-    return { success: true, project };
+    const before = await db.projects.findById(params.id);
+    if (!before) { set.status = 404; return { error: 'Project not found' }; }
+    const after = await db.projects.update(params.id, body);
+    if (!after) { set.status = 404; return { error: 'Project not found' }; }
+    const diff = diffFields(before as any, after as any, Object.keys(body));
+    if (Object.keys(diff.after).length > 0) {
+      await writeAudit({ headers }, {
+        action: 'project.update',
+        targetType: 'project',
+        targetId: params.id,
+        targetName: after.name,
+        before: diff.before,
+        after: diff.after,
+        summary: `更新项目配置：${Object.keys(diff.after).join(', ')}`,
+      });
+    }
+    return { success: true, project: after };
   }, {
     body: t.Object({
       preDeployScript: t.Optional(t.String()),
@@ -113,17 +144,39 @@ export const deployRoutes = new Elysia()
   })
   .delete('/api/projects/:id', async ({ headers, params, set }) => {
     if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
-    
-    // params.id 会获取 URL 路径参数，比如 "proj_xxxxx"
+
+    const before = await db.projects.findById(params.id);
+    if (!before) { set.status = 404; return { error: 'Project not found' }; }
+    const deploymentCount = await db.deployments.countByProject(params.id);
+
     const success = await db.projects.remove(params.id);
     if (!success) { set.status = 404; return { error: 'Project not found' }; }
-    
+
+    await writeAudit({ headers }, {
+      action: 'project.delete',
+      targetType: 'project',
+      targetId: before.id,
+      targetName: before.name,
+      before: { ...sanitize(before) as any, deploymentCount },
+      after: null,
+      summary: `删除项目 ${before.name}（连带 ${deploymentCount} 条部署历史）`,
+    });
+
     return { success: true, message: 'Project deleted successfully' };
   })
   .post('/api/projects/:id/token', async ({ headers, params, set }) => {
     if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
     const project = await db.projects.update(params.id, { token: 'kt_' + randomUUID().replace(/-/g, '') });
     if (!project) { set.status = 404; return { error: 'Project not found' }; }
+    await writeAudit({ headers }, {
+      action: 'project.token.rotate',
+      targetType: 'project',
+      targetId: project.id,
+      targetName: project.name,
+      before: { token: '****' },
+      after: { token: '****' },
+      summary: `重新生成项目 ${project.name} 的 Token`,
+    });
     return { success: true, token: project.token };
   })
   .get('/api/logs', async ({ headers, set }) => {

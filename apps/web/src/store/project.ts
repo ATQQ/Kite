@@ -218,6 +218,37 @@ export const useProjectStore = defineStore('project', () => {
     }
   }
 
+  async function fetchAuditLogs(params: {
+    action?: string
+    targetId?: string
+    targetType?: string
+    from?: number
+    to?: number
+    limit?: number
+    offset?: number
+  } = {}) {
+    try {
+      const qs = new URLSearchParams()
+      for (const [k, v] of Object.entries(params)) {
+        if (v !== undefined && v !== null && v !== '') qs.append(k, String(v))
+      }
+      const suffix = qs.toString() ? `?${qs.toString()}` : ''
+      return await apiFetch(`/audit-logs${suffix}`)
+    } catch (e) {
+      console.error('Failed to fetch audit logs', e)
+      return { rows: [], total: 0, limit: 50, offset: 0 }
+    }
+  }
+
+  async function fetchAuditLogDetail(id: string) {
+    try {
+      return await apiFetch(`/audit-logs/${id}`)
+    } catch (e) {
+      console.error('Failed to fetch audit log detail', e)
+      return null
+    }
+  }
+
   async function login(token: string) {
     try {
       const data = await apiFetch('/auth/login', {
@@ -258,6 +289,8 @@ export const useProjectStore = defineStore('project', () => {
     updateSettings,
     changeAdminToken,
     fetchSystemStatus,
+    fetchAuditLogs,
+    fetchAuditLogDetail,
     fetchFiles,
     fetchFileContent,
     login,

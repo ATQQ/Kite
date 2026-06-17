@@ -2,6 +2,7 @@ import { Elysia } from "elysia";
 import { deployRoutes } from "./routes/deploy.js";
 import { settingsRoutes } from "./routes/settings.js";
 import { migrationRoutes } from "./routes/migration.js";
+import { auditRoutes } from "./routes/audit.js";
 import { staticPlugin } from "./static.js";
 import { ensureDbReady } from "./db/index.js";
 import http from "node:http";
@@ -31,6 +32,7 @@ const app = new Elysia({ adapter })
   .use(deployRoutes)
   .use(settingsRoutes)
   .use(migrationRoutes)
+  .use(auditRoutes)
   .use(staticPlugin);
 
 if (isBun) {

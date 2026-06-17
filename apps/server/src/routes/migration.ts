@@ -7,6 +7,7 @@ import {
   type ImportOptions,
   type ImportStrategy,
 } from '../lib/migration.js';
+import { writeAudit } from '../lib/audit.js';
 
 const verifyAdminToken = (headers: Record<string, string | undefined>) => {
   const authHeader = headers.authorization;
@@ -48,6 +49,20 @@ export const migrationRoutes = new Elysia()
 
     try {
       const { buffer, filename } = await buildExportArchive(options);
+      await writeAudit({ headers }, {
+        action: 'migration.export',
+        targetType: 'migration',
+        targetName: filename,
+        after: {
+          filename,
+          sizeBytes: buffer.length,
+          projectIds: options.projectIds ?? 'all',
+          includeArtifacts: options.includeArtifacts,
+          includeDeployments: options.includeDeployments,
+          deploymentLimitPerProject: options.deploymentLimitPerProject,
+        },
+        summary: `导出迁移包 ${filename}（${(options.projectIds?.length ?? 'all')} 个项目）`,
+      });
       return new Response(buffer, {
         status: 200,
         headers: {
@@ -57,6 +72,18 @@ export const migrationRoutes = new Elysia()
         },
       });
     } catch (err: any) {
+      await writeAudit({ headers }, {
+        action: 'migration.export',
+        targetType: 'migration',
+        after: {
+          projectIds: options.projectIds ?? 'all',
+          includeArtifacts: options.includeArtifacts,
+          includeDeployments: options.includeDeployments,
+        },
+        summary: '导出迁移包失败',
+        status: 'failed',
+        errorMessage: err.message,
+      });
       return new Response(JSON.stringify({ error: err.message }), {
         status: 500,
         headers: { 'Content-Type': 'application/json' },
@@ -102,8 +129,30 @@ export const migrationRoutes = new Elysia()
       const ab = await file.arrayBuffer();
       const buffer = Buffer.from(ab);
       const summary = await applyImportArchive(buffer, opts);
+      await writeAudit({ headers }, {
+        action: 'migration.import',
+        targetType: 'migration',
+        targetName: (file as any).name || 'import.zip',
+        after: {
+          fileName: (file as any).name,
+          sizeBytes: buffer.length,
+          strategy: opts.strategy,
+          restoreArtifacts: opts.restoreArtifacts,
+          summary,
+        },
+        summary: `导入迁移包（策略：${opts.strategy}）`,
+      });
       return { success: true, summary };
     } catch (err: any) {
+      await writeAudit({ headers }, {
+        action: 'migration.import',
+        targetType: 'migration',
+        targetName: (file as any)?.name || 'import.zip',
+        after: { strategy: opts.strategy, restoreArtifacts: opts.restoreArtifacts },
+        summary: '导入迁移包失败',
+        status: 'failed',
+        errorMessage: err.message,
+      });
       set.status = 500;
       return { error: err.message };
     }

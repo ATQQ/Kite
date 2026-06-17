@@ -33,3 +33,20 @@ export const deployments = sqliteTable('deployments', {
   startTime: text('start_time').notNull(),
   endTime: text('end_time'),
 });
+
+// 操作日志（运维审计）表
+export const auditLogs = sqliteTable('audit_logs', {
+  id: text('id').primaryKey(),
+  createdAt: text('created_at').notNull(),
+  actor: text('actor').notNull(),              // 当前固定 'admin'
+  actorIp: text('actor_ip'),
+  action: text('action').notNull(),            // e.g. 'project.update'
+  targetType: text('target_type'),             // 'project' | 'settings' | 'migration' | 'auth'
+  targetId: text('target_id'),
+  targetName: text('target_name'),
+  before: text('before'),                      // JSON string, nullable
+  after: text('after'),                        // JSON string, nullable
+  summary: text('summary'),
+  status: text('status').notNull(),            // 'success' | 'failed'
+  errorMessage: text('error_message'),
+});

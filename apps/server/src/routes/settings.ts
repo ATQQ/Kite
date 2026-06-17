@@ -2,6 +2,7 @@ import { Elysia, t } from 'elysia';
 import { db } from '../db/index.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { writeAudit, diffFields } from '../lib/audit.js';
 
 const verifyAdminToken = (headers: Record<string, string | undefined>) => {
   const authHeader = headers.authorization;
@@ -31,6 +32,7 @@ export const settingsRoutes = new Elysia()
   .put('/api/settings', async ({ headers, body, set }) => {
     if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
     const allowed = ['webhook_url', 'webhook_events', 'default_deploy_path', 'max_upload_size', 'global_deploy_token'];
+    const beforeAll = await db.settings.getAll();
     const entries: Record<string, string> = {};
     for (const [key, value] of Object.entries(body)) {
       if (allowed.includes(key)) {
@@ -38,6 +40,18 @@ export const settingsRoutes = new Elysia()
       }
     }
     await db.settings.setMany(entries);
+    const afterAll = await db.settings.getAll();
+    const changedKeys = Object.keys(entries);
+    const diff = diffFields(beforeAll as any, afterAll as any, changedKeys);
+    if (Object.keys(diff.after).length > 0) {
+      await writeAudit({ headers }, {
+        action: 'settings.update',
+        targetType: 'settings',
+        before: diff.before,
+        after: diff.after,
+        summary: `更新系统设置：${Object.keys(diff.after).join(', ')}`,
+      });
+    }
     return { success: true, message: 'Settings updated' };
   }, {
     body: t.Object({
@@ -52,6 +66,13 @@ export const settingsRoutes = new Elysia()
     if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
     const { oldToken, newToken } = body;
     if (oldToken !== process.env.ADMIN_TOKEN) {
+      await writeAudit({ headers }, {
+        action: 'admin_token.change',
+        targetType: 'admin_token',
+        summary: '修改 Admin Token 失败（旧 Token 不正确）',
+        status: 'failed',
+        errorMessage: '旧 Token 不正确',
+      });
       set.status = 400;
       return { error: '旧 Token 不正确' };
     }
@@ -72,6 +93,13 @@ export const settingsRoutes = new Elysia()
     await fs.writeFile(envPath, lines.join('\n') + '\n');
     // Update runtime env
     process.env.ADMIN_TOKEN = newToken;
+    await writeAudit({ headers }, {
+      action: 'admin_token.change',
+      targetType: 'admin_token',
+      before: { adminToken: '****' },
+      after: { adminToken: '****' },
+      summary: '修改 Admin Token',
+    });
     return { success: true, message: 'Token 已更新，下次登录请使用新 Token' };
   }, {
     body: t.Object({

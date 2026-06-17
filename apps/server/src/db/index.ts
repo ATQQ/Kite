@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { createClient } from '@libsql/client';
 import { drizzle } from 'drizzle-orm/libsql';
 import * as schema from './schema.js';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, and, gte, lte } from 'drizzle-orm';
 import path from 'node:path';
 
 // Initialize libSQL client (using local file for now, can be swapped to Turso URL)
@@ -75,6 +75,27 @@ const initDb = async () => {
       end_time TEXT
     );
   `);
+
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS audit_logs (
+      id TEXT PRIMARY KEY,
+      created_at TEXT NOT NULL,
+      actor TEXT NOT NULL,
+      actor_ip TEXT,
+      action TEXT NOT NULL,
+      target_type TEXT,
+      target_id TEXT,
+      target_name TEXT,
+      before TEXT,
+      after TEXT,
+      summary TEXT,
+      status TEXT NOT NULL,
+      error_message TEXT
+    );
+  `);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);`);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);`);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_audit_logs_target_id ON audit_logs(target_id);`);
 
   // Seed a demo project on first run (no existing projects)
   if (process.env.KITE_SEED_DEMO_PROJECT !== 'false') {
@@ -213,6 +234,94 @@ export const db = {
     async findAll() {
       await ensureDbReady();
       return await ormDb.select().from(schema.deployments).orderBy(desc(schema.deployments.startTime));
+    },
+    async countByProject(projectId: string) {
+      await ensureDbReady();
+      const result = await client.execute({
+        sql: 'SELECT COUNT(*) as count FROM deployments WHERE project_id = ?',
+        args: [projectId]
+      });
+      return Number(result.rows[0]?.count ?? 0);
+    }
+  },
+  auditLogs: {
+    async create(data: {
+      action: string;
+      actor?: string;
+      actorIp?: string | null;
+      targetType?: string | null;
+      targetId?: string | null;
+      targetName?: string | null;
+      before?: string | null;
+      after?: string | null;
+      summary?: string | null;
+      status?: 'success' | 'failed';
+      errorMessage?: string | null;
+    }) {
+      await ensureDbReady();
+      const row = {
+        id: randomUUID(),
+        createdAt: new Date().toISOString(),
+        actor: data.actor || 'admin',
+        actorIp: data.actorIp ?? null,
+        action: data.action,
+        targetType: data.targetType ?? null,
+        targetId: data.targetId ?? null,
+        targetName: data.targetName ?? null,
+        before: data.before ?? null,
+        after: data.after ?? null,
+        summary: data.summary ?? null,
+        status: data.status || 'success',
+        errorMessage: data.errorMessage ?? null,
+      };
+      await ormDb.insert(schema.auditLogs).values(row);
+      return row;
+    },
+    async findById(id: string) {
+      await ensureDbReady();
+      const result = await ormDb.select().from(schema.auditLogs).where(eq(schema.auditLogs.id, id)).limit(1);
+      return result[0] || null;
+    },
+    async list(filters: {
+      action?: string;
+      targetId?: string;
+      targetType?: string;
+      from?: string;
+      to?: string;
+      limit?: number;
+      offset?: number;
+    } = {}) {
+      await ensureDbReady();
+      const conds: any[] = [];
+      if (filters.action) conds.push(eq(schema.auditLogs.action, filters.action));
+      if (filters.targetId) conds.push(eq(schema.auditLogs.targetId, filters.targetId));
+      if (filters.targetType) conds.push(eq(schema.auditLogs.targetType, filters.targetType));
+      if (filters.from) conds.push(gte(schema.auditLogs.createdAt, filters.from));
+      if (filters.to) conds.push(lte(schema.auditLogs.createdAt, filters.to));
+
+      const limit = Math.min(Math.max(filters.limit ?? 50, 1), 200);
+      const offset = Math.max(filters.offset ?? 0, 0);
+
+      const baseQuery = ormDb.select().from(schema.auditLogs);
+      const query = conds.length > 0 ? baseQuery.where(and(...conds)) : baseQuery;
+      const rows = await query.orderBy(desc(schema.auditLogs.createdAt)).limit(limit).offset(offset);
+
+      // Count total separately (avoid pulling all rows just to count)
+      const whereParts: string[] = [];
+      const whereArgs: any[] = [];
+      if (filters.action) { whereParts.push('action = ?'); whereArgs.push(filters.action); }
+      if (filters.targetId) { whereParts.push('target_id = ?'); whereArgs.push(filters.targetId); }
+      if (filters.targetType) { whereParts.push('target_type = ?'); whereArgs.push(filters.targetType); }
+      if (filters.from) { whereParts.push('created_at >= ?'); whereArgs.push(filters.from); }
+      if (filters.to) { whereParts.push('created_at <= ?'); whereArgs.push(filters.to); }
+      const whereSql = whereParts.length ? `WHERE ${whereParts.join(' AND ')}` : '';
+      const totalRes = await client.execute({
+        sql: `SELECT COUNT(*) as count FROM audit_logs ${whereSql}`,
+        args: whereArgs
+      });
+      const total = Number(totalRes.rows[0]?.count ?? 0);
+
+      return { rows, total, limit, offset };
     }
   }
 };

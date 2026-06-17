@@ -38,6 +38,11 @@ const routes = [
         component: () => import('../views/LogBoard.vue')
       },
       {
+        path: 'audit',
+        name: 'AuditLog',
+        component: () => import('../views/AuditLog.vue')
+      },
+      {
         path: 'settings',
         name: 'Settings',
         component: () => import('../views/Settings.vue')
