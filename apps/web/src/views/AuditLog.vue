@@ -104,19 +104,6 @@ function resetFilters() {
   filterAction.value = ''
   filterTargetId.value = ''
   filterTargetType.value = ''
-  offset.value = 0
-  router.replace({ query: {} })
-  load()
-}
-
-function applyFilters() {
-  offset.value = 0
-  const q: Record<string, string> = {}
-  if (filterAction.value) q.action = filterAction.value
-  if (filterTargetId.value) q.targetId = filterTargetId.value
-  if (filterTargetType.value) q.targetType = filterTargetType.value
-  router.replace({ query: q })
-  load()
 }
 
 function nextPage() {
@@ -147,11 +134,27 @@ onMounted(() => {
   load()
 })
 
+// Auto-apply filters when any of them changes (with debounce for text inputs).
+let debounceTimer: ReturnType<typeof setTimeout> | null = null
+watch([filterAction, filterTargetId, filterTargetType], ([action], [prevAction]) => {
+  if (debounceTimer) clearTimeout(debounceTimer)
+  // Action 是下拉，立即触发；targetId/targetType 是文本输入，debounce 300ms
+  const isTextChange = action === prevAction
+  const delay = isTextChange ? 300 : 0
+  debounceTimer = setTimeout(() => {
+    offset.value = 0
+    const q: Record<string, string> = {}
+    if (filterAction.value) q.action = filterAction.value
+    if (filterTargetId.value) q.targetId = filterTargetId.value
+    if (filterTargetType.value) q.targetType = filterTargetType.value
+    router.replace({ query: q })
+    load()
+  }, delay)
+})
+
 watch(() => route.query.targetId, (tid) => {
   if (typeof tid === 'string' && tid !== filterTargetId.value) {
     filterTargetId.value = tid
-    offset.value = 0
-    load()
   }
 })
 </script>
@@ -211,15 +214,15 @@ watch(() => route.query.targetId, (tid) => {
             class="w-full bg-base border border-border rounded px-3 py-2 text-sm text-textMain focus:border-primary focus:outline-none"
           />
         </div>
-        <div class="flex items-end gap-2">
-          <button
-            @click="applyFilters"
-            class="flex-1 px-3 py-2 bg-primary text-white rounded text-sm hover:bg-primary/80 transition-colors"
-          >应用</button>
+        <div class="flex items-end">
           <button
             @click="resetFilters"
-            class="px-3 py-2 bg-base border border-border text-textMuted rounded text-sm hover:border-textMuted transition-colors"
-          >重置</button>
+            :disabled="!filterAction && !filterTargetId && !filterTargetType"
+            class="w-full px-3 py-2 bg-base border border-border text-textMuted rounded text-sm hover:border-textMuted hover:text-textMain transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+          >
+            <X class="w-3.5 h-3.5" />
+            清空筛选
+          </button>
         </div>
       </div>
     </div>

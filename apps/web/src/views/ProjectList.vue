@@ -3,9 +3,11 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useProjectStore } from '../store/project'
 import { Plus, MoreVertical, Server, Clock, ScrollText } from 'lucide-vue-next'
+import { useToast } from '../composables/useToast'
 
 const projectStore = useProjectStore()
 const router = useRouter()
+const toast = useToast()
 
 onMounted(() => {
   projectStore.fetchProjects()
@@ -20,8 +22,9 @@ const createProject = async () => {
   if (success) {
     showCreateModal.value = false
     newProject.value = { name: '', description: '', destPath: '', env: '' }
+    toast.success('项目创建成功')
   } else {
-    alert('创建失败，请稍后重试')
+    toast.error('创建失败', '请稍后重试')
   }
 }
 

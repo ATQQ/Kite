@@ -3,10 +3,13 @@ import { computed, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useProjectStore } from '../store/project'
 import { ArrowLeft, Save, Key, Copy, RefreshCw, Trash2, CheckCircle2, TerminalSquare, FolderOpen, AlertTriangle, XCircle, ScrollText } from 'lucide-vue-next'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
+import { useToast } from '../composables/useToast'
 
 const route = useRoute()
 const router = useRouter()
 const projectStore = useProjectStore()
+const toast = useToast()
 
 const projectId = route.params.id as string
 const project = computed(() => projectStore.getProjectById(projectId))
@@ -38,7 +41,7 @@ onMounted(async () => {
 
 const saveConfig = async () => {
   await projectStore.updateProject(projectId, formData.value)
-  alert('配置已保存')
+  toast.success('配置已保存')
 }
 
 const copyToken = () => {
@@ -78,10 +81,22 @@ const configFilesExamples = [
   { label: '混合配置', files: ['dist/**/*', 'server.js', 'config/*.json'] },
 ]
 
-const refreshToken = async () => {
-  if (confirm('重新生成 Token 将导致旧 Token 立即失效，是否继续？')) {
+const showRefreshTokenModal = ref(false)
+const isRefreshingToken = ref(false)
+const refreshToken = () => {
+  showRefreshTokenModal.value = true
+}
+const confirmRefreshToken = async () => {
+  isRefreshingToken.value = true
+  try {
     await projectStore.generateToken(projectId)
     isTokenVisible.value = true
+    showRefreshTokenModal.value = false
+    toast.success('Token 已重新生成', '旧 Token 已立即失效')
+  } catch (e: any) {
+    toast.error('Token 重置失败', e?.message)
+  } finally {
+    isRefreshingToken.value = false
   }
 }
 
@@ -516,5 +531,16 @@ async function confirmDelete() {
         </div>
       </div>
     </div>
+
+    <ConfirmDialog
+      v-model:open="showRefreshTokenModal"
+      tone="warning"
+      title="重新生成项目 Token？"
+      message="旧 Token 将立即失效。所有正在使用旧 Token 的 CLI / Webhook 调用都会被拒绝，请记得同步更新。"
+      confirm-text="重新生成"
+      cancel-text="取消"
+      :loading="isRefreshingToken"
+      @confirm="confirmRefreshToken"
+    />
   </div>
 </template>

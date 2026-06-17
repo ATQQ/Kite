@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { Database, Download, Upload, RefreshCw, CheckCircle2, AlertTriangle, FileArchive, Loader2 } from 'lucide-vue-next'
 import { useProjectStore } from '../store/project'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
 
 interface MigrationProject {
   id: string
@@ -154,9 +155,21 @@ async function handleImport() {
     return
   }
   if (importStrategy.value === 'overwrite') {
-    const ok = window.confirm('Overwrite 策略会覆盖同 ID 的现有项目/设置/部署日志，确认继续吗？')
-    if (!ok) return
+    showOverwriteConfirm.value = true
+    return
   }
+  await doImport()
+}
+
+const showOverwriteConfirm = ref(false)
+
+async function confirmOverwriteImport() {
+  showOverwriteConfirm.value = false
+  await doImport()
+}
+
+async function doImport() {
+  if (!importFile.value) return
   isImporting.value = true
   try {
     const formData = new FormData()
@@ -457,5 +470,16 @@ onMounted(loadProjects)
         </div>
       </div>
     </div>
+
+    <ConfirmDialog
+      v-model:open="showOverwriteConfirm"
+      tone="danger"
+      title="确认使用 Overwrite 策略导入？"
+      message="Overwrite 策略会覆盖同 ID 的现有项目、设置与部署日志。此操作不可撤销，请确认你已备份当前数据。"
+      confirm-text="确认覆盖导入"
+      cancel-text="取消"
+      :loading="isImporting"
+      @confirm="confirmOverwriteImport"
+    />
   </div>
 </template>
