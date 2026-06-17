@@ -2,7 +2,7 @@
 import { computed, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useProjectStore } from '../store/project'
-import { ArrowLeft, Save, Key, Copy, RefreshCw, Trash2, CheckCircle2, TerminalSquare, FolderOpen } from 'lucide-vue-next'
+import { ArrowLeft, Save, Key, Copy, RefreshCw, Trash2, CheckCircle2, TerminalSquare, FolderOpen, AlertTriangle, XCircle } from 'lucide-vue-next'
 
 const route = useRoute()
 const router = useRouter()
@@ -85,14 +85,48 @@ const refreshToken = async () => {
   }
 }
 
-const removeProject = async () => {
-  if (confirm(`确定要永久删除项目 ${project.value?.name} 吗？此操作不可恢复。`)) {
+const showDeleteModal = ref(false)
+const deleteConfirmText = ref('')
+const isDeleting = ref(false)
+const deleteError = ref('')
+
+const expectedConfirmName = computed(() => project.value?.name?.trim() || '')
+const canConfirmDelete = computed(() =>
+  !isDeleting.value &&
+  expectedConfirmName.value.length > 0 &&
+  deleteConfirmText.value.trim() === expectedConfirmName.value
+)
+
+function openDeleteModal() {
+  deleteConfirmText.value = ''
+  deleteError.value = ''
+  isDeleting.value = false
+  showDeleteModal.value = true
+}
+
+function closeDeleteModal() {
+  if (isDeleting.value) return
+  showDeleteModal.value = false
+  deleteConfirmText.value = ''
+  deleteError.value = ''
+}
+
+async function confirmDelete() {
+  if (!canConfirmDelete.value) return
+  isDeleting.value = true
+  deleteError.value = ''
+  try {
     const success = await projectStore.removeProject(projectId)
     if (success) {
+      showDeleteModal.value = false
       router.replace('/projects')
     } else {
-      alert('删除失败，请稍后重试')
+      deleteError.value = '删除失败，请稍后重试'
     }
+  } catch (e: any) {
+    deleteError.value = e?.message || '删除失败，请稍后重试'
+  } finally {
+    isDeleting.value = false
   }
 }
 </script>
@@ -373,15 +407,107 @@ const removeProject = async () => {
             <Trash2 class="w-4 h-4 mr-2" />
             危险操作区
           </h3>
-          <div class="mt-4 flex items-center justify-between">
-            <p class="text-sm text-textMuted">删除该项目将清空所有配置与日志，且不可恢复。</p>
-            <button @click="removeProject" class="px-4 py-2 bg-danger/10 hover:bg-danger text-danger hover:text-white border border-danger/20 hover:border-danger rounded-md transition-colors text-sm font-medium">
+          <div class="mt-4 flex items-start justify-between gap-4">
+            <div class="text-sm text-textMuted space-y-1">
+              <p>删除该项目将同时清空数据库中的项目配置与全部部署历史日志，且不可恢复。</p>
+              <p class="text-textMuted/80">部署目录中的实际文件不会被删除，需要时请手动清理。</p>
+            </div>
+            <button @click="openDeleteModal" class="shrink-0 px-4 py-2 bg-danger/10 hover:bg-danger text-danger hover:text-white border border-danger/20 hover:border-danger rounded-md transition-colors text-sm font-medium">
               删除项目
             </button>
           </div>
         </div>
       </div>
-      
+
+    </div>
+
+    <!-- Delete Confirmation Modal -->
+    <div
+      v-if="showDeleteModal"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      @click.self="closeDeleteModal"
+    >
+      <div class="bg-panel border border-danger/30 rounded-xl w-full max-w-lg p-6 shadow-2xl">
+        <div class="flex items-start space-x-3 mb-5">
+          <div class="p-2 rounded-lg bg-danger/10 border border-danger/20 shrink-0">
+            <AlertTriangle class="w-5 h-5 text-danger" />
+          </div>
+          <div class="flex-1 min-w-0">
+            <h2 class="text-lg font-semibold text-textMain">确认删除项目</h2>
+            <p class="text-sm text-textMuted mt-1">
+              即将删除项目
+              <span class="font-mono text-textMain">{{ project?.name }}</span>
+              （<span class="font-mono text-textMuted">{{ projectId }}</span>），此操作不可恢复。
+            </p>
+          </div>
+        </div>
+
+        <div class="space-y-3 mb-5">
+          <div class="bg-danger/5 border border-danger/20 rounded-lg p-3">
+            <p class="text-xs font-medium text-danger mb-2 flex items-center">
+              <XCircle class="w-3.5 h-3.5 mr-1.5" />
+              将被永久删除的内容
+            </p>
+            <ul class="text-xs text-textMain/90 space-y-1 list-disc list-inside marker:text-danger/60">
+              <li>该项目在数据库中的配置（名称、描述、部署目录、部署脚本、Token、环境标识等）</li>
+              <li>该项目的<span class="font-medium">全部部署历史日志</span>（部署日志面板中将不再可见）</li>
+            </ul>
+          </div>
+
+          <div class="bg-success/5 border border-success/20 rounded-lg p-3">
+            <p class="text-xs font-medium text-success mb-2 flex items-center">
+              <CheckCircle2 class="w-3.5 h-3.5 mr-1.5" />
+              不会被删除的内容
+            </p>
+            <ul class="text-xs text-textMain/90 space-y-1 list-disc list-inside marker:text-success/60">
+              <li>
+                部署目录
+                <code class="font-mono text-textMain bg-base px-1 py-0.5 rounded text-[11px]">{{ project?.destPath || '—' }}</code>
+                下的所有实际文件
+              </li>
+              <li>其他项目的数据、全局设置、Admin Token</li>
+              <li>项目源码中的 <code class="font-mono text-textMain bg-base px-1 py-0.5 rounded text-[11px]">kite.config*.json</code> / <code class="font-mono text-textMain bg-base px-1 py-0.5 rounded text-[11px]">.env.local</code> 等本地配置</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="mb-2">
+          <label class="block text-sm font-medium text-textMuted mb-1.5">
+            请输入项目名称
+            <span class="font-mono text-textMain">{{ expectedConfirmName }}</span>
+            以确认删除
+          </label>
+          <input
+            v-model="deleteConfirmText"
+            type="text"
+            :disabled="isDeleting"
+            :placeholder="expectedConfirmName"
+            class="w-full bg-base border border-border rounded-md px-3 py-2 text-textMain font-mono focus:outline-none focus:border-danger focus:ring-1 focus:ring-danger/50 transition-all text-sm disabled:opacity-60"
+            @keydown.enter.prevent="confirmDelete"
+          />
+        </div>
+
+        <p v-if="deleteError" class="text-xs text-danger mt-2">{{ deleteError }}</p>
+
+        <div class="mt-6 flex justify-end space-x-3">
+          <button
+            @click="closeDeleteModal"
+            :disabled="isDeleting"
+            class="px-4 py-2 text-sm font-medium text-textMuted hover:text-textMain dark:hover:bg-white/5 hover:bg-black/5 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            取消
+          </button>
+          <button
+            @click="confirmDelete"
+            :disabled="!canConfirmDelete"
+            class="px-4 py-2 text-sm font-medium bg-danger text-white rounded-md hover:bg-danger/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center"
+          >
+            <RefreshCw v-if="isDeleting" class="w-4 h-4 mr-2 animate-spin" />
+            <Trash2 v-else class="w-4 h-4 mr-2" />
+            {{ isDeleting ? '正在删除...' : '永久删除' }}
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
