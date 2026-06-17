@@ -1,4 +1,7 @@
 import { db } from '../db/index.js';
+import { moduleLogger, isValidTraceId } from './logger.js';
+
+const auditLog = moduleLogger('audit');
 
 // 字段脱敏白名单（不区分大小写）
 const SENSITIVE_KEYS = new Set([
@@ -79,6 +82,7 @@ export interface AuditContext {
   headers?: Record<string, string | undefined>;
   request?: Request;
   ip?: string;
+  traceId?: string;
 }
 
 export interface AuditPayload {
@@ -103,8 +107,19 @@ function pickIp(ctx: AuditContext): string | null {
   return null;
 }
 
+function pickTraceIdFromCtx(ctx: AuditContext): string | null {
+  if (isValidTraceId(ctx.traceId)) return ctx.traceId;
+  const h = ctx.headers || {};
+  const raw = h['x-kite-trace-id'] || h['X-Kite-Trace-Id' as any];
+  return isValidTraceId(raw) ? raw : null;
+}
+
 // Best-effort audit writer. Must never throw to caller.
 export async function writeAudit(ctx: AuditContext, payload: AuditPayload): Promise<void> {
+  const traceId = pickTraceIdFromCtx(ctx);
+  const summary = traceId && payload.summary
+    ? `[trace:${traceId.slice(0, 8)}] ${payload.summary}`
+    : payload.summary ?? null;
   try {
     await db.auditLogs.create({
       action: payload.action,
@@ -113,12 +128,22 @@ export async function writeAudit(ctx: AuditContext, payload: AuditPayload): Prom
       targetName: payload.targetName ?? null,
       before: serialize(payload.before),
       after: serialize(payload.after),
-      summary: payload.summary ?? null,
+      summary,
       status: payload.status || 'success',
       errorMessage: payload.errorMessage ?? null,
       actorIp: pickIp(ctx),
     });
+    auditLog.info(
+      {
+        traceId: traceId || undefined,
+        action: payload.action,
+        targetType: payload.targetType,
+        targetId: payload.targetId,
+        status: payload.status || 'success',
+      },
+      payload.summary || payload.action,
+    );
   } catch (err) {
-    console.error('[Audit] Failed to write audit log:', err);
+    auditLog.error({ traceId: traceId || undefined, err }, 'failed to write audit log');
   }
 }

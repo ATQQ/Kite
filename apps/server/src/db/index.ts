@@ -33,6 +33,10 @@ const initDb = async () => {
     await client.execute(`ALTER TABLE projects ADD COLUMN env TEXT`);
   } catch { /* column already exists */ }
 
+  // Migration: add clean_mode / protect_paths for rollback feature (#1)
+  try { await client.execute(`ALTER TABLE projects ADD COLUMN clean_mode TEXT`); } catch { /* exists */ }
+  try { await client.execute(`ALTER TABLE projects ADD COLUMN protect_paths TEXT`); } catch { /* exists */ }
+
   await client.execute(`
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
@@ -61,6 +65,10 @@ const initDb = async () => {
     sql: `INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`,
     args: ['global_deploy_token', '']
   });
+  await client.execute({
+    sql: `INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`,
+    args: ['artifact_keep_n', '10']
+  });
 
   await client.execute(`
     CREATE TABLE IF NOT EXISTS deployments (
@@ -75,6 +83,13 @@ const initDb = async () => {
       end_time TEXT
     );
   `);
+
+  // Migration: rollback artifact columns (#1)
+  try { await client.execute(`ALTER TABLE deployments ADD COLUMN artifact_path TEXT`); } catch { /* exists */ }
+  try { await client.execute(`ALTER TABLE deployments ADD COLUMN artifact_size INTEGER`); } catch { /* exists */ }
+  try { await client.execute(`ALTER TABLE deployments ADD COLUMN rollback_of TEXT`); } catch { /* exists */ }
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_deployments_artifact_path ON deployments(artifact_path);`);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_deployments_project_id ON deployments(project_id);`);
 
   await client.execute(`
     CREATE TABLE IF NOT EXISTS audit_logs (
@@ -217,7 +232,7 @@ export const db = {
       await ensureDbReady();
       const newLog = {
         ...data,
-        id: randomUUID(),
+        id: data.id || randomUUID(),
       };
       await ormDb.insert(schema.deployments).values(newLog);
       return newLog;
@@ -242,6 +257,26 @@ export const db = {
         args: [projectId]
       });
       return Number(result.rows[0]?.count ?? 0);
+    },
+    async findByProject(projectId: string) {
+      await ensureDbReady();
+      return await ormDb.select().from(schema.deployments)
+        .where(eq(schema.deployments.projectId, projectId))
+        .orderBy(desc(schema.deployments.startTime));
+    },
+    async countByArtifactPath(artifactPath: string) {
+      await ensureDbReady();
+      const result = await client.execute({
+        sql: 'SELECT COUNT(*) as count FROM deployments WHERE artifact_path = ?',
+        args: [artifactPath]
+      });
+      return Number(result.rows[0]?.count ?? 0);
+    },
+    async clearArtifactPath(id: string) {
+      await ensureDbReady();
+      await ormDb.update(schema.deployments)
+        .set({ artifactPath: null, artifactSize: null })
+        .where(eq(schema.deployments.id, id));
     }
   },
   auditLogs: {

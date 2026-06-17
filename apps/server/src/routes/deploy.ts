@@ -6,6 +6,9 @@ import { db } from '../db/index.js';
 import { randomUUID } from 'node:crypto';
 import { spawn, writeFile } from '../runtime.js';
 import { writeAudit, diffFields, sanitize } from '../lib/audit.js';
+import { moduleLogger, pickTraceId } from '../lib/logger.js';
+
+const deployLog = moduleLogger('deploy');
 
 // Token verification helper
 const verifyAdminToken = (headers: Record<string, string | undefined>) => {
@@ -265,7 +268,13 @@ export const deployRoutes = new Elysia()
         } catch { /* ignore invalid env */ }
       }
 
-      console.log(`[Deploy] Received zip for project: ${projectId}`);
+      const reqTraceId = pickTraceId(headers as Record<string, string | undefined>);
+      const deployTraceId = reqTraceId || randomUUID();
+      const reqLog = deployLog.child({ traceId: deployTraceId, projectId });
+      reqLog.info('received zip for deploy');
+
+      // 将 traceId 注入子进程 env，方便 pre/post 脚本里串联日志
+      deployEnv = { ...(deployEnv || {}), KITE_DEPLOY_TRACE_ID: deployTraceId };
 
       // 优先使用 CLI push 时间作为 startTime；非法或缺失时回退到 server 当前时间
       let startTimeIso = new Date().toISOString();
@@ -277,7 +286,8 @@ export const deployRoutes = new Elysia()
         }
       }
 
-      const deployLog = await db.deployments.insert({
+      const deploymentRow = await db.deployments.insert({
+        id: deployTraceId,
         projectId: project.id,
         projectName: project.name,
         status: 'running',
@@ -291,8 +301,8 @@ export const deployRoutes = new Elysia()
       let fullOutput = '';
       const appendLog = async (text: string) => {
         fullOutput += text + '\n';
-        await db.deployments.update(deployLog.id, { output: fullOutput });
-        broadcastToSubscribers(deployLog.id, 'log', text);
+        await db.deployments.update(deploymentRow.id, { output: fullOutput });
+        broadcastToSubscribers(deploymentRow.id, 'log', text);
       };
 
       // Stream NDJSON response to CLI
@@ -368,11 +378,12 @@ export const deployRoutes = new Elysia()
             sendEvent(controller, 'log', { data: successMsg });
             await appendLog(successMsg);
 
-            await db.deployments.update(deployLog.id, { status: 'success', duration: durationStr, endTime: new Date().toISOString() });
+            await db.deployments.update(deploymentRow.id, { status: 'success', duration: durationStr, endTime: new Date().toISOString() });
             await db.projects.update(project.id, { status: 'success' });
 
-            sendEvent(controller, 'status', { status: 'success', duration: durationStr, deployId: deployLog.id });
-            broadcastToSubscribers(deployLog.id, 'status', JSON.stringify({ status: 'success', duration: durationStr }));
+            sendEvent(controller, 'status', { status: 'success', duration: durationStr, deployId: deploymentRow.id });
+            broadcastToSubscribers(deploymentRow.id, 'status', JSON.stringify({ status: 'success', duration: durationStr }));
+            reqLog.info({ ms: Date.now() - startTime }, 'deploy success');
 
           } catch (err: any) {
             const durationStr = ((Date.now() - startTime) / 1000).toFixed(1) + 's';
@@ -380,11 +391,12 @@ export const deployRoutes = new Elysia()
             sendEvent(controller, 'log', { data: failMsg });
             await appendLog(failMsg);
 
-            await db.deployments.update(deployLog.id, { status: 'failed', duration: durationStr, endTime: new Date().toISOString() });
+            await db.deployments.update(deploymentRow.id, { status: 'failed', duration: durationStr, endTime: new Date().toISOString() });
             await db.projects.update(project.id, { status: 'failed' });
 
-            sendEvent(controller, 'status', { status: 'failed', duration: durationStr, deployId: deployLog.id });
-            broadcastToSubscribers(deployLog.id, 'status', JSON.stringify({ status: 'failed', duration: durationStr }));
+            sendEvent(controller, 'status', { status: 'failed', duration: durationStr, deployId: deploymentRow.id });
+            broadcastToSubscribers(deploymentRow.id, 'status', JSON.stringify({ status: 'failed', duration: durationStr }));
+            reqLog.error({ ms: Date.now() - startTime, err: { name: err?.name, message: err?.message } }, 'deploy failed');
           } finally {
             controller.close();
           }
@@ -399,7 +411,7 @@ export const deployRoutes = new Elysia()
       });
 
     } catch (error: any) {
-      console.error('[Deploy] Error:', error);
+      deployLog.error({ err: { name: error?.name, message: error?.message, stack: error?.stack } }, 'unhandled error in /api/deploy/upload');
       set.status = 500;
       return { error: error.message };
     }

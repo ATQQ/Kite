@@ -11,6 +11,8 @@ export const projects = sqliteTable('projects', {
   postDeployScript: text('post_deploy_script'),
   env: text('env'),                          // optional environment label, e.g. 'test', 'prod'
   status: text('status').default('idle'), // 'idle' | 'success' | 'failed' | 'running'
+  cleanMode: text('clean_mode'),             // 'merge' (default/null) | 'clean' | 'clean-all'
+  protectPaths: text('protect_paths'),       // JSON string array of globs
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 });
@@ -27,11 +29,14 @@ export const deployments = sqliteTable('deployments', {
   projectId: text('project_id').references(() => projects.id).notNull(),
   projectName: text('project_name').notNull(),
   status: text('status').notNull(), // 'success' | 'failed' | 'running'
-  triggerSource: text('trigger_source').notNull(), // 'cli' | 'webhook'
+  triggerSource: text('trigger_source').notNull(), // 'cli' | 'webhook' | 'rollback'
   duration: text('duration'),
   output: text('output'),
   startTime: text('start_time').notNull(),
   endTime: text('end_time'),
+  artifactPath: text('artifact_path'),         // absolute path to ~/.kite/deployments/<projectId>/artifacts/<id>.zip (null = unarchived / cleaned)
+  artifactSize: integer('artifact_size'),      // bytes
+  rollbackOf: text('rollback_of'),             // source deployment id when this run is a rollback
 });
 
 // 操作日志（运维审计）表

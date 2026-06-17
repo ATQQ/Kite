@@ -3,7 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useProjectStore } from '../store/project'
 import { useThemeStore } from '../store/theme'
 import type { ThemeMode } from '../store/theme'
-import { Settings, Server, Key, HardDrive, Webhook, Save, CheckCircle2, AlertTriangle, Activity, Sun, Moon, Monitor, RefreshCw, Eye, EyeOff, Copy } from 'lucide-vue-next'
+import { Settings, Server, Key, HardDrive, Webhook, Save, CheckCircle2, AlertTriangle, Activity, Sun, Moon, Monitor, RefreshCw, Eye, EyeOff, Copy, HeartPulse } from 'lucide-vue-next'
 
 const projectStore = useProjectStore()
 const themeStore = useThemeStore()
@@ -17,6 +17,29 @@ const themeOptions: { value: ThemeMode; label: string; icon: typeof Sun; desc: s
 
 // System status
 const status = ref<any>(null)
+const health = ref<any>(null)
+const healthLoading = ref(false)
+
+const refreshHealth = async () => {
+  healthLoading.value = true
+  health.value = await projectStore.fetchHealthDetail()
+  healthLoading.value = false
+}
+
+const formatBytes = (bytes: number | null) => {
+  if (bytes == null) return 'N/A'
+  const gb = bytes / 1024 / 1024 / 1024
+  if (gb >= 1) return `${gb.toFixed(2)} GB`
+  const mb = bytes / 1024 / 1024
+  return `${mb.toFixed(1)} MB`
+}
+
+const diskTone = (pct: number | null) => {
+  if (pct == null) return 'text-textMuted'
+  if (pct >= 95) return 'text-danger'
+  if (pct >= 85) return 'text-yellow-400'
+  return 'text-success'
+}
 
 // Settings form
 const form = ref({
@@ -68,6 +91,7 @@ onMounted(async () => {
     form.value.max_upload_size = settingsData.max_upload_size || '50'
     form.value.global_deploy_token = settingsData.global_deploy_token || ''
   }
+  refreshHealth()
 })
 
 const saveSettings = async () => {
@@ -174,6 +198,81 @@ const toggleEvent = (event: string) => {
           </div>
         </div>
         <div v-else class="text-textMuted text-sm py-4 text-center">加载中...</div>
+      </div>
+    </div>
+
+    <!-- Health Card -->
+    <div class="bg-panel border border-border rounded-xl shadow-sm overflow-hidden">
+      <div class="px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02] flex items-center justify-between">
+        <div>
+          <h2 class="text-lg font-semibold text-textMain flex items-center">
+            <HeartPulse class="w-5 h-5 mr-2 text-primary" />
+            服务健康
+          </h2>
+          <p class="text-sm text-textMuted mt-1">实时探活 DB、磁盘、Kite Home 与最近部署成功率，等同 <code class="font-mono text-primary">kite doctor</code> 远端段。</p>
+        </div>
+        <button
+          @click="refreshHealth"
+          :disabled="healthLoading"
+          class="flex items-center px-3 py-2 bg-base border border-border rounded-md text-textMuted hover:text-textMain hover:border-primary/50 transition-all disabled:opacity-50"
+          type="button"
+        >
+          <RefreshCw class="w-4 h-4" :class="healthLoading ? 'animate-spin' : ''" />
+        </button>
+      </div>
+      <div class="p-6">
+        <div v-if="!health && !healthLoading" class="text-textMuted text-sm py-4 text-center">暂无数据</div>
+        <div v-else-if="healthLoading && !health" class="text-textMuted text-sm py-4 text-center">加载中...</div>
+        <div v-else class="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div class="bg-base border border-border rounded-lg p-4">
+            <div class="flex items-center justify-between mb-1">
+              <p class="text-xs text-textMuted">DB</p>
+              <CheckCircle2 v-if="health.db?.ok" class="w-4 h-4 text-success" />
+              <AlertTriangle v-else class="w-4 h-4 text-danger" />
+            </div>
+            <p class="text-sm font-mono text-textMain truncate" :title="health.db?.path">{{ health.db?.path || 'N/A' }}</p>
+            <p class="text-xs text-textMuted mt-1">{{ health.db?.latencyMs ?? '?' }} ms</p>
+          </div>
+          <div class="bg-base border border-border rounded-lg p-4">
+            <div class="flex items-center justify-between mb-1">
+              <p class="text-xs text-textMuted">Kite Home</p>
+              <CheckCircle2 v-if="health.kiteHome?.writable" class="w-4 h-4 text-success" />
+              <AlertTriangle v-else class="w-4 h-4 text-danger" />
+            </div>
+            <p class="text-sm font-mono text-textMain truncate" :title="health.kiteHome?.path">{{ health.kiteHome?.path || 'N/A' }}</p>
+            <p class="text-xs text-textMuted mt-1">tmp {{ health.kiteHome?.tmpWritable ? '可写' : '不可写' }}</p>
+          </div>
+          <div class="bg-base border border-border rounded-lg p-4">
+            <div class="flex items-center justify-between mb-1">
+              <p class="text-xs text-textMuted">磁盘</p>
+              <Activity class="w-4 h-4" :class="diskTone(health.disk?.percentUsed)" />
+            </div>
+            <p class="text-sm font-mono" :class="diskTone(health.disk?.percentUsed)">
+              {{ health.disk?.percentUsed != null ? health.disk.percentUsed + '%' : 'N/A' }}
+            </p>
+            <p class="text-xs text-textMuted mt-1">{{ formatBytes(health.disk?.freeBytes) }} 可用</p>
+          </div>
+          <div class="bg-base border border-border rounded-lg p-4">
+            <div class="flex items-center justify-between mb-1">
+              <p class="text-xs text-textMuted">最近 5 次部署</p>
+              <Activity class="w-4 h-4 text-primary" />
+            </div>
+            <p class="text-sm font-mono text-textMain">
+              {{ health.deploy?.successRate != null ? Math.round(health.deploy.successRate * 100) + '%' : 'N/A' }}
+            </p>
+            <p class="text-xs text-textMuted mt-1">共 {{ health.deploy?.last5?.length ?? 0 }} 条</p>
+          </div>
+          <div class="bg-base border border-border rounded-lg p-4 col-span-2">
+            <p class="text-xs text-textMuted mb-1">Runtime</p>
+            <p class="text-sm font-mono text-textMain">{{ health.runtime?.name }} {{ health.runtime?.version }}</p>
+            <p class="text-xs text-textMuted mt-1">uptime {{ health.uptimeSec }}s · 内存 RSS {{ health.memoryMB?.rss }}MB / Heap {{ health.memoryMB?.heapUsed }}MB</p>
+          </div>
+          <div class="bg-base border border-border rounded-lg p-4 col-span-2">
+            <p class="text-xs text-textMuted mb-1">服务器时间</p>
+            <p class="text-sm font-mono text-textMain">{{ health.serverTime }}</p>
+            <p class="text-xs text-textMuted mt-1">version {{ health.version }}</p>
+          </div>
+        </div>
       </div>
     </div>
 

@@ -14,6 +14,7 @@ import { parseIgnoreOption } from './ignore.js';
 import { runExport } from './export.js';
 import { runImport } from './import.js';
 import { runVerify } from './verify.js';
+import { runDoctor } from './doctor.js';
 
 // @ts-ignore
 const cli = cac('kite');
@@ -726,8 +727,14 @@ cli.command('push', 'Push and deploy project')
       });
       if (result.success) {
         console.log(chalk.green(`\nDeployed successfully! (${result.duration})`));
+        if (result.traceId) {
+          console.log(chalk.gray(`  trace: ${result.traceId}`));
+        }
       } else {
         console.error(chalk.red('\nDeployment failed'));
+        if (result.traceId) {
+          console.error(chalk.gray(`  trace: ${result.traceId}`));
+        }
         process.exit(1);
       }
 
@@ -801,6 +808,19 @@ cli.command('verify', 'Verify ~/.kite migration integrity (db, deploy paths, tok
       });
     } catch (error: any) {
       console.error(chalk.red(`\nVerify failed: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+cli.command('doctor', 'Run local + remote health diagnostics')
+  .option('--server <url>', 'Override server URL (defaults to global config / KITE_SERVER_URL)')
+  .option('--token <token>', 'Override admin token (defaults to global config / KITE_TOKEN)')
+  .action(async (options: any) => {
+    try {
+      const code = await runDoctor({ server: options.server, token: options.token });
+      process.exit(code);
+    } catch (error: any) {
+      console.error(chalk.red(`\nDoctor failed: ${error.message}`));
       process.exit(1);
     }
   });

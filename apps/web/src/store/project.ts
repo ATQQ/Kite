@@ -218,6 +218,15 @@ export const useProjectStore = defineStore('project', () => {
     }
   }
 
+  async function fetchHealthDetail() {
+    try {
+      return await apiFetch('/health/detail')
+    } catch (e) {
+      console.error('Failed to fetch health detail', e)
+      return null
+    }
+  }
+
   async function fetchAuditLogs(params: {
     action?: string
     targetId?: string
@@ -289,6 +298,7 @@ export const useProjectStore = defineStore('project', () => {
     updateSettings,
     changeAdminToken,
     fetchSystemStatus,
+    fetchHealthDetail,
     fetchAuditLogs,
     fetchAuditLogDetail,
     fetchFiles,

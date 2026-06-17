@@ -501,6 +501,38 @@ kite verify --check-server   # 额外探活 serverUrl（要求 server 已启动�
 
 退出码：错误 = `exit 1`；仅警告 = `exit 0`；纯通过 = `exit 0`。
 
+### 健康诊断 (kite doctor)
+
+`kite doctor` 在 `kite verify` 之外补一份「实时探活」视角：本地段验 Node 版本/Kite Home/磁盘/全局配置，远端段直接打 `/api/health` 与 `/api/health/detail`。
+
+```bash
+kite doctor                                           # 用全局配置的 serverUrl + token
+kite doctor --server http://localhost:5431            # 仅探活，不需要 token
+kite doctor --server http://localhost:5431 --token x  # 显式覆盖
+```
+
+输出示例：
+
+```
+[Local]
+  ✓ Node.js                v24.16.0 (>=18 required)
+  ✓ Kite Home              ~/.kite
+  ✓ Disk free              276.68 GB free (40% used)
+  ✓ Global config          serverUrl=http://127.0.0.1:5431
+
+[Remote http://127.0.0.1:5431]
+  ✓ GET /api/health        status=ok uptime=239s version=dev
+  ✓ Remote DB              ~/.kite/kite.db (14.3ms)
+  ✓ Remote Kite Home       ~/.kite writable=true tmp=true
+  ✓ Remote Disk            276.68 GB free (40% used)
+  ! Recent deploys         last 0 success rate=n/a
+  ✓ Remote runtime         node v24.16.0 uptime=239s
+
+Doctor: passed with warnings.
+```
+
+退出码：任一 `✗` → `exit 1`；只有 `!` → `exit 0`；全 `✓` → `exit 0`。Web 后台的 *系统设置 → 服务健康* 卡片调用同一接口（仅远端段）。
+
 ### 典型迁移流程
 
 ```bash
