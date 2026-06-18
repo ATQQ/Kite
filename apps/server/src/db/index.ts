@@ -90,6 +90,7 @@ const initDb = async () => {
   try { await client.execute(`ALTER TABLE deployments ADD COLUMN rollback_of TEXT`); } catch { /* exists */ }
   await client.execute(`CREATE INDEX IF NOT EXISTS idx_deployments_artifact_path ON deployments(artifact_path);`);
   await client.execute(`CREATE INDEX IF NOT EXISTS idx_deployments_project_id ON deployments(project_id);`);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_deployments_start_time ON deployments(start_time);`);
 
   await client.execute(`
     CREATE TABLE IF NOT EXISTS audit_logs (
@@ -358,5 +359,63 @@ export const db = {
 
       return { rows, total, limit, offset };
     }
-  }
+  },
+  stats: {
+    async heatmap(sinceIso: string) {
+      await ensureDbReady();
+      const res = await client.execute({
+        sql: `SELECT substr(start_time, 1, 10) AS d, COUNT(*) AS c
+              FROM deployments
+              WHERE start_time >= ?
+              GROUP BY d`,
+        args: [sinceIso],
+      });
+      return res.rows.map(r => ({ date: String(r.d), count: Number(r.c) }));
+    },
+    async successRate(sinceIso: string) {
+      await ensureDbReady();
+      const res = await client.execute({
+        sql: `SELECT substr(start_time, 1, 10) AS d,
+                     SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) AS s,
+                     SUM(CASE WHEN status='failed'  THEN 1 ELSE 0 END) AS f,
+                     COUNT(*) AS total
+              FROM deployments
+              WHERE start_time >= ? AND status IN ('success','failed')
+              GROUP BY d`,
+        args: [sinceIso],
+      });
+      return res.rows.map(r => ({
+        date: String(r.d),
+        success: Number(r.s),
+        failed: Number(r.f),
+        total: Number(r.total),
+      }));
+    },
+    async failureTop(sinceIso: string, limit: number, minTotal: number) {
+      await ensureDbReady();
+      const res = await client.execute({
+        sql: `SELECT project_id AS pid, project_name AS pname,
+                     SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed,
+                     COUNT(*) AS total
+              FROM deployments
+              WHERE start_time >= ? AND status IN ('success','failed')
+              GROUP BY project_id, project_name
+              HAVING total >= ?
+              ORDER BY (CAST(failed AS REAL) / total) DESC, failed DESC
+              LIMIT ?`,
+        args: [sinceIso, minTotal, limit],
+      });
+      return res.rows.map(r => {
+        const failed = Number(r.failed);
+        const total = Number(r.total);
+        return {
+          projectId: String(r.pid),
+          projectName: String(r.pname),
+          failed,
+          total,
+          rate: total > 0 ? Math.round((failed / total) * 10000) / 10000 : 0,
+        };
+      });
+    },
+  },
 };

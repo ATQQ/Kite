@@ -203,6 +203,33 @@ export const useProjectStore = defineStore('project', () => {
     })
   }
 
+  async function fetchHeatmap(days = 30) {
+    try {
+      return await apiFetch(`/stats/heatmap?days=${days}`)
+    } catch (e) {
+      console.error('Failed to fetch heatmap', e)
+      return { days, cells: [] }
+    }
+  }
+
+  async function fetchSuccessRate(days = 14) {
+    try {
+      return await apiFetch(`/stats/success-rate?days=${days}`)
+    } catch (e) {
+      console.error('Failed to fetch success rate', e)
+      return { days, points: [] }
+    }
+  }
+
+  async function fetchFailureTop(limit = 5, days = 30) {
+    try {
+      return await apiFetch(`/stats/failure-top?limit=${limit}&days=${days}`)
+    } catch (e) {
+      console.error('Failed to fetch failure top', e)
+      return { days, limit, minTotal: 3, items: [] }
+    }
+  }
+
   async function generateToken(id: string) {
     try {
       const data = await apiFetch(`/projects/${id}/token`, { method: 'POST' })
@@ -363,6 +390,9 @@ export const useProjectStore = defineStore('project', () => {
     fetchDiskProjects,
     fetchProjectArtifacts,
     deleteArtifact,
+    fetchHeatmap,
+    fetchSuccessRate,
+    fetchFailureTop,
     generateToken,
     fetchSettings,
     updateSettings,

@@ -1,16 +1,39 @@
 <script setup lang="ts">
-import { onMounted, computed } from 'vue'
+import { onMounted, computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useProjectStore } from '../store/project'
-import { Activity, Server, Clock, AlertCircle } from 'lucide-vue-next'
+import { Activity, Server, Clock, AlertCircle, AlertTriangle } from 'lucide-vue-next'
 import { APP_VERSION } from '../constants'
+import DeployHeatmap from '../components/DeployHeatmap.vue'
+import SuccessRateChart from '../components/SuccessRateChart.vue'
 
 const projectStore = useProjectStore()
 const router = useRouter()
 
-onMounted(() => {
+interface HeatmapCell { date: string; count: number }
+interface RatePoint { date: string; success: number; failed: number; total: number; rate: number | null }
+interface FailureItem { projectId: string; projectName: string; failed: number; total: number; rate: number }
+
+const heatmapCells = ref<HeatmapCell[]>([])
+const ratePoints = ref<RatePoint[]>([])
+const failureItems = ref<FailureItem[]>([])
+const statsLoading = ref(true)
+
+onMounted(async () => {
   projectStore.fetchProjects()
   projectStore.fetchLogs()
+  try {
+    const [hm, sr, ft] = await Promise.all([
+      projectStore.fetchHeatmap(30),
+      projectStore.fetchSuccessRate(14),
+      projectStore.fetchFailureTop(5, 30),
+    ])
+    heatmapCells.value = hm?.cells ?? []
+    ratePoints.value = sr?.points ?? []
+    failureItems.value = ft?.items ?? []
+  } finally {
+    statsLoading.value = false
+  }
 })
 
 const recentLogs = computed(() => projectStore.logs.slice(0, 5))
@@ -48,6 +71,14 @@ const stats = computed(() => [
 function goToLog(id: string) {
   router.push({ name: 'LogBoard', query: { id } })
 }
+
+function goToProject(id: string) {
+  router.push({ name: 'ProjectDetail', params: { id } })
+}
+
+function pctText(n: number): string {
+  return `${(n * 100).toFixed(1)}%`
+}
 </script>
 
 <template>
@@ -73,6 +104,46 @@ function goToLog(id: string) {
           <p class="text-sm font-medium text-textMuted">{{ stat.label }}</p>
           <p class="text-3xl font-bold text-textMain mt-1 font-mono">{{ stat.value }}</p>
         </div>
+      </div>
+    </div>
+
+    <!-- Heatmap -->
+    <DeployHeatmap :cells="heatmapCells" :loading="statsLoading" />
+
+    <!-- Success rate + Failure TopN -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div class="lg:col-span-2">
+        <SuccessRateChart :points="ratePoints" :loading="statsLoading" />
+      </div>
+      <div class="bg-panel border border-border rounded-xl p-6 shadow-sm">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <h3 class="text-base font-semibold text-textMain flex items-center gap-2">
+              <AlertTriangle class="w-4 h-4 text-danger" />
+              失败率 TopN
+            </h3>
+            <p class="text-xs text-textMuted mt-1">近 30 天 · 至少 3 次部署</p>
+          </div>
+        </div>
+        <div v-if="statsLoading" class="text-sm text-textMuted py-6 text-center">加载中…</div>
+        <ul v-else-if="failureItems.length" class="space-y-2">
+          <li
+            v-for="item in failureItems"
+            :key="item.projectId"
+            @click="goToProject(item.projectId)"
+            class="flex items-center justify-between px-3 py-2 rounded-lg border border-border bg-base hover:border-primary/40 cursor-pointer transition-colors"
+          >
+            <div class="min-w-0">
+              <p class="text-sm font-medium text-textMain truncate">{{ item.projectName }}</p>
+              <p class="text-xs text-textMuted font-mono mt-0.5">{{ item.failed }} / {{ item.total }} 失败</p>
+            </div>
+            <span
+              class="font-mono text-sm shrink-0 ml-3"
+              :class="item.rate >= 0.5 ? 'text-danger' : item.rate >= 0.2 ? 'text-yellow-400' : 'text-textMuted'"
+            >{{ pctText(item.rate) }}</span>
+          </li>
+        </ul>
+        <div v-else class="text-sm text-textMuted py-6 text-center">暂无符合条件的项目</div>
       </div>
     </div>
 
