@@ -185,6 +185,24 @@ export const useProjectStore = defineStore('project', () => {
     })
   }
 
+  async function fetchDiskOverview() {
+    return await apiFetch('/disk/overview')
+  }
+
+  async function fetchDiskProjects() {
+    return await apiFetch('/disk/projects')
+  }
+
+  async function fetchProjectArtifacts(projectId: string) {
+    return await apiFetch(`/disk/projects/${projectId}/artifacts`)
+  }
+
+  async function deleteArtifact(deployId: string) {
+    return await apiFetch(`/disk/artifacts/${deployId}`, {
+      method: 'DELETE',
+    })
+  }
+
   async function generateToken(id: string) {
     try {
       const data = await apiFetch(`/projects/${id}/token`, { method: 'POST' })
@@ -341,6 +359,10 @@ export const useProjectStore = defineStore('project', () => {
     removeProject,
     cleanPreview,
     rollbackDeployment,
+    fetchDiskOverview,
+    fetchDiskProjects,
+    fetchProjectArtifacts,
+    deleteArtifact,
     generateToken,
     fetchSettings,
     updateSettings,

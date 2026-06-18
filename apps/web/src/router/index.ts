@@ -48,6 +48,11 @@ const routes = [
         component: () => import('../views/Settings.vue')
       },
       {
+        path: 'storage',
+        name: 'Storage',
+        component: () => import('../views/Storage.vue')
+      },
+      {
         path: 'migration',
         name: 'Migration',
         component: () => import('../views/Migration.vue')

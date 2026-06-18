@@ -4,6 +4,7 @@ import { settingsRoutes } from "./routes/settings.js";
 import { migrationRoutes } from "./routes/migration.js";
 import { auditRoutes } from "./routes/audit.js";
 import { healthRoutes } from "./routes/health.js";
+import { diskRoutes } from "./routes/disk.js";
 import { staticPlugin } from "./static.js";
 import { ensureDbReady } from "./db/index.js";
 import { moduleLogger, pickTraceId, rootLogger } from "./lib/logger.js";
@@ -54,6 +55,7 @@ const app = new Elysia({ adapter })
   .use(migrationRoutes)
   .use(auditRoutes)
   .use(healthRoutes)
+  .use(diskRoutes)
   .use(staticPlugin);
 
 if (isBun) {
