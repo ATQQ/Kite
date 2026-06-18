@@ -15,6 +15,7 @@ import { runExport } from './export.js';
 import { runImport } from './import.js';
 import { runVerify } from './verify.js';
 import { runDoctor } from './doctor.js';
+import { runList, runStatus, runLogs, runRollback } from './ops.js';
 
 // @ts-ignore
 const cli = cac('kite');
@@ -821,6 +822,87 @@ cli.command('doctor', 'Run local + remote health diagnostics')
       process.exit(code);
     } catch (error: any) {
       console.error(chalk.red(`\nDoctor failed: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+cli.command('list', 'List projects on Kite server')
+  .option('--server <url>', 'Override server URL')
+  .option('--token <token>', 'Override admin token')
+  .option('--env <name>', 'Filter by project env')
+  .option('--json', 'Output JSON (no colors)')
+  .action(async (options: any) => {
+    try {
+      const code = await runList({ server: options.server, token: options.token, env: options.env, json: options.json });
+      process.exit(code);
+    } catch (error: any) {
+      console.error(chalk.red(`\nList failed: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+cli.command('status [projectId]', 'Show recent deployments of a project')
+  .option('--server <url>', 'Override server URL')
+  .option('--token <token>', 'Override admin token')
+  .option('--env <name>', 'Pick kite.config.<env>.json when no projectId given')
+  .option('--limit <n>', 'Number of deployments to show (default 5, max 50)')
+  .option('--json', 'Output JSON')
+  .action(async (projectId: string | undefined, options: any) => {
+    try {
+      const code = await runStatus(projectId, {
+        server: options.server,
+        token: options.token,
+        env: options.env,
+        limit: options.limit ? Number(options.limit) : undefined,
+        json: options.json,
+      });
+      process.exit(code);
+    } catch (error: any) {
+      console.error(chalk.red(`\nStatus failed: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+cli.command('logs <deployId>', 'Print deployment logs (or follow live with -f)')
+  .option('--server <url>', 'Override server URL')
+  .option('--token <token>', 'Override admin token')
+  .option('-f, --follow', 'Stream live logs via SSE until the deployment finishes')
+  .option('--json', 'Output JSON (only without --follow)')
+  .action(async (deployId: string, options: any) => {
+    try {
+      const code = await runLogs(deployId, {
+        server: options.server,
+        token: options.token,
+        follow: options.follow,
+        json: options.json,
+      });
+      process.exit(code);
+    } catch (error: any) {
+      console.error(chalk.red(`\nLogs failed: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+cli.command('rollback [projectId]', 'Rollback a project to a previous successful deployment')
+  .option('--server <url>', 'Override server URL')
+  .option('--token <token>', 'Override admin token (admin required)')
+  .option('--env <name>', 'Pick kite.config.<env>.json when no projectId given')
+  .option('--to <deployId>', 'Target deployment to roll back to (default: previous success)')
+  .option('--yes', 'Skip interactive confirmation (required in non-TTY)')
+  .option('--json', 'Output JSON on success')
+  .action(async (projectId: string | undefined, options: any) => {
+    try {
+      const code = await runRollback(projectId, {
+        server: options.server,
+        token: options.token,
+        env: options.env,
+        to: options.to,
+        yes: options.yes,
+        json: options.json,
+      });
+      process.exit(code);
+    } catch (error: any) {
+      console.error(chalk.red(`\nRollback failed: ${error.message}`));
       process.exit(1);
     }
   });

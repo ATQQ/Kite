@@ -568,3 +568,33 @@ kite push
 - **导入**：选择本地 zip，选择冲突策略（`skip-existing` / `merge` / `overwrite`）和是否还原 artifacts；`overwrite` 会触发二次确认并要求请求头带 `X-Confirm-Overwrite: yes`。导入完成后面板会展示项目 / 设置 / 部署日志 / artifacts 的逐项摘要。
 
 Web 端与 CLI 共用 `manifest.schemaVersion=1` 的 zip 格式，因此 CLI 导出的包可以从 Web 导入，反之亦然。与 CLI `kite import` 不同的是，Web 导入不会改写 `~/.kite/config.json`（server 本身就是目标端），开发机的 `kite push` 仍按现有 token 工作。
+
+## 十四、运维命令 (kite list / status / logs / rollback)
+
+无需打开浏览器即可查看服务端上项目、部署历史和实时日志，并支持回滚到上一个成功版本。这些命令均通过 admin token 与 server 通信，配置链与 `kite doctor` 一致：`--token` 参数 > `KITE_TOKEN` > `~/.kite/config.json` 中的 `token`。
+
+| 命令 | 说明 |
+|------|------|
+| `kite list` | 列出 server 上所有项目（ID / 名称 / env / 状态 / 更新时间）。`--env <name>` 过滤；`--json` 输出 JSON 便于 CI 消费。 |
+| `kite status [projectId]` | 查看指定项目最近若干次部署。不传 `projectId` 时读取当前目录 `kite.config*.json`。`--limit <n>` 默认 5、上限 50；`--json` 输出原始 JSON。 |
+| `kite logs <deployId>` | 打印一次部署的完整输出。加 `-f / --follow` 通过 SSE 实时跟随，直到部署结束（success 退出码 0、failed 退出码 1）。 |
+| `kite rollback [projectId]` | 回滚到指定历史部署。`--to <deployId>` 指定目标；不传时自动取最近一次有归档的成功部署。`--yes` 跳过二次确认（非 TTY 必填）。 |
+
+```bash
+# 列出所有项目，过滤生产环境
+kite list --env prod
+
+# 查看某项目最近 10 条部署
+kite status proj_abcdef --limit 10
+
+# 实时跟随某次部署的日志（CI 中常用）
+kite logs 1f2a3b4c-... -f
+
+# 一键回滚到上一次成功部署（开发机交互模式）
+kite rollback proj_abcdef
+# CI 中必须显式 --yes，否则退出码 1
+kite rollback proj_abcdef --to 1f2a3b4c-... --yes
+```
+
+> `rollback` 走 server 端 `POST /api/deployments/:id/rollback` 接口，自动复用源部署的归档 zip（Web 管理端「存储」页面的引用计数会保护这些 zip 不被误删）。失败会保留新的 `triggerSource=rollback` 部署记录，可用 `kite logs <newDeployId>` 排查。
+
