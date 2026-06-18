@@ -13,6 +13,8 @@ export interface Project {
   postDeployScript?: string
   token?: string
   env?: string
+  cleanMode?: 'merge' | 'clean' | 'clean-all' | null
+  protectPaths?: string | null
   status: 'running' | 'success' | 'failed' | 'idle'
   updatedAt: string
 }
@@ -27,6 +29,31 @@ export interface DeploymentLog {
   output: string
   startTime: string
   endTime?: string
+  artifactPath?: string | null
+  artifactSize?: number | null
+  rollbackOf?: string | null
+}
+
+export interface CleanPreviewNode {
+  name: string
+  path: string
+  type: 'file' | 'dir'
+  size: number
+  willDelete: boolean
+  children?: CleanPreviewNode[]
+}
+
+export interface CleanPreviewResult {
+  tree: CleanPreviewNode | null
+  summary: {
+    totalFiles: number
+    deleteFiles: number
+    deleteBytes: number
+    protectFiles: number
+    truncated: boolean
+  }
+  mode: 'merge' | 'clean' | 'clean-all'
+  cached?: boolean
 }
 
 export const useProjectStore = defineStore('project', () => {
@@ -68,7 +95,9 @@ export const useProjectStore = defineStore('project', () => {
         destPath: p.deployPath,
         preDeploy: p.preDeployScript,
         postDeploy: p.postDeployScript,
-        env: p.env || ''
+        env: p.env || '',
+        cleanMode: p.cleanMode ?? null,
+        protectPaths: p.protectPaths ?? null,
       }))
     } catch (e) {
       console.error('Failed to fetch projects', e)
@@ -120,12 +149,14 @@ export const useProjectStore = defineStore('project', () => {
     }
     return false
   }
-  async function updateProject(id: string, payload: Partial<Project>) {
+  async function updateProject(id: string, payload: Record<string, any>) {
     try {
       const apiPayload: any = {}
       if (payload.preDeploy !== undefined) apiPayload.preDeployScript = payload.preDeploy
       if (payload.postDeploy !== undefined) apiPayload.postDeployScript = payload.postDeploy
       if (payload.destPath !== undefined) apiPayload.deployPath = payload.destPath
+      if (payload.cleanMode !== undefined) apiPayload.cleanMode = payload.cleanMode
+      if (payload.protectPaths !== undefined) apiPayload.protectPaths = payload.protectPaths
 
       const data = await apiFetch(`/projects/${id}`, {
         method: 'PUT',
@@ -136,7 +167,22 @@ export const useProjectStore = defineStore('project', () => {
       }
     } catch (e) {
       console.error('Failed to update project', e)
+      throw e
     }
+  }
+
+  async function cleanPreview(id: string, payload: { cleanMode: 'clean' | 'clean-all'; protectPaths: string[] }) {
+    return await apiFetch(`/projects/${id}/clean-preview`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }) as CleanPreviewResult
+  }
+
+  async function rollbackDeployment(deploymentId: string) {
+    return await apiFetch(`/deployments/${deploymentId}/rollback`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    })
   }
 
   async function generateToken(id: string) {
@@ -293,6 +339,8 @@ export const useProjectStore = defineStore('project', () => {
     addProject,
     updateProject,
     removeProject,
+    cleanPreview,
+    rollbackDeployment,
     generateToken,
     fetchSettings,
     updateSettings,

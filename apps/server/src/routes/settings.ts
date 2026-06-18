@@ -31,7 +31,7 @@ export const settingsRoutes = new Elysia()
   })
   .put('/api/settings', async ({ headers, body, set }) => {
     if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
-    const allowed = ['webhook_url', 'webhook_events', 'default_deploy_path', 'max_upload_size', 'global_deploy_token'];
+    const allowed = ['webhook_url', 'webhook_events', 'default_deploy_path', 'max_upload_size', 'global_deploy_token', 'artifact_keep_n'];
     const beforeAll = await db.settings.getAll();
     const entries: Record<string, string> = {};
     for (const [key, value] of Object.entries(body)) {
@@ -60,6 +60,7 @@ export const settingsRoutes = new Elysia()
       default_deploy_path: t.Optional(t.String()),
       max_upload_size: t.Optional(t.String()),
       global_deploy_token: t.Optional(t.String()),
+      artifact_keep_n: t.Optional(t.String()),
     })
   })
   .post('/api/settings/token', async ({ headers, body, set }) => {

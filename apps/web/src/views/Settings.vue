@@ -47,7 +47,8 @@ const form = ref({
   webhook_events: [] as string[],
   default_deploy_path: '',
   max_upload_size: '50',
-  global_deploy_token: ''
+  global_deploy_token: '',
+  artifact_keep_n: '10',
 })
 
 const showGlobalToken = ref(false)
@@ -90,6 +91,7 @@ onMounted(async () => {
     form.value.default_deploy_path = settingsData.default_deploy_path || ''
     form.value.max_upload_size = settingsData.max_upload_size || '50'
     form.value.global_deploy_token = settingsData.global_deploy_token || ''
+    form.value.artifact_keep_n = settingsData.artifact_keep_n || '10'
   }
   refreshHealth()
 })
@@ -103,6 +105,7 @@ const saveSettings = async () => {
     default_deploy_path: form.value.default_deploy_path,
     max_upload_size: form.value.max_upload_size,
     global_deploy_token: form.value.global_deploy_token,
+    artifact_keep_n: form.value.artifact_keep_n,
   })
   saveMessage.value = success ? '保存成功' : '保存失败'
   isSaving.value = false
@@ -437,6 +440,21 @@ const toggleEvent = (event: string) => {
             placeholder="50"
           />
           <p class="text-xs text-textMuted mt-2">单次部署上传的 ZIP 文件大小上限。</p>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-textMain mb-2">归档保留份数 (artifact_keep_n)</label>
+          <input
+            v-model="form.artifact_keep_n"
+            type="number"
+            min="1"
+            max="500"
+            class="w-full bg-base border border-border rounded-md px-4 py-3 text-textMain font-mono text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all"
+            placeholder="10"
+          />
+          <p class="text-xs text-textMuted mt-2">
+            每个项目保留最近多少份部署归档 ZIP（位于 <code class="font-mono text-textMain">~/.kite/deployments/&lt;projectId&gt;/artifacts/</code>），超出部分按时间倒序清理。
+            归档保留越多，可回滚的历史越长，占用磁盘也越大。被任何 <code class="font-mono text-textMain">rollback</code> 引用的归档不会被清理。
+          </p>
         </div>
       </div>
     </div>

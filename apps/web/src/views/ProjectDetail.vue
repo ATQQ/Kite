@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useProjectStore } from '../store/project'
-import { ArrowLeft, Save, Key, Copy, RefreshCw, Trash2, CheckCircle2, TerminalSquare, FolderOpen, AlertTriangle, XCircle, ScrollText } from 'lucide-vue-next'
+import { useProjectStore, type CleanPreviewResult } from '../store/project'
+import { ArrowLeft, Save, Key, Copy, RefreshCw, Trash2, CheckCircle2, TerminalSquare, FolderOpen, AlertTriangle, XCircle, ScrollText, Eye, Shield, ShieldAlert, Plus } from 'lucide-vue-next'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
+import CleanPreviewDialog from '../components/CleanPreviewDialog.vue'
 import { useToast } from '../composables/useToast'
 
 const route = useRoute()
@@ -20,6 +21,22 @@ const formData = ref({
   postDeploy: ''
 })
 
+const cleanForm = ref<{
+  cleanMode: 'merge' | 'clean' | 'clean-all'
+  protectPaths: string[]
+}>({
+  cleanMode: 'merge',
+  protectPaths: [],
+})
+const protectInput = ref('')
+const isSavingClean = ref(false)
+const showCleanAllConfirm = ref(false)
+
+const showPreview = ref(false)
+const previewLoading = ref(false)
+const previewError = ref('')
+const previewData = ref<CleanPreviewResult | null>(null)
+
 const isTokenVisible = ref(false)
 const isCopied = ref(false)
 const copiedCommand = ref('')
@@ -34,6 +51,19 @@ onMounted(async () => {
     formData.value.preDeploy = project.value.preDeploy || ''
     formData.value.postDeploy = project.value.postDeploy || ''
     cliEnv.value = project.value.env || ''
+    const rawMode = (project.value as any).cleanMode
+    cleanForm.value.cleanMode = (rawMode === 'clean' || rawMode === 'clean-all') ? rawMode : 'merge'
+    const rawProtect = (project.value as any).protectPaths
+    if (typeof rawProtect === 'string' && rawProtect.length > 0) {
+      try {
+        const parsed = JSON.parse(rawProtect)
+        cleanForm.value.protectPaths = Array.isArray(parsed) ? parsed.filter((s) => typeof s === 'string') : []
+      } catch {
+        cleanForm.value.protectPaths = []
+      }
+    } else {
+      cleanForm.value.protectPaths = []
+    }
   } else {
     router.replace('/projects')
   }
@@ -42,6 +72,65 @@ onMounted(async () => {
 const saveConfig = async () => {
   await projectStore.updateProject(projectId, formData.value)
   toast.success('配置已保存')
+}
+
+function addProtectPath() {
+  const v = protectInput.value.trim()
+  if (!v) return
+  if (cleanForm.value.protectPaths.includes(v)) {
+    protectInput.value = ''
+    return
+  }
+  cleanForm.value.protectPaths.push(v)
+  protectInput.value = ''
+}
+function removeProtectPath(g: string) {
+  cleanForm.value.protectPaths = cleanForm.value.protectPaths.filter(x => x !== g)
+}
+
+async function commitCleanForm() {
+  isSavingClean.value = true
+  try {
+    await projectStore.updateProject(projectId, {
+      cleanMode: cleanForm.value.cleanMode,
+      protectPaths: cleanForm.value.protectPaths.length ? cleanForm.value.protectPaths : null,
+    })
+    toast.success('清理策略已保存', cleanForm.value.cleanMode === 'merge' ? '将沿用合并模式（零破坏）' : `下次部署会按 ${cleanForm.value.cleanMode} 执行`)
+  } catch (e: any) {
+    toast.error('保存失败', e?.message)
+  } finally {
+    isSavingClean.value = false
+    showCleanAllConfirm.value = false
+  }
+}
+
+async function saveCleanConfig() {
+  if (cleanForm.value.cleanMode === 'clean-all') {
+    showCleanAllConfirm.value = true
+    return
+  }
+  await commitCleanForm()
+}
+
+async function openPreview() {
+  if (cleanForm.value.cleanMode === 'merge') {
+    toast.info('merge 模式不会删除任何文件，无需预览')
+    return
+  }
+  showPreview.value = true
+  previewLoading.value = true
+  previewError.value = ''
+  previewData.value = null
+  try {
+    previewData.value = await projectStore.cleanPreview(projectId, {
+      cleanMode: cleanForm.value.cleanMode,
+      protectPaths: cleanForm.value.protectPaths,
+    })
+  } catch (e: any) {
+    previewError.value = e?.message || '预览失败'
+  } finally {
+    previewLoading.value = false
+  }
 }
 
 const copyToken = () => {
@@ -422,6 +511,115 @@ async function confirmDelete() {
         </div>
       </div>
 
+      <!-- Clean Strategy Card -->
+      <div class="bg-panel border border-border rounded-xl shadow-sm overflow-hidden">
+        <div class="px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02]">
+          <h2 class="text-lg font-semibold text-textMain flex items-center">
+            <Shield class="w-5 h-5 mr-2 text-primary" />
+            部署清理策略
+          </h2>
+          <p class="text-sm text-textMuted mt-1">每次部署解压前，对目标目录执行的清理动作。默认 <code class="font-mono text-textMain">merge</code> 沿用旧行为（零破坏）。</p>
+        </div>
+        <div class="p-6 space-y-5">
+          <!-- Mode picker -->
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <label
+              v-for="opt in [
+                { value: 'merge', title: 'merge', desc: '不清理，直接覆盖。旧行为，零破坏。', tone: 'primary' as const },
+                { value: 'clean', title: 'clean', desc: '清空目录，但保留 protectPaths 命中的文件，以及 .kite-* 内部目录。', tone: 'warning' as const },
+                { value: 'clean-all', title: 'clean-all', desc: '清空全部内容（仅保留 .kite-*），protectPaths 也被忽略。', tone: 'danger' as const },
+              ]"
+              :key="opt.value"
+              class="relative flex flex-col p-4 rounded-lg border-2 cursor-pointer transition-all"
+              :class="cleanForm.cleanMode === opt.value
+                ? (opt.tone === 'danger' ? 'border-danger bg-danger/5' : opt.tone === 'warning' ? 'border-yellow-400 bg-yellow-400/5' : 'border-primary bg-primary/5')
+                : 'border-border hover:border-textMuted/50 bg-base'"
+            >
+              <input type="radio" v-model="cleanForm.cleanMode" :value="opt.value" class="sr-only" />
+              <span class="text-sm font-semibold font-mono"
+                :class="opt.tone === 'danger' ? 'text-danger' : opt.tone === 'warning' ? 'text-yellow-400' : 'text-primary'"
+              >{{ opt.title }}</span>
+              <span class="text-xs text-textMuted mt-1 leading-relaxed">{{ opt.desc }}</span>
+              <CheckCircle2
+                v-if="cleanForm.cleanMode === opt.value"
+                class="absolute top-2 right-2 w-4 h-4"
+                :class="opt.tone === 'danger' ? 'text-danger' : opt.tone === 'warning' ? 'text-yellow-400' : 'text-primary'"
+              />
+            </label>
+          </div>
+
+          <!-- ProtectPaths -->
+          <div v-if="cleanForm.cleanMode === 'clean'">
+            <label class="block text-sm font-medium text-textMain mb-2">保护路径 (protectPaths)</label>
+            <p class="text-xs text-textMuted mb-2">
+              支持 minimatch glob，命中文件不会被删除。<code class="font-mono text-textMain">.kite-*</code> 始终自动保护，无需添加。
+              常见示例：<code class="font-mono text-textMain">uploads/**</code>、<code class="font-mono text-textMain">.env</code>、<code class="font-mono text-textMain">config/*.json</code>
+            </p>
+            <div class="flex gap-2 mb-3">
+              <input
+                v-model="protectInput"
+                type="text"
+                class="flex-1 bg-base border border-border rounded-md px-3 py-2 text-textMain font-mono text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all"
+                placeholder="如 uploads/**"
+                @keydown.enter.prevent="addProtectPath"
+              />
+              <button
+                @click="addProtectPath"
+                type="button"
+                class="flex items-center px-3 bg-base border border-border hover:border-primary/50 hover:text-primary text-textMain rounded-md transition-all"
+              >
+                <Plus class="w-4 h-4 mr-1" />
+                添加
+              </button>
+            </div>
+            <div v-if="cleanForm.protectPaths.length" class="flex flex-wrap gap-2">
+              <span
+                v-for="g in cleanForm.protectPaths"
+                :key="g"
+                class="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-success/10 border border-success/30 text-success font-mono"
+              >
+                {{ g }}
+                <button @click="removeProtectPath(g)" type="button" class="text-success/70 hover:text-danger">
+                  <XCircle class="w-3 h-3" />
+                </button>
+              </span>
+            </div>
+            <p v-else class="text-xs text-textMuted italic">尚未设置保护路径。clean 模式下会清空整个部署目录（仅保留 .kite-*）。</p>
+          </div>
+
+          <div v-if="cleanForm.cleanMode === 'clean-all'" class="p-3 rounded-md bg-danger/10 border border-danger/30 flex items-start gap-2">
+            <ShieldAlert class="w-4 h-4 text-danger shrink-0 mt-0.5" />
+            <p class="text-xs text-danger leading-relaxed">
+              clean-all 会清空目标目录下<strong>所有</strong>文件（仅保留 <code class="font-mono bg-base px-1 rounded">.kite-*</code>）。protectPaths 设置在此模式下被忽略。请务必通过预览确认。
+            </p>
+          </div>
+
+          <!-- Action bar -->
+          <div class="pt-3 border-t border-border flex items-center justify-end gap-3">
+            <button
+              v-if="cleanForm.cleanMode !== 'merge'"
+              @click="openPreview"
+              type="button"
+              class="flex items-center px-4 py-2 text-sm bg-base border border-border hover:border-yellow-400/50 hover:text-yellow-400 text-textMain rounded-md transition-all"
+            >
+              <Eye class="w-4 h-4 mr-2" />
+              预览将删除的文件 (DRY-RUN)
+            </button>
+            <button
+              @click="saveCleanConfig"
+              :disabled="isSavingClean"
+              class="flex items-center px-6 py-2.5 text-sm font-medium rounded-md transition-all disabled:opacity-50"
+              :class="cleanForm.cleanMode === 'clean-all'
+                ? 'bg-danger text-white hover:bg-danger/90'
+                : 'bg-primary text-white hover:bg-primary/90 shadow-[0_0_15px_rgba(59,130,246,0.3)]'"
+            >
+              <Save class="w-4 h-4 mr-2" />
+              {{ isSavingClean ? '保存中...' : '保存清理策略' }}
+            </button>
+          </div>
+        </div>
+      </div>
+
       <!-- Danger Zone -->
       <div class="bg-panel border border-danger/20 rounded-xl shadow-sm overflow-hidden">
         <div class="px-6 py-4">
@@ -541,6 +739,28 @@ async function confirmDelete() {
       cancel-text="取消"
       :loading="isRefreshingToken"
       @confirm="confirmRefreshToken"
+    />
+
+    <CleanPreviewDialog
+      v-model:open="showPreview"
+      :loading="previewLoading"
+      :error="previewError"
+      :preview="previewData"
+      :mode="cleanForm.cleanMode === 'merge' ? 'clean' : cleanForm.cleanMode"
+      :protect-paths="cleanForm.protectPaths"
+    />
+
+    <ConfirmDialog
+      v-model:open="showCleanAllConfirm"
+      tone="danger"
+      title="确认启用 clean-all 模式？"
+      message="后续每次部署都会清空部署目录下除 .kite-* 之外的全部内容，protectPaths 在此模式下被忽略。请输入项目名以确认。"
+      confirm-text="启用 clean-all"
+      cancel-text="取消"
+      :require-text="expectedConfirmName"
+      :require-text-hint="`请输入项目名 ${expectedConfirmName} 以确认`"
+      :loading="isSavingClean"
+      @confirm="commitCleanForm"
     />
   </div>
 </template>
