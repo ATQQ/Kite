@@ -349,6 +349,32 @@ export const useProjectStore = defineStore('project', () => {
     }
   }
 
+  async function fetchFsHome() {
+    return await apiFetch('/fs/home') as {
+      home: string
+      cwd: string
+      sep: string
+      roots: string[]
+    }
+  }
+
+  async function fetchFsList(p: string) {
+    return await apiFetch(`/fs/list?path=${encodeURIComponent(p)}`) as {
+      path: string
+      parent: string | null
+      exists: boolean
+      isDir: boolean
+      truncated: boolean
+      entries: Array<{
+        name: string
+        path: string
+        isDir: boolean
+        isHidden: boolean
+        isSymlink: boolean
+      }>
+    }
+  }
+
   async function login(token: string) {
     try {
       const data = await apiFetch('/auth/login', {
@@ -403,6 +429,8 @@ export const useProjectStore = defineStore('project', () => {
     fetchAuditLogDetail,
     fetchFiles,
     fetchFileContent,
+    fetchFsHome,
+    fetchFsList,
     login,
     logout
   }
