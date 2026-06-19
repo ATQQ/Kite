@@ -116,7 +116,7 @@ export const useProjectStore = defineStore('project', () => {
     return projects.value.find(p => p.id === id)
   }
 
-  async function addProject(project: Partial<Project>) {
+  async function addProject(project: Partial<Project>): Promise<{ ok: boolean; error?: string }> {
     try {
       const data = await apiFetch('/projects', {
         method: 'POST',
@@ -129,12 +129,13 @@ export const useProjectStore = defineStore('project', () => {
       })
       if (data.success) {
         await fetchProjects()
-        return true
+        return { ok: true }
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('Failed to add project', e)
+      return { ok: false, error: e?.message }
     }
-    return false
+    return { ok: false }
   }
 
   async function removeProject(id: string) {
@@ -152,6 +153,7 @@ export const useProjectStore = defineStore('project', () => {
   async function updateProject(id: string, payload: Record<string, any>) {
     try {
       const apiPayload: any = {}
+      if (payload.name !== undefined) apiPayload.name = payload.name
       if (payload.preDeploy !== undefined) apiPayload.preDeployScript = payload.preDeploy
       if (payload.postDeploy !== undefined) apiPayload.postDeployScript = payload.postDeploy
       if (payload.destPath !== undefined) apiPayload.deployPath = payload.destPath

@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useProjectStore } from '../store/project'
-import { Plus, MoreVertical, Server, Clock, ScrollText, FolderPlus, Trash2, RefreshCw, CheckCircle2, XCircle, AlertTriangle } from 'lucide-vue-next'
+import { Plus, MoreVertical, Server, Clock, ScrollText, FolderPlus, Trash2, RefreshCw, CheckCircle2, XCircle, AlertTriangle, Pencil, FolderOpen } from 'lucide-vue-next'
 import { useToast } from '../composables/useToast'
 import FolderPickerDialog from '../components/FolderPickerDialog.vue'
 
@@ -19,13 +19,13 @@ const newProject = ref({ name: '', description: '', destPath: '', env: '' })
 
 const createProject = async () => {
   if (!newProject.value.name || !newProject.value.destPath) return
-  const success = await projectStore.addProject(newProject.value)
-  if (success) {
+  const result = await projectStore.addProject(newProject.value)
+  if (result.ok) {
     showCreateModal.value = false
     newProject.value = { name: '', description: '', destPath: '', env: '' }
     toast.success('项目创建成功')
   } else {
-    toast.error('创建失败', '请稍后重试')
+    toast.error('创建失败', result.error || '请稍后重试')
   }
 }
 
@@ -35,6 +35,132 @@ const goToDetail = (id: string) => {
 
 const goToLogs = (id: string) => {
   router.push({ path: '/logs', query: { projectId: id } })
+}
+
+const goToFiles = (id: string) => {
+  router.push(`/projects/${id}/files`)
+}
+
+// ---------- Card dropdown menu ----------
+const openDropdownId = ref<string | null>(null)
+const dropdownStyle = ref<Record<string, string>>({})
+const DROPDOWN_WIDTH = 160
+const DROPDOWN_HEIGHT = 196
+
+async function toggleDropdown(id: string, e: Event) {
+  e.stopPropagation()
+  if (openDropdownId.value === id) {
+    openDropdownId.value = null
+    return
+  }
+  const trigger = e.currentTarget as HTMLElement
+  const rect = trigger.getBoundingClientRect()
+  const viewportH = window.innerHeight
+  const viewportW = window.innerWidth
+  const spaceBelow = viewportH - rect.bottom
+  const openUpward = spaceBelow < DROPDOWN_HEIGHT + 12 && rect.top > DROPDOWN_HEIGHT + 12
+  const top = openUpward
+    ? Math.max(8, rect.top - DROPDOWN_HEIGHT - 4)
+    : Math.min(viewportH - DROPDOWN_HEIGHT - 8, rect.bottom + 4)
+  const left = Math.min(
+    viewportW - DROPDOWN_WIDTH - 8,
+    Math.max(8, rect.right - DROPDOWN_WIDTH),
+  )
+  dropdownStyle.value = {
+    position: 'fixed',
+    top: `${top}px`,
+    left: `${left}px`,
+    width: `${DROPDOWN_WIDTH}px`,
+  }
+  openDropdownId.value = id
+  await nextTick()
+}
+
+function closeDropdown() {
+  openDropdownId.value = null
+}
+
+function handleWindowChange() {
+  if (openDropdownId.value) closeDropdown()
+}
+
+onMounted(() => {
+  window.addEventListener('scroll', handleWindowChange, true)
+  window.addEventListener('resize', handleWindowChange)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('scroll', handleWindowChange, true)
+  window.removeEventListener('resize', handleWindowChange)
+})
+
+// ---------- Rename ----------
+const showRenameModal = ref(false)
+const renameTarget = ref<{ id: string; name: string } | null>(null)
+const renameInput = ref('')
+const isRenaming = ref(false)
+
+function openRename(projectId: string, currentName: string) {
+  closeDropdown()
+  renameTarget.value = { id: projectId, name: currentName }
+  renameInput.value = currentName
+  showRenameModal.value = true
+}
+
+async function confirmRename() {
+  if (!renameTarget.value) return
+  const newName = renameInput.value.trim()
+  if (!newName || newName === renameTarget.value.name) {
+    showRenameModal.value = false
+    return
+  }
+  isRenaming.value = true
+  try {
+    await projectStore.updateProject(renameTarget.value.id, { name: newName })
+    toast.success('重命名成功')
+    showRenameModal.value = false
+  } catch (e: any) {
+    toast.error('重命名失败', e?.message || '请稍后重试')
+  } finally {
+    isRenaming.value = false
+  }
+}
+
+// ---------- Delete ----------
+const showDeleteModal = ref(false)
+const deleteTarget = ref<{ id: string; name: string } | null>(null)
+const deleteConfirmText = ref('')
+const isDeleting = ref(false)
+
+function openDelete(projectId: string, projectName: string) {
+  closeDropdown()
+  deleteTarget.value = { id: projectId, name: projectName }
+  deleteConfirmText.value = ''
+  showDeleteModal.value = true
+}
+
+const canConfirmDelete = computed(() =>
+  deleteTarget.value &&
+  deleteConfirmText.value.trim() === deleteTarget.value.name &&
+  !isDeleting.value
+)
+
+async function confirmDelete() {
+  if (!deleteTarget.value || !canConfirmDelete.value) return
+  isDeleting.value = true
+  try {
+    const success = await projectStore.removeProject(deleteTarget.value.id)
+    if (success) {
+      toast.success('项目已删除')
+      showDeleteModal.value = false
+    } else {
+      toast.error('删除失败')
+    }
+  } catch (e: any) {
+    toast.error('删除失败', e?.message || '请稍后重试')
+  } finally {
+    isDeleting.value = false
+  }
 }
 
 // ---------- Folder picker + batch create ----------
@@ -113,9 +239,11 @@ function removeBatchRow(id: number) {
 }
 
 const existingNames = computed(() => new Set(projectStore.projects.map((p) => p.name)))
+const existingDeployPaths = computed(() => new Set(projectStore.projects.map((p) => p.destPath).filter(Boolean)))
 
 const batchValidation = computed(() => {
-  const seen = new Map<string, number>()
+  const seenNames = new Map<string, number>()
+  const seenPaths = new Map<string, number>()
   const result = new Map<number, string>()
   for (const r of batchRows.value) {
     const name = r.name.trim()
@@ -127,11 +255,21 @@ const batchValidation = computed(() => {
       result.set(r.id, '与已有项目重名')
       continue
     }
-    if (seen.has(name)) {
+    if (seenNames.has(name)) {
       result.set(r.id, '本次批量内重名')
       continue
     }
-    seen.set(name, r.id)
+    seenNames.set(name, r.id)
+    const dp = r.destPath.trim()
+    if (existingDeployPaths.value.has(dp)) {
+      result.set(r.id, '该部署目录已被其他项目占用')
+      continue
+    }
+    if (seenPaths.has(dp)) {
+      result.set(r.id, '本次批量内部署目录重复')
+      continue
+    }
+    seenPaths.set(dp, r.id)
   }
   return result
 })
@@ -161,27 +299,24 @@ async function submitBatch() {
       if (row.status === 'success') continue
       row.status = 'submitting'
       row.errorMsg = undefined
-      try {
-        const ok = await projectStore.addProject({
-          name: row.name.trim(),
-          description: row.description?.trim() || undefined,
-          destPath: row.destPath,
-          env: row.env?.trim() || undefined,
-        })
-        if (ok) {
-          row.status = 'success'
-        } else {
-          row.status = 'failed'
-          row.errorMsg = '创建失败'
-        }
-      } catch (e: any) {
+      const result = await projectStore.addProject({
+        name: row.name.trim(),
+        description: row.description?.trim() || undefined,
+        destPath: row.destPath,
+        env: row.env?.trim() || undefined,
+      })
+      if (result.ok) {
+        row.status = 'success'
+      } else {
         row.status = 'failed'
-        row.errorMsg = e?.message || '创建失败'
+        row.errorMsg = result.error || '创建失败'
       }
     }
     const { success, failed } = batchSummary.value
     if (failed === 0) {
       toast.success(`批量创建完成`, `成功 ${success} 个`)
+      batchRows.value = []
+      showBatchModal.value = false
     } else {
       toast.error(`部分创建失败`, `成功 ${success} 个，失败 ${failed} 个`)
     }
@@ -242,9 +377,11 @@ function closeBatchModal() {
               <p class="text-xs text-textMuted font-mono mt-0.5">{{ project.id }}</p>
             </div>
           </div>
-          <button class="p-1 dark:hover:bg-white/10 hover:bg-black/10 rounded-md transition-colors text-textMuted hover:text-textMain" @click.stop>
-            <MoreVertical class="w-4 h-4" />
-          </button>
+          <div class="relative">
+            <button class="p-1 dark:hover:bg-white/10 hover:bg-black/10 rounded-md transition-colors text-textMuted hover:text-textMain" @click.stop="toggleDropdown(project.id, $event)">
+              <MoreVertical class="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
         <p class="text-sm text-textMuted mb-5 line-clamp-2 min-h-[40px]">
@@ -273,6 +410,48 @@ function closeBatchModal() {
         </div>
       </div>
     </div>
+
+    <!-- Card dropdown (teleported to body to avoid being clipped by card's overflow:hidden) -->
+    <Teleport to="body">
+      <transition name="fade">
+        <div
+          v-if="openDropdownId"
+          class="bg-panel border border-border rounded-lg shadow-xl py-1"
+          :style="{ ...dropdownStyle, zIndex: 60 }"
+          @click.stop
+        >
+          <button
+            class="flex items-center w-full px-3 py-2 text-sm text-textMain hover:bg-white/5 transition-colors"
+            @click="(() => { const p = projectStore.projects.find(x => x.id === openDropdownId); if (p) openRename(p.id, p.name) })()"
+          >
+            <Pencil class="w-3.5 h-3.5 mr-2 text-textMuted" />
+            重命名
+          </button>
+          <button
+            class="flex items-center w-full px-3 py-2 text-sm text-textMain hover:bg-white/5 transition-colors"
+            @click.stop="(() => { const id = openDropdownId; closeDropdown(); if (id) goToFiles(id) })()"
+          >
+            <FolderOpen class="w-3.5 h-3.5 mr-2 text-textMuted" />
+            查看文件
+          </button>
+          <button
+            class="flex items-center w-full px-3 py-2 text-sm text-textMain hover:bg-white/5 transition-colors"
+            @click="(() => { const id = openDropdownId; closeDropdown(); if (id) goToLogs(id) })()"
+          >
+            <ScrollText class="w-3.5 h-3.5 mr-2 text-textMuted" />
+            部署日志
+          </button>
+          <div class="border-t border-border my-1"></div>
+          <button
+            class="flex items-center w-full px-3 py-2 text-sm text-danger hover:bg-danger/10 transition-colors"
+            @click="(() => { const p = projectStore.projects.find(x => x.id === openDropdownId); if (p) openDelete(p.id, p.name) })()"
+          >
+            <Trash2 class="w-3.5 h-3.5 mr-2" />
+            删除项目
+          </button>
+        </div>
+      </transition>
+    </Teleport>
 
     <!-- Create Modal -->
     <div v-if="showCreateModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
@@ -480,5 +659,117 @@ function closeBatchModal() {
         </div>
       </div>
     </div>
+
+    <!-- Dropdown click-outside overlay -->
+    <Teleport to="body">
+      <div
+        v-if="openDropdownId"
+        class="fixed inset-0"
+        style="z-index: 55"
+        @click="closeDropdown"
+      ></div>
+    </Teleport>
+
+    <!-- Rename Modal -->
+    <div
+      v-if="showRenameModal"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      @click.self="showRenameModal = false"
+    >
+      <div class="bg-panel border border-border rounded-xl w-full max-w-md p-6 shadow-2xl">
+        <h2 class="text-lg font-semibold text-textMain mb-4">重命名项目</h2>
+        <div>
+          <label class="block text-sm font-medium text-textMuted mb-1.5">项目名称</label>
+          <input
+            v-model="renameInput"
+            type="text"
+            :disabled="isRenaming"
+            class="w-full bg-base border border-border rounded-md px-3 py-2 text-textMain focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all text-sm disabled:opacity-60"
+            placeholder="输入新的项目名称"
+            @keydown.enter.prevent="confirmRename"
+          />
+        </div>
+        <div class="mt-6 flex justify-end space-x-3">
+          <button
+            @click="showRenameModal = false"
+            :disabled="isRenaming"
+            class="px-4 py-2 text-sm font-medium text-textMuted hover:text-textMain dark:hover:bg-white/5 hover:bg-black/5 rounded-md transition-colors disabled:opacity-50"
+          >取消</button>
+          <button
+            @click="confirmRename"
+            :disabled="isRenaming || !renameInput.trim() || renameInput.trim() === renameTarget?.name"
+            class="px-4 py-2 text-sm font-medium bg-primary text-white rounded-md hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center"
+          >
+            <RefreshCw v-if="isRenaming" class="w-4 h-4 mr-2 animate-spin" />
+            确认
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Delete Modal -->
+    <div
+      v-if="showDeleteModal"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      @click.self="!isDeleting && (showDeleteModal = false)"
+    >
+      <div class="bg-panel border border-danger/30 rounded-xl w-full max-w-lg p-6 shadow-2xl">
+        <div class="flex items-start space-x-3 mb-5">
+          <div class="p-2 rounded-lg bg-danger/10 border border-danger/20 shrink-0">
+            <AlertTriangle class="w-5 h-5 text-danger" />
+          </div>
+          <div>
+            <h2 class="text-lg font-semibold text-textMain">确认删除项目</h2>
+            <p class="text-sm text-textMuted mt-1">
+              即将删除项目
+              <span class="font-mono text-textMain">{{ deleteTarget?.name }}</span>，
+              此操作不可恢复。
+            </p>
+          </div>
+        </div>
+
+        <div class="mb-4">
+          <label class="block text-sm font-medium text-textMuted mb-1.5">
+            请输入项目名称 <span class="font-mono text-textMain">{{ deleteTarget?.name }}</span> 以确认删除
+          </label>
+          <input
+            v-model="deleteConfirmText"
+            type="text"
+            :disabled="isDeleting"
+            :placeholder="deleteTarget?.name"
+            class="w-full bg-base border border-border rounded-md px-3 py-2 text-textMain font-mono focus:outline-none focus:border-danger focus:ring-1 focus:ring-danger/50 transition-all text-sm disabled:opacity-60"
+            @keydown.enter.prevent="confirmDelete"
+          />
+        </div>
+
+        <div class="flex justify-end space-x-3">
+          <button
+            @click="showDeleteModal = false"
+            :disabled="isDeleting"
+            class="px-4 py-2 text-sm font-medium text-textMuted hover:text-textMain dark:hover:bg-white/5 hover:bg-black/5 rounded-md transition-colors disabled:opacity-50"
+          >取消</button>
+          <button
+            @click="confirmDelete"
+            :disabled="!canConfirmDelete"
+            class="px-4 py-2 text-sm font-medium bg-danger text-white rounded-md hover:bg-danger/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center"
+          >
+            <RefreshCw v-if="isDeleting" class="w-4 h-4 mr-2 animate-spin" />
+            <Trash2 v-else class="w-4 h-4 mr-2" />
+            {{ isDeleting ? '正在删除...' : '永久删除' }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
+
+<style scoped>
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.12s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+</style>

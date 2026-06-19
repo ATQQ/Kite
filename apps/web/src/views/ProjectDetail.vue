@@ -181,8 +181,12 @@ function formatStart(s: string) {
 }
 
 const saveConfig = async () => {
-  await projectStore.updateProject(projectId, formData.value)
-  toast.success('配置已保存')
+  try {
+    await projectStore.updateProject(projectId, formData.value)
+    toast.success('配置已保存')
+  } catch (e: any) {
+    toast.error('保存失败', e?.message || '请稍后重试')
+  }
 }
 
 function addProtectPath() {

@@ -102,6 +102,13 @@ export const deployRoutes = new Elysia()
   })
   .post('/api/projects', async ({ headers, body, set }) => {
     if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
+    // Check deployPath uniqueness
+    const allProjects = await db.projects.findAll();
+    const conflict = allProjects.find((p) => p.deployPath === body.deployPath);
+    if (conflict) {
+      set.status = 409;
+      return { error: '该部署目录已被项目占用', conflictProject: conflict.name };
+    }
     const project = await db.projects.create({
       ...body,
       id: 'proj_' + randomUUID().replace(/-/g, '').substring(0, 12),
@@ -137,6 +144,28 @@ export const deployRoutes = new Elysia()
     if (!before) { set.status = 404; return { error: 'Project not found' }; }
     // Normalise / validate clean-mode related fields before write
     const patch: Record<string, any> = { ...body };
+    // Check deployPath uniqueness when it's being changed
+    if (typeof patch.deployPath === 'string') {
+      const allProjects = await db.projects.findAll();
+      const conflict = allProjects.find((p) => p.deployPath === patch.deployPath && p.id !== params.id);
+      if (conflict) {
+        set.status = 409;
+        return { error: '该部署目录已被项目占用', conflictProject: conflict.name };
+      }
+    }
+    // Check name uniqueness when it's being changed
+    if (typeof patch.name === 'string') {
+      if (!patch.name.trim()) {
+        set.status = 400;
+        return { error: '项目名不能为空' };
+      }
+      const allProjects = await db.projects.findAll();
+      const conflict = allProjects.find((p) => p.name === patch.name && p.id !== params.id);
+      if (conflict) {
+        set.status = 409;
+        return { error: '项目名已存在' };
+      }
+    }
     if (typeof patch.cleanMode !== 'undefined') {
       const allowed = ['merge', 'clean', 'clean-all', null, ''];
       if (!allowed.includes(patch.cleanMode)) {
@@ -174,6 +203,7 @@ export const deployRoutes = new Elysia()
     return { success: true, project: after };
   }, {
     body: t.Object({
+      name: t.Optional(t.String()),
       preDeployScript: t.Optional(t.String()),
       postDeployScript: t.Optional(t.String()),
       deployPath: t.Optional(t.String()),
