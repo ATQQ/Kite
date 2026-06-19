@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useProjectStore, type CleanPreviewResult } from '../store/project'
-import { ArrowLeft, Save, Key, Copy, RefreshCw, Trash2, CheckCircle2, TerminalSquare, FolderOpen, AlertTriangle, XCircle, ScrollText, Eye, Shield, ShieldAlert, Plus } from 'lucide-vue-next'
+import { useProjectStore, type CleanPreviewResult, type DeploymentLog } from '../store/project'
+import { ArrowLeft, Save, Key, Copy, RefreshCw, Trash2, CheckCircle2, TerminalSquare, FolderOpen, AlertTriangle, XCircle, ScrollText, Eye, Shield, ShieldAlert, Plus, History, RotateCcw, Archive, ArchiveX } from 'lucide-vue-next'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import CleanPreviewDialog from '../components/CleanPreviewDialog.vue'
 import { useToast } from '../composables/useToast'
@@ -67,7 +67,90 @@ onMounted(async () => {
   } else {
     router.replace('/projects')
   }
+  await loadDeployments()
 })
+
+const deployments = ref<DeploymentLog[]>([])
+const isLoadingDeployments = ref(false)
+const showRollbackConfirm = ref(false)
+const isRollingBack = ref(false)
+const rollbackTarget = ref<DeploymentLog | null>(null)
+
+async function loadDeployments() {
+  isLoadingDeployments.value = true
+  try {
+    await projectStore.fetchLogs()
+    deployments.value = projectStore.logs
+      .filter(l => l.projectId === projectId)
+      .slice(0, 10)
+  } catch (e) {
+    deployments.value = []
+  } finally {
+    isLoadingDeployments.value = false
+  }
+}
+
+function shortId(id?: string | null) {
+  if (!id) return ''
+  return id.slice(0, 8)
+}
+
+function canRollbackLog(log: DeploymentLog): boolean {
+  if (!log) return false
+  if (log.status === 'running') return false
+  if ((log as any).triggerSource === 'rollback') return false
+  return !!log.artifactPath
+}
+
+function rollbackDisabledReason(log: DeploymentLog): string {
+  if (!log) return ''
+  if (log.status === 'running') return '部署进行中，无法回滚'
+  if ((log as any).triggerSource === 'rollback') return '回滚记录不可再被回滚'
+  if (!log.artifactPath) return '该版本归档已被清理或过早，无法回滚'
+  return ''
+}
+
+function openRollback(log: DeploymentLog) {
+  if (!canRollbackLog(log)) return
+  rollbackTarget.value = log
+  showRollbackConfirm.value = true
+}
+
+async function confirmRollback() {
+  const sourceId = rollbackTarget.value?.id
+  if (!sourceId) return
+  isRollingBack.value = true
+  try {
+    const data = await projectStore.rollbackDeployment(sourceId)
+    toast.success('回滚已完成', `新部署 ${shortId(data.deployId)}`)
+    showRollbackConfirm.value = false
+    rollbackTarget.value = null
+    await loadDeployments()
+  } catch (e: any) {
+    toast.error('回滚失败', e?.message || '未知错误')
+  } finally {
+    isRollingBack.value = false
+  }
+}
+
+function goLogBoard(log?: DeploymentLog) {
+  if (log) {
+    router.push({ path: '/logs', query: { id: log.id, projectId } })
+  } else {
+    router.push({ path: '/logs', query: { projectId } })
+  }
+}
+
+function formatStart(s: string) {
+  if (!s) return '—'
+  try {
+    const d = new Date(s)
+    if (isNaN(d.getTime())) return s
+    return d.toLocaleString()
+  } catch {
+    return s
+  }
+}
 
 const saveConfig = async () => {
   await projectStore.updateProject(projectId, formData.value)
@@ -330,6 +413,106 @@ async function confirmDelete() {
               <strong class="text-primary font-medium">CLI 用法:</strong> 将此 Token 保存到全局配置后，<code class="bg-base px-1 py-0.5 rounded font-mono text-xs text-textMain border border-border">kite push</code> 时无需再传。
             </p>
           </div>
+        </div>
+      </div>
+
+      <!-- Deployment History Card -->
+      <div class="bg-panel border border-border rounded-xl shadow-sm overflow-hidden">
+        <div class="px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02] flex items-center justify-between">
+          <div>
+            <h2 class="text-lg font-semibold text-textMain flex items-center">
+              <History class="w-5 h-5 mr-2 text-primary" />
+              部署历史
+            </h2>
+            <p class="text-sm text-textMuted mt-1">最近 10 次部署。点击行查看完整日志，行末可对已归档版本一键回滚。</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <button
+              @click="loadDeployments"
+              :disabled="isLoadingDeployments"
+              class="inline-flex items-center px-3 py-1.5 text-xs font-medium bg-base border border-border hover:border-primary/50 hover:text-primary text-textMuted rounded-md transition-all disabled:opacity-50"
+            >
+              <RefreshCw class="w-3.5 h-3.5 mr-1.5" :class="{ 'animate-spin': isLoadingDeployments }" />
+              刷新
+            </button>
+            <button
+              @click="goLogBoard()"
+              class="inline-flex items-center px-3 py-1.5 text-xs font-medium bg-base border border-border hover:border-primary/50 hover:text-primary text-textMuted rounded-md transition-all"
+            >
+              <ScrollText class="w-3.5 h-3.5 mr-1.5" />
+              查看全部
+            </button>
+          </div>
+        </div>
+
+        <div class="p-6">
+          <div v-if="isLoadingDeployments && deployments.length === 0" class="py-10 text-center text-sm text-textMuted">
+            加载中…
+          </div>
+          <div v-else-if="deployments.length === 0" class="py-10 text-center text-sm text-textMuted">
+            该项目暂无部署记录。
+          </div>
+          <ul v-else class="divide-y divide-border">
+            <li
+              v-for="log in deployments"
+              :key="log.id"
+              class="flex items-center gap-3 py-3 hover:bg-black/[0.02] dark:hover:bg-white/[0.02] -mx-2 px-2 rounded-md transition-colors"
+            >
+              <button
+                @click="goLogBoard(log)"
+                class="flex-1 min-w-0 text-left"
+              >
+                <div class="flex items-center gap-2">
+                  <span
+                    class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium border"
+                    :class="{
+                      'bg-success/10 border-success/20 text-success': log.status === 'success',
+                      'bg-danger/10 border-danger/20 text-danger': log.status === 'failed',
+                      'bg-primary/10 border-primary/20 text-primary': log.status === 'running',
+                    }"
+                  >
+                    {{ log.status }}
+                  </span>
+                  <span
+                    v-if="(log as any).triggerSource === 'rollback'"
+                    class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-warning/10 border border-warning/20 text-warning"
+                    title="该部署是一次回滚"
+                  >
+                    RB
+                  </span>
+                  <Archive
+                    v-if="log.artifactPath"
+                    class="w-3.5 h-3.5 text-success/70"
+                    aria-label="已归档"
+                  />
+                  <ArchiveX
+                    v-else
+                    class="w-3.5 h-3.5 text-textMuted/50"
+                    aria-label="无归档"
+                  />
+                  <span class="font-mono text-xs text-textMuted">{{ shortId(log.id) }}</span>
+                  <span class="text-xs text-textMuted">·</span>
+                  <span class="text-xs text-textMuted truncate">{{ formatStart(log.startTime) }}</span>
+                  <span v-if="log.duration" class="text-xs text-textMuted">· {{ log.duration }}</span>
+                </div>
+              </button>
+              <button
+                v-if="canRollbackLog(log)"
+                @click.stop="openRollback(log)"
+                class="inline-flex items-center px-2.5 py-1 text-xs font-medium bg-warning/10 text-warning border border-warning/20 hover:bg-warning hover:text-white rounded-md transition-all"
+              >
+                <RotateCcw class="w-3 h-3 mr-1" />
+                回滚到此版本
+              </button>
+              <span
+                v-else
+                class="inline-flex items-center px-2.5 py-1 text-xs font-medium bg-base text-textMuted/60 border border-border rounded-md cursor-not-allowed"
+                :title="rollbackDisabledReason(log)"
+              >
+                不可回滚
+              </span>
+            </li>
+          </ul>
         </div>
       </div>
 
@@ -761,6 +944,17 @@ async function confirmDelete() {
       :require-text-hint="`请输入项目名 ${expectedConfirmName} 以确认`"
       :loading="isSavingClean"
       @confirm="commitCleanForm"
+    />
+
+    <ConfirmDialog
+      v-model:open="showRollbackConfirm"
+      tone="warning"
+      title="确认回滚到此版本？"
+      :message="rollbackTarget ? `将以归档 ${shortId(rollbackTarget.id)} 重新部署到项目 ${rollbackTarget.projectName}。会按当前项目的 cleanMode / protectPaths 执行清理后再解压，运行时数据按保护规则保留。` : ''"
+      confirm-text="确认回滚"
+      cancel-text="取消"
+      :loading="isRollingBack"
+      @confirm="confirmRollback"
     />
   </div>
 </template>
