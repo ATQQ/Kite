@@ -185,7 +185,12 @@ const saveConfig = async () => {
     await projectStore.updateProject(projectId, formData.value)
     toast.success('配置已保存')
   } catch (e: any) {
-    toast.error('保存失败', e?.message || '请稍后重试')
+    const conflict = e?.data?.conflictProject
+    if (e?.status === 409 && conflict) {
+      toast.error('保存失败', `部署目录已被项目「${conflict}」占用，请更换目录或修改对方项目`)
+    } else {
+      toast.error('保存失败', e?.message || '请稍后重试')
+    }
   }
 }
 

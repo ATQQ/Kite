@@ -25,7 +25,10 @@ const createProject = async () => {
     newProject.value = { name: '', description: '', destPath: '', env: '' }
     toast.success('项目创建成功')
   } else {
-    toast.error('创建失败', result.error || '请稍后重试')
+    const detail = result.conflictProject
+      ? `部署目录已被项目「${result.conflictProject}」占用`
+      : result.error || '请稍后重试'
+    toast.error('创建失败', detail)
   }
 }
 
@@ -309,7 +312,9 @@ async function submitBatch() {
         row.status = 'success'
       } else {
         row.status = 'failed'
-        row.errorMsg = result.error || '创建失败'
+        row.errorMsg = result.conflictProject
+          ? `部署目录已被项目「${result.conflictProject}」占用`
+          : result.error || '创建失败'
       }
     }
     const { success, failed } = batchSummary.value

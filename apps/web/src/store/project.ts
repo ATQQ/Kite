@@ -83,7 +83,12 @@ export const useProjectStore = defineStore('project', () => {
       throw new Error('Unauthorized')
     }
     const data = await res.json()
-    if (!res.ok) throw new Error(data.error || data.message || 'API request failed')
+    if (!res.ok) {
+      const err: any = new Error(data.error || data.message || 'API request failed')
+      err.status = res.status
+      err.data = data
+      throw err
+    }
     return data
   }
 
@@ -116,7 +121,7 @@ export const useProjectStore = defineStore('project', () => {
     return projects.value.find(p => p.id === id)
   }
 
-  async function addProject(project: Partial<Project>): Promise<{ ok: boolean; error?: string }> {
+  async function addProject(project: Partial<Project>): Promise<{ ok: boolean; error?: string; conflictProject?: string }> {
     try {
       const data = await apiFetch('/projects', {
         method: 'POST',
@@ -133,7 +138,7 @@ export const useProjectStore = defineStore('project', () => {
       }
     } catch (e: any) {
       console.error('Failed to add project', e)
-      return { ok: false, error: e?.message }
+      return { ok: false, error: e?.message, conflictProject: e?.data?.conflictProject }
     }
     return { ok: false }
   }
