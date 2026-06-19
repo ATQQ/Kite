@@ -2,7 +2,7 @@
 import { computed, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useProjectStore, type CleanPreviewResult, type DeploymentLog } from '../store/project'
-import { ArrowLeft, Save, Key, Copy, RefreshCw, Trash2, CheckCircle2, TerminalSquare, FolderOpen, AlertTriangle, XCircle, ScrollText, Eye, Shield, ShieldAlert, Plus, History, RotateCcw, Archive, ArchiveX } from 'lucide-vue-next'
+import { ArrowLeft, Save, Key, Copy, RefreshCw, Trash2, CheckCircle2, TerminalSquare, FolderOpen, AlertTriangle, XCircle, ScrollText, Eye, Shield, ShieldAlert, Plus, History, RotateCcw, Archive, ArchiveX, CheckCheck } from 'lucide-vue-next'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import CleanPreviewDialog from '../components/CleanPreviewDialog.vue'
 import { useToast } from '../composables/useToast'
@@ -94,6 +94,34 @@ function shortId(id?: string | null) {
   if (!id) return ''
   return id.slice(0, 8)
 }
+
+const copiedDeployId = ref<string>('')
+async function copyDeploymentId(id: string, evt?: Event) {
+  if (evt) {
+    evt.stopPropagation()
+    evt.preventDefault()
+  }
+  if (!id) return
+  try {
+    await navigator.clipboard.writeText(id)
+    copiedDeployId.value = id
+    toast.success('已复制部署 ID', shortId(id))
+    setTimeout(() => {
+      if (copiedDeployId.value === id) copiedDeployId.value = ''
+    }, 2000)
+  } catch (e: any) {
+    toast.error('复制失败', e?.message || '请手动选择文本复制')
+  }
+}
+
+const currentDeploymentId = computed(() => {
+  const sorted = [...deployments.value].sort((a, b) => {
+    const ta = new Date(a.startTime).getTime() || 0
+    const tb = new Date(b.startTime).getTime() || 0
+    return tb - ta
+  })
+  return sorted.find(l => l.status === 'success' && (l as any).triggerSource !== 'rollback')?.id || ''
+})
 
 function canRollbackLog(log: DeploymentLog): boolean {
   if (!log) return false
@@ -490,7 +518,23 @@ async function confirmDelete() {
                     class="w-3.5 h-3.5 text-textMuted/50"
                     aria-label="无归档"
                   />
-                  <span class="font-mono text-xs text-textMuted">{{ shortId(log.id) }}</span>
+                  <span
+                    role="button"
+                    tabindex="0"
+                    class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-base border border-border font-mono text-[10px] text-textMuted hover:text-primary hover:border-primary/40 transition-colors cursor-pointer"
+                    :title="`点击复制完整 ID: ${log.id}`"
+                    @click.stop.prevent="copyDeploymentId(log.id, $event)"
+                    @keydown.enter.stop.prevent="copyDeploymentId(log.id, $event)"
+                  >
+                    <CheckCheck v-if="copiedDeployId === log.id" class="w-3 h-3 text-success" />
+                    <Copy v-else class="w-3 h-3" />
+                    {{ shortId(log.id) }}
+                  </span>
+                  <span
+                    v-if="log.id === currentDeploymentId"
+                    class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-success/10 border border-success/30 text-success"
+                    title="该版本为当前线上版本"
+                  >当前版本</span>
                   <span class="text-xs text-textMuted">·</span>
                   <span class="text-xs text-textMuted truncate">{{ formatStart(log.startTime) }}</span>
                   <span v-if="log.duration" class="text-xs text-textMuted">· {{ log.duration }}</span>

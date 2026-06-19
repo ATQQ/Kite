@@ -83,16 +83,17 @@ describe('artifact', () => {
     });
 
     // Sorted by startTime desc → [d_a_rb, d_d, d_c, d_b, d_a]
-    // keepN=2 → keep [d_a_rb, d_d], stale = [d_c, d_b, d_a]
+    // Rollback rows are excluded from keepN accounting → normal = [d_d, d_c, d_b, d_a]
+    // keepN=2 → keep [d_d, d_c], stale = [d_b, d_a]
     // d_a's file is still referenced by d_a_rb → preserved.
     const result = await gcArtifacts({ projectId, keepN: 2 });
     expect(result.inspected).toBe(5);
-    expect(result.detached).toBe(3);
-    expect(result.removedFiles).toBe(2);
+    expect(result.detached).toBe(2);
+    expect(result.removedFiles).toBe(1);
     expect(result.preserved).toBe(1);
 
     await expect(fs.access(artifactPathFor(projectId, 'd_b'))).rejects.toThrow();
-    await expect(fs.access(artifactPathFor(projectId, 'd_c'))).rejects.toThrow();
+    await fs.access(artifactPathFor(projectId, 'd_c')); // d_c zip kept (within keepN of normal rows)
     await fs.access(artifactPathFor(projectId, 'd_a')); // d_a zip still present (referenced by rollback)
     await fs.access(artifactPathFor(projectId, 'd_d')); // d_d zip still present (within keepN)
   });

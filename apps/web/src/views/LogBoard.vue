@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useProjectStore } from '../store/project'
 import { ansiToHtml } from '../utils/ansi'
 import { useDeployStream } from '../composables/useDeployStream'
-import { Terminal, CheckCircle2, XCircle, Clock, RefreshCw, AlertCircle, RotateCcw, Archive, ArchiveX } from 'lucide-vue-next'
+import { Terminal, CheckCircle2, XCircle, Clock, RefreshCw, AlertCircle, RotateCcw, Archive, ArchiveX, Copy, CheckCheck } from 'lucide-vue-next'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import { useToast } from '../composables/useToast'
 
@@ -157,6 +157,45 @@ function shortId(id?: string | null) {
   return id.slice(0, 8)
 }
 
+const copiedId = ref<string>('')
+async function copyDeploymentId(id: string, evt?: Event) {
+  if (evt) {
+    evt.stopPropagation()
+    evt.preventDefault()
+  }
+  if (!id) return
+  try {
+    await navigator.clipboard.writeText(id)
+    copiedId.value = id
+    toast.success('已复制部署 ID', shortId(id))
+    setTimeout(() => {
+      if (copiedId.value === id) copiedId.value = ''
+    }, 2000)
+  } catch (e: any) {
+    toast.error('复制失败', e?.message || '请手动选择文本复制')
+  }
+}
+
+const currentDeploymentByProject = computed(() => {
+  const map: Record<string, string> = {}
+  const sorted = [...projectStore.logs].sort((a, b) => {
+    const ta = new Date(a.startTime).getTime() || 0
+    const tb = new Date(b.startTime).getTime() || 0
+    return tb - ta
+  })
+  for (const log of sorted) {
+    if (log.status !== 'success') continue
+    if ((log as any).triggerSource === 'rollback') continue
+    if (map[log.projectId]) continue
+    map[log.projectId] = log.id
+  }
+  return map
+})
+
+function isCurrentVersion(log: { id: string; projectId: string }) {
+  return currentDeploymentByProject.value[log.projectId] === log.id
+}
+
 function openRollback() {
   if (!canRollback.value) return
   showRollbackConfirm.value = true
@@ -248,7 +287,21 @@ async function confirmRollback() {
                 <span class="font-medium text-textMain text-sm truncate">{{ log.projectName }}</span>
                 <span class="text-xs text-textMuted font-mono shrink-0">{{ new Date(log.startTime).toLocaleString() }}</span>
               </div>
-              <div class="flex items-center text-xs text-textMuted space-x-3">
+              <div class="flex items-center text-xs text-textMuted gap-1.5 flex-wrap">
+                <span
+                  class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-base border border-border font-mono text-[10px] text-textMuted hover:text-primary hover:border-primary/40 transition-colors cursor-pointer"
+                  :title="`点击复制完整 ID: ${log.id}`"
+                  @click.stop="copyDeploymentId(log.id, $event)"
+                >
+                  <CheckCheck v-if="copiedId === log.id" class="w-3 h-3 text-success" />
+                  <Copy v-else class="w-3 h-3" />
+                  {{ shortId(log.id) }}
+                </span>
+                <span
+                  v-if="isCurrentVersion(log)"
+                  class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-success/10 border border-success/30 text-success"
+                  title="该版本为当前线上版本"
+                >当前</span>
                 <span class="flex items-center">
                   <Terminal class="w-3 h-3 mr-1" />
                   {{ log.triggerSource }}
@@ -280,11 +333,28 @@ async function confirmRollback() {
             <div class="w-3 h-3 rounded-full bg-yellow-500/80"></div>
             <div class="w-3 h-3 rounded-full bg-success/80"></div>
           </div>
-          <div class="flex-1 text-center text-textMuted text-xs font-sans truncate">
-            <template v-if="selectedLog">bash - {{ selectedLog.projectName }} ({{ shortId(selectedLog.id) }})</template>
+          <div class="flex-1 text-center text-textMuted text-xs font-sans truncate flex items-center justify-center gap-1.5">
+            <template v-if="selectedLog">
+              <span>bash - {{ selectedLog.projectName }}</span>
+              <button
+                type="button"
+                class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-base border border-border font-mono text-[10px] text-textMuted hover:text-primary hover:border-primary/40 transition-colors"
+                :title="`点击复制完整 ID: ${selectedLog.id}`"
+                @click="copyDeploymentId(selectedLog.id, $event)"
+              >
+                <CheckCheck v-if="copiedId === selectedLog.id" class="w-3 h-3 text-success" />
+                <Copy v-else class="w-3 h-3" />
+                {{ shortId(selectedLog.id) }}
+              </button>
+            </template>
             <template v-else>等待选择...</template>
           </div>
           <div v-if="selectedLog" class="flex items-center gap-1.5">
+            <span
+              v-if="isCurrentVersion(selectedLog)"
+              class="text-[10px] font-medium px-1.5 py-0.5 rounded bg-success/10 border border-success/30 text-success"
+              title="该版本为当前线上版本"
+            >当前版本</span>
             <span
               v-if="selectedLog.triggerSource === 'rollback'"
               class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-yellow-400/10 border border-yellow-400/30 text-yellow-400"

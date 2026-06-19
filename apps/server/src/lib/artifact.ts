@@ -64,8 +64,11 @@ export interface GcResult {
  *
  * Strategy:
  *   1. List all deployments for the project sorted by startTime desc.
- *   2. Keep the most-recent `keepN` rows untouched.
- *   3. For each older row with a non-null artifactPath:
+ *   2. Rollback rows do NOT consume a keepN slot and are NOT cleaned up here:
+ *      they share the original deployment's artifactPath via reference counting, so
+ *      their lifetime is bound to the original row that actually owns the file.
+ *   3. From the non-rollback rows, keep the most-recent `keepN` untouched.
+ *   4. For each older non-rollback row with a non-null artifactPath:
  *        - clear its DB artifactPath (so the row stops referencing the file)
  *        - if no other deployment row still references that file path, unlink it
  */
@@ -78,9 +81,11 @@ export async function gcArtifacts(opts: {
   if (opts.keepN <= 0) return result;
   const rows = await db.deployments.findByProject(opts.projectId);
   result.inspected = rows.length;
-  if (rows.length <= opts.keepN) return result;
+  // Only normal deployments count toward keepN; rollback rows are skipped entirely.
+  const normalRows = rows.filter((r: any) => r.triggerSource !== 'rollback');
+  if (normalRows.length <= opts.keepN) return result;
 
-  const stale = rows.slice(opts.keepN);
+  const stale = normalRows.slice(opts.keepN);
   for (const row of stale) {
     if (!row.artifactPath) continue;
     const targetPath = row.artifactPath;
