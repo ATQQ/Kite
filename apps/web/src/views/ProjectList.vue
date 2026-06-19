@@ -247,32 +247,30 @@ const existingDeployPaths = computed(() => new Set(projectStore.projects.map((p)
 const batchValidation = computed(() => {
   const seenNames = new Map<string, number>()
   const seenPaths = new Map<string, number>()
-  const result = new Map<number, string>()
+  const result = new Map<number, { name?: string; dest?: string }>()
   for (const r of batchRows.value) {
+    const entry: { name?: string; dest?: string } = {}
     const name = r.name.trim()
     if (!name) {
-      result.set(r.id, '项目名不能为空')
-      continue
+      entry.name = '项目名不能为空'
+    } else if (existingNames.value.has(name)) {
+      entry.name = '与已有项目重名'
+    } else if (seenNames.has(name)) {
+      entry.name = '本次批量内重名'
+    } else {
+      seenNames.set(name, r.id)
     }
-    if (existingNames.value.has(name)) {
-      result.set(r.id, '与已有项目重名')
-      continue
-    }
-    if (seenNames.has(name)) {
-      result.set(r.id, '本次批量内重名')
-      continue
-    }
-    seenNames.set(name, r.id)
     const dp = r.destPath.trim()
-    if (existingDeployPaths.value.has(dp)) {
-      result.set(r.id, '该部署目录已被其他项目占用')
-      continue
+    if (!dp) {
+      entry.dest = '部署目录不能为空'
+    } else if (existingDeployPaths.value.has(dp)) {
+      entry.dest = '该部署目录已被其他项目占用'
+    } else if (seenPaths.has(dp)) {
+      entry.dest = '本次批量内部署目录重复'
+    } else {
+      seenPaths.set(dp, r.id)
     }
-    if (seenPaths.has(dp)) {
-      result.set(r.id, '本次批量内部署目录重复')
-      continue
-    }
-    seenPaths.set(dp, r.id)
+    if (entry.name || entry.dest) result.set(r.id, entry)
   }
   return result
 })
@@ -546,9 +544,9 @@ function closeBatchModal() {
           </button>
         </div>
 
-        <div class="px-6 py-3 border-b border-border bg-yellow-400/5 flex items-start space-x-2">
-          <AlertTriangle class="w-4 h-4 text-yellow-400 flex-shrink-0 mt-0.5" />
-          <p class="text-xs text-yellow-200/90">
+        <div class="px-6 py-3 border-b border-border bg-yellow-400/15 dark:bg-yellow-400/5 flex items-start space-x-2">
+          <AlertTriangle class="w-4 h-4 text-yellow-600 dark:text-yellow-400 flex-shrink-0 mt-0.5" />
+          <p class="text-xs text-yellow-800 dark:text-yellow-200/90">
             请确认所选目录用于部署。每次部署会在该目录下解压新构建产物，请勿选择关键系统目录或包含重要个人文件的目录。
           </p>
         </div>
@@ -576,12 +574,21 @@ function closeBatchModal() {
                     type="text"
                     :disabled="row.status === 'success' || isBatchSubmitting"
                     class="w-full bg-base border rounded px-2 py-1.5 text-textMain text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-60"
-                    :class="batchValidation.get(row.id) ? 'border-danger' : 'border-border focus:border-primary'"
+                    :class="batchValidation.get(row.id)?.name ? 'border-danger' : 'border-border focus:border-primary'"
                   />
-                  <p v-if="batchValidation.get(row.id)" class="text-[11px] text-danger mt-1">{{ batchValidation.get(row.id) }}</p>
+                  <p v-if="batchValidation.get(row.id)?.name" class="text-[11px] text-danger mt-1">{{ batchValidation.get(row.id)?.name }}</p>
                 </td>
                 <td class="px-3 py-2">
-                  <code class="block text-xs font-mono text-textMuted bg-base border border-border rounded px-2 py-1.5 break-all">{{ row.destPath }}</code>
+                  <input
+                    v-model="row.destPath"
+                    type="text"
+                    spellcheck="false"
+                    :disabled="row.status === 'success' || isBatchSubmitting"
+                    class="w-full bg-base border rounded px-2 py-1.5 text-textMain font-mono text-xs focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-60 break-all"
+                    :class="batchValidation.get(row.id)?.dest ? 'border-danger' : 'border-border focus:border-primary'"
+                    :title="row.destPath"
+                  />
+                  <p v-if="batchValidation.get(row.id)?.dest" class="text-[11px] text-danger mt-1">{{ batchValidation.get(row.id)?.dest }}</p>
                 </td>
                 <td class="px-3 py-2">
                   <input
