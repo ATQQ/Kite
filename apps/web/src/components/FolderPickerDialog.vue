@@ -23,6 +23,25 @@ const emit = defineEmits<{
 const projectStore = useProjectStore()
 const toast = useToast()
 
+const LAST_DIR_STORAGE_KEY = 'kite:folderPicker:lastDir'
+
+function readLastDir(): string {
+  try {
+    return localStorage.getItem(LAST_DIR_STORAGE_KEY) || ''
+  } catch {
+    return ''
+  }
+}
+
+function writeLastDir(p: string) {
+  if (!p) return
+  try {
+    localStorage.setItem(LAST_DIR_STORAGE_KEY, p)
+  } catch {
+    /* ignore quota / privacy mode */
+  }
+}
+
 const loading = ref(false)
 const errorMsg = ref('')
 const truncated = ref(false)
@@ -89,7 +108,7 @@ function removeSelected(p: string) {
   if (idx >= 0) selected.value.splice(idx, 1)
 }
 
-async function loadDir(p: string) {
+async function loadDir(p: string): Promise<boolean> {
   loading.value = true
   errorMsg.value = ''
   try {
@@ -99,11 +118,14 @@ async function loadDir(p: string) {
     entries.value = data.entries
     truncated.value = data.truncated
     pathInput.value = data.path
+    writeLastDir(data.path)
+    return true
   } catch (e: any) {
     const msg = e?.message || '读取目录失败'
     errorMsg.value = msg
     entries.value = []
     truncated.value = false
+    return false
   } finally {
     loading.value = false
   }
@@ -117,7 +139,15 @@ async function initialize() {
     home.value = info.home
     sep.value = info.sep
     roots.value = info.roots || ['/']
-    await loadDir(info.home || info.cwd || (info.roots && info.roots[0]) || '/')
+    const fallback = info.home || info.cwd || (info.roots && info.roots[0]) || '/'
+    const lastDir = readLastDir()
+    if (lastDir && lastDir !== fallback) {
+      const ok = await loadDir(lastDir)
+      if (ok) return
+      // 上次目录已不存在或不可读，回退到 HOME
+      errorMsg.value = ''
+    }
+    await loadDir(fallback)
   } catch (e: any) {
     errorMsg.value = e?.message || '初始化目录浏览器失败'
   } finally {
