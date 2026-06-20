@@ -1,12 +1,6 @@
 import { Elysia, t } from 'elysia';
 import { db } from '../db/index.js';
-
-const verifyAdminToken = (headers: Record<string, string | undefined>) => {
-  const authHeader = headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) return false;
-  const token = authHeader.split(' ')[1];
-  return token === process.env.ADMIN_TOKEN;
-};
+import { verifyAdminToken } from '../lib/auth.js';
 
 const parseNum = (v: string | undefined, fallback: number) => {
   if (v === undefined || v === null || v === '') return fallback;

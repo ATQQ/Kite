@@ -1,12 +1,6 @@
 import { Elysia } from 'elysia';
 import { db } from '../db/index.js';
-
-const verifyAdminToken = (headers: Record<string, string | undefined>) => {
-  const authHeader = headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) return false;
-  const token = authHeader.split(' ')[1];
-  return token === process.env.ADMIN_TOKEN;
-};
+import { verifyAdminToken } from '../lib/auth.js';
 
 interface CacheEntry<T> { value: T; expireAt: number }
 const CACHE_TTL_MS = 60_000;

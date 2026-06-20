@@ -17,7 +17,7 @@ import http from "node:http";
 await ensureDbReady();
 
 const port = Number(process.env.PORT) || 5430;
-const host = process.env.HOST || '0.0.0.0';
+const host = process.env.HOST || '127.0.0.1';
 const serverVersion = process.env.KITE_SERVER_VERSION || 'dev';
 
 // Detect runtime and configure adapter

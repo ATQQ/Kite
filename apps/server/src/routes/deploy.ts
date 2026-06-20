@@ -19,18 +19,18 @@ import {
   parseProtectPaths,
   type CleanMode,
 } from '../lib/clean.js';
+import {
+  verifyAdminToken,
+  verifyAdminTokenValue,
+  extractBearerToken,
+  safeEqual,
+  loginGuard,
+  loginFailure,
+  loginSuccess,
+  pickClientKey,
+} from '../lib/auth.js';
 
 const deployLog = moduleLogger('deploy');
-
-// Token verification helper
-const verifyAdminToken = (headers: Record<string, string | undefined>) => {
-  const authHeader = headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) return false;
-  const token = authHeader.split(' ')[1];
-
-  // Verify against the ADMIN_TOKEN loaded via Bun env
-  return token === process.env.ADMIN_TOKEN;
-};
 
 // SSE broadcast: deployId -> Set of controllers
 const deploySubscribers = new Map<string, Set<ReadableStreamDefaultController>>();
@@ -80,10 +80,27 @@ async function* runShellCommand(command: string, cwd: string, env?: Record<strin
 
 export const deployRoutes = new Elysia()
   .post('/api/auth/login', async ({ body, headers, set }) => {
+    const clientKey = pickClientKey(headers as Record<string, string | undefined>);
+    const guard = await loginGuard(clientKey);
+    if (guard.locked) {
+      const retrySec = Math.ceil(guard.retryAfterMs / 1000);
+      set.status = 429;
+      set.headers = { ...(set.headers || {}), 'Retry-After': String(retrySec) };
+      await writeAudit({ headers }, {
+        action: 'auth.login_failed',
+        targetType: 'auth',
+        summary: `Admin 登录被限流（剩余 ${retrySec}s）`,
+        status: 'failed',
+        errorMessage: 'Too many attempts',
+      });
+      return { success: false, message: 'Too many attempts, please retry later', retryAfter: retrySec };
+    }
     const { token } = body;
-    if (token === process.env.ADMIN_TOKEN) {
+    if (verifyAdminTokenValue(token)) {
+      loginSuccess(clientKey);
       return { success: true, message: 'Login successful' };
     }
+    loginFailure(clientKey);
     await writeAudit({ headers }, {
       action: 'auth.login_failed',
       targetType: 'auth',
@@ -320,13 +337,12 @@ export const deployRoutes = new Elysia()
   })
   .post('/api/deploy/upload', async ({ body, headers, set }) => {
     try {
-      const authHeader = headers.authorization;
-      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      const token = extractBearerToken(headers as Record<string, string | undefined>);
+      if (!token) {
         set.status = 401;
         return { error: 'Missing or invalid Authorization header' };
       }
 
-      const token = authHeader.split(' ')[1];
       let project = await db.projects.findByToken(token);
 
       const file = body.file as File;
@@ -334,7 +350,7 @@ export const deployRoutes = new Elysia()
 
       if (!project) {
         const globalToken = await db.settings.get('global_deploy_token');
-        if (!globalToken || token !== globalToken) {
+        if (!globalToken || !safeEqual(token, globalToken)) {
           set.status = 403;
           return { error: 'Invalid Token' };
         }

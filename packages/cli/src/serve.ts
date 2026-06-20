@@ -47,6 +47,14 @@ function detectRuntime(preferred?: string): { name: string; version: string } {
   }) as never;
 }
 
+function isWeakAdminToken(token: string): { weak: boolean; reason?: string } {
+  if (typeof token !== 'string') return { weak: true, reason: 'token 必须是字符串' };
+  if (token.length < 24) return { weak: true, reason: '长度不足 24' };
+  if (!/[A-Za-z]/.test(token) || !/[0-9]/.test(token)) return { weak: true, reason: '需同时包含字母和数字' };
+  if (new Set(token).size < 8) return { weak: true, reason: '字符多样性不足（去重 < 8）' };
+  return { weak: false };
+}
+
 function ensureAdminToken(): string {
   const localEnv = readLocalEnv();
   if (localEnv.KITE_DEPLOY_TOKEN) {
@@ -60,7 +68,12 @@ function ensureAdminToken(): string {
     const content = fs.readFileSync(envPath, 'utf-8');
     const match = content.match(/^ADMIN_TOKEN=(.+)$/m);
     if (match) {
-      return match[1].replace(/^['"]|['"]$/g, '');
+      const existing = match[1].replace(/^['"]|['"]$/g, '');
+      const check = isWeakAdminToken(existing);
+      if (check.weak) {
+        console.warn(chalk.yellow(`[warn] 当前 ADMIN_TOKEN 强度不足（${check.reason}），建议执行 kite rotate-token 或在 .env.local 中替换为长度 ≥ 24 且包含字母和数字、去重字符 ≥ 8 的随机字符串。`));
+      }
+      return existing;
     }
   }
 
@@ -84,6 +97,16 @@ function buildServerEnv(options: ServeOptions, adminToken: string): Record<strin
   };
 }
 
+function isLocalHost(host: string): boolean {
+  return host === '127.0.0.1' || host === 'localhost' || host === '::1';
+}
+
+function warnRemoteHost(host: string): void {
+  if (!isLocalHost(host)) {
+    console.warn(chalk.yellow(`[warn] 当前监听 host=${host}，将对外网络暴露 Kite 管理端。请确保已在前置代理（Nginx/Caddy）配置 TLS 与限速，否则建议使用 --host 127.0.0.1。`));
+  }
+}
+
 function startForeground(options: ServeOptions, env: Record<string, string>, runtime: { name: string; version: string }): void {
   const bundlePath = getServerBundlePath();
 
@@ -101,6 +124,7 @@ function startForeground(options: ServeOptions, env: Record<string, string>, run
   console.log(chalk.gray(`  DB Dir: ${env.KITE_DB_DIR}`));
   console.log(chalk.yellow(`  Admin Token: ${env.ADMIN_TOKEN}`));
   console.log();
+  warnRemoteHost(options.host);
 
   const args = runtime.name === 'bun' ? ['run', bundlePath] : [bundlePath];
   const child = spawn(runtime.name, args, {
@@ -216,6 +240,7 @@ function startPm2(options: ServeOptions, env: Record<string, string>, runtime: {
   console.log(chalk.gray('  pm2 logs kite-server    # View logs'));
   console.log(chalk.gray('  pm2 status              # Check status'));
   console.log(chalk.gray('  kite serve --pm2 stop   # Stop server'));
+  warnRemoteHost(options.host);
 }
 
 function stopPm2(): void {

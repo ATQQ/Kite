@@ -3,17 +3,11 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { moduleLogger } from '../lib/logger.js';
+import { verifyAdminToken } from '../lib/auth.js';
 
 const log = moduleLogger('fs');
 
 const MAX_ENTRIES = 500;
-
-const verifyAdminToken = (headers: Record<string, string | undefined>) => {
-  const authHeader = headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) return false;
-  const token = authHeader.split(' ')[1];
-  return token === process.env.ADMIN_TOKEN;
-};
 
 function listRoots(): string[] {
   if (process.platform === 'win32') {

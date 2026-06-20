@@ -42,6 +42,12 @@ kite serve --runtime bun
 kite serve --host 0.0.0.0 --port 5431
 ```
 
+> 安全提示：`kite serve` 默认监听 `127.0.0.1`，仅本机可访问。若显式指定非本地地址（如 `--host 0.0.0.0` 或公网 IP），CLI 启动时会打印黄色 `[warn]` 提示，请务必在 Nginx/Caddy 等前置代理上配置 TLS 与限速。
+>
+> Admin Token 强度策略：长度 ≥ 24，且至少包含字母和数字，去重字符数 ≥ 8。当 `.env.local` 中的 `ADMIN_TOKEN` 不满足该策略时，`kite serve` 启动会打印 `[warn]` 但不会阻塞启动；建议执行 `kite reset-password --random` 重新生成强随机 Token，或手工替换为更强的随机字符串。
+>
+> 登录限流：管理端登录 (`POST /api/auth/login`) 与修改 Admin Token (`POST /api/settings/token`) 共享内存级限流，按客户端 IP（取 `X-Forwarded-For` / `X-Real-IP` 首项）累计失败次数；10 分钟内累计 8 次失败将锁定 5 分钟并返回 `429 Retry-After`。
+
 ### 后台运行 (pm2)
 
 `kite serve` 支持通过 pm2 实现后台守护运行，适合部署在内网/云服务器上长期提供服务。
