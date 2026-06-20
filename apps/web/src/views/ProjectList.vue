@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useProjectStore } from '../store/project'
-import { Plus, MoreVertical, Server, Clock, ScrollText, FolderPlus, Trash2, RefreshCw, XCircle, AlertTriangle, Pencil, FolderOpen } from 'lucide-vue-next'
+import type { Category } from '../store/project'
+import { Plus, MoreVertical, Server, Clock, ScrollText, FolderPlus, Trash2, RefreshCw, XCircle, AlertTriangle, Pencil, FolderOpen, LayoutGrid, List as ListIcon, Tag, FolderTree, ChevronRight } from 'lucide-vue-next'
 import { useToast } from '../composables/useToast'
 import FolderPickerDialog from '../components/FolderPickerDialog.vue'
 
@@ -10,19 +11,93 @@ const projectStore = useProjectStore()
 const router = useRouter()
 const toast = useToast()
 
+const VIEW_KEY = 'kite:projectList:viewMode'
+const viewMode = ref<'card' | 'list'>(((): 'card' | 'list' => {
+  const v = localStorage.getItem(VIEW_KEY)
+  return v === 'list' ? 'list' : 'card'
+})())
+watch(viewMode, (v) => localStorage.setItem(VIEW_KEY, v))
+
+const selectedCategoryFilter = ref<string>('all') // 'all' | 'default' | <categoryId>
+
 onMounted(() => {
   projectStore.fetchProjects()
+  projectStore.fetchCategories()
 })
 
+const categoryMap = computed<Map<string, Category>>(() => {
+  const m = new Map<string, Category>()
+  for (const c of projectStore.categories) m.set(c.id, c)
+  return m
+})
+
+const filteredProjects = computed(() => {
+  const list = projectStore.projects
+  if (selectedCategoryFilter.value === 'all') return list
+  if (selectedCategoryFilter.value === 'default') return list.filter((p) => !p.categoryId)
+  return list.filter((p) => p.categoryId === selectedCategoryFilter.value)
+})
+
+const projectCountByCategory = computed(() => {
+  const m: Record<string, number> = { all: projectStore.projects.length, default: 0 }
+  for (const c of projectStore.categories) m[c.id] = 0
+  for (const p of projectStore.projects) {
+    if (!p.categoryId || !m.hasOwnProperty(p.categoryId)) m.default++
+    else m[p.categoryId]++
+  }
+  return m
+})
+
+const categoryColorClass: Record<string, string> = {
+  blue: 'bg-blue-500/15 text-blue-500 border-blue-500/30',
+  green: 'bg-green-500/15 text-green-500 border-green-500/30',
+  yellow: 'bg-yellow-500/15 text-yellow-500 border-yellow-500/30',
+  purple: 'bg-purple-500/15 text-purple-500 border-purple-500/30',
+  pink: 'bg-pink-500/15 text-pink-500 border-pink-500/30',
+  cyan: 'bg-cyan-500/15 text-cyan-500 border-cyan-500/30',
+  gray: 'bg-gray-500/15 text-gray-400 border-gray-500/30',
+}
+function categoryChipClass(color?: string | null) {
+  if (color && categoryColorClass[color]) return categoryColorClass[color]
+  return 'bg-base text-textMuted border-border'
+}
+
+function categoryNameOf(categoryId?: string | null): string {
+  if (!categoryId) return '默认'
+  return categoryMap.value.get(categoryId)?.name ?? '默认'
+}
+
+function formatRelativeTime(iso?: string | null): string {
+  if (!iso) return '从未部署'
+  const t = new Date(iso).getTime()
+  if (isNaN(t)) return '—'
+  const diff = Date.now() - t
+  const sec = Math.floor(diff / 1000)
+  if (sec < 60) return `${sec} 秒前`
+  const min = Math.floor(sec / 60)
+  if (min < 60) return `${min} 分钟前`
+  const hour = Math.floor(min / 60)
+  if (hour < 24) return `${hour} 小时前`
+  const day = Math.floor(hour / 24)
+  if (day < 30) return `${day} 天前`
+  return new Date(iso).toLocaleDateString()
+}
+
 const showCreateModal = ref(false)
-const newProject = ref({ name: '', description: '', destPath: '', env: '' })
+const newProject = ref({ name: '', description: '', destPath: '', env: '', categoryId: '' as string })
 
 const createProject = async () => {
   if (!newProject.value.name || !newProject.value.destPath) return
-  const result = await projectStore.addProject(newProject.value)
+  const result = await projectStore.addProject({
+    name: newProject.value.name,
+    description: newProject.value.description,
+    destPath: newProject.value.destPath,
+    env: newProject.value.env,
+    categoryId: newProject.value.categoryId || null,
+  })
   if (result.ok) {
     showCreateModal.value = false
-    newProject.value = { name: '', description: '', destPath: '', env: '' }
+    newProject.value = { name: '', description: '', destPath: '', env: '', categoryId: '' }
     toast.success('项目创建成功')
   } else {
     const detail = result.conflictProject
@@ -81,6 +156,7 @@ async function toggleDropdown(id: string, e: Event) {
 
 function closeDropdown() {
   openDropdownId.value = null
+  moveSubmenuOpen.value = false
 }
 
 function handleWindowChange() {
@@ -333,6 +409,123 @@ function closeBatchModal() {
   showBatchModal.value = false
   batchRows.value = []
 }
+
+// ---------- Move to category ----------
+const moveSubmenuOpen = ref(false)
+const isMovingCategory = ref(false)
+
+function openMoveSubmenu(e: Event) {
+  e.stopPropagation()
+  moveSubmenuOpen.value = !moveSubmenuOpen.value
+}
+
+async function moveProjectToCategory(projectId: string, categoryId: string | null) {
+  if (isMovingCategory.value) return
+  isMovingCategory.value = true
+  try {
+    await projectStore.updateProject(projectId, { categoryId })
+    const name = categoryId ? (categoryMap.value.get(categoryId)?.name ?? '分类') : '默认'
+    toast.success(`已移动到「${name}」`)
+    moveSubmenuOpen.value = false
+    closeDropdown()
+  } catch (e: any) {
+    toast.error('移动失败', e?.message || '请稍后重试')
+  } finally {
+    isMovingCategory.value = false
+  }
+}
+
+// ---------- Manage categories modal ----------
+const showCategoryModal = ref(false)
+const newCategoryName = ref('')
+const newCategoryColor = ref<string>('')
+const isCreatingCategory = ref(false)
+const editingCategoryId = ref<string | null>(null)
+const editCategoryName = ref('')
+const editCategoryColor = ref<string>('')
+const isSavingCategory = ref(false)
+const deletingCategoryId = ref<string | null>(null)
+
+const ALL_COLORS = ['blue', 'green', 'yellow', 'purple', 'pink', 'cyan', 'gray']
+
+function openCategoryModal() {
+  showCategoryModal.value = true
+  newCategoryName.value = ''
+  newCategoryColor.value = ''
+  editingCategoryId.value = null
+  projectStore.fetchCategories()
+}
+
+async function submitCreateCategory() {
+  const name = newCategoryName.value.trim()
+  if (!name) return
+  isCreatingCategory.value = true
+  try {
+    const res = await projectStore.createCategory({ name, color: newCategoryColor.value || null })
+    if (res.ok) {
+      toast.success('分类创建成功')
+      newCategoryName.value = ''
+      newCategoryColor.value = ''
+    } else {
+      toast.error('创建失败', res.conflictCategory ? `分类名「${res.conflictCategory}」已存在` : res.error || '请稍后重试')
+    }
+  } finally {
+    isCreatingCategory.value = false
+  }
+}
+
+function startEditCategory(c: Category) {
+  editingCategoryId.value = c.id
+  editCategoryName.value = c.name
+  editCategoryColor.value = c.color || ''
+}
+
+function cancelEditCategory() {
+  editingCategoryId.value = null
+  editCategoryName.value = ''
+  editCategoryColor.value = ''
+}
+
+async function submitEditCategory() {
+  if (!editingCategoryId.value) return
+  const name = editCategoryName.value.trim()
+  if (!name) return
+  isSavingCategory.value = true
+  try {
+    const res = await projectStore.updateCategory(editingCategoryId.value, { name, color: editCategoryColor.value || null })
+    if (res.ok) {
+      toast.success('分类已更新')
+      cancelEditCategory()
+    } else {
+      toast.error('更新失败', res.conflictCategory ? `分类名「${res.conflictCategory}」已存在` : res.error || '请稍后重试')
+    }
+  } finally {
+    isSavingCategory.value = false
+  }
+}
+
+async function deleteCategoryAction(c: Category) {
+  if (deletingCategoryId.value) return
+  const count = projectCountByCategory.value[c.id] || 0
+  const ok = window.confirm(
+    count > 0
+      ? `分类「${c.name}」下还有 ${count} 个项目，删除后这些项目会回落到默认。是否继续？`
+      : `确认删除分类「${c.name}」？`
+  )
+  if (!ok) return
+  deletingCategoryId.value = c.id
+  try {
+    const res = await projectStore.deleteCategory(c.id)
+    if (res.ok) {
+      toast.success('分类已删除', res.detachedProjects ? `${res.detachedProjects} 个项目已回落到默认` : undefined)
+      if (selectedCategoryFilter.value === c.id) selectedCategoryFilter.value = 'all'
+    } else {
+      toast.error('删除失败', res.error || '请稍后重试')
+    }
+  } finally {
+    deletingCategoryId.value = null
+  }
+}
 </script>
 
 <template>
@@ -343,6 +536,32 @@ function closeBatchModal() {
         <p class="text-textMuted text-sm mt-1">管理所有可部署的应用服务与脚本配置</p>
       </div>
       <div class="flex items-center space-x-2">
+        <div class="flex items-center border border-border rounded-md overflow-hidden">
+          <button
+            @click="viewMode = 'card'"
+            :class="viewMode === 'card' ? 'bg-primary/15 text-primary' : 'text-textMuted hover:text-textMain'"
+            class="flex items-center px-2.5 py-1.5 text-xs transition-colors"
+            title="卡片视图"
+          >
+            <LayoutGrid class="w-3.5 h-3.5" />
+          </button>
+          <button
+            @click="viewMode = 'list'"
+            :class="viewMode === 'list' ? 'bg-primary/15 text-primary' : 'text-textMuted hover:text-textMain'"
+            class="flex items-center px-2.5 py-1.5 text-xs transition-colors border-l border-border"
+            title="列表视图"
+          >
+            <ListIcon class="w-3.5 h-3.5" />
+          </button>
+        </div>
+        <button
+          @click="openCategoryModal"
+          class="flex items-center px-3 py-2 border border-border hover:border-primary/50 text-textMain rounded-md transition-all font-medium text-sm"
+          title="管理分类"
+        >
+          <FolderTree class="w-4 h-4 mr-2" />
+          管理分类
+        </button>
         <button
           @click="openFolderPicker"
           class="flex items-center px-4 py-2 bg-primary hover:bg-primary/90 text-white rounded-md shadow-[0_0_15px_rgba(59,130,246,0.3)] transition-all font-medium text-sm"
@@ -360,16 +579,47 @@ function closeBatchModal() {
       </div>
     </div>
 
-    <!-- Project Grid -->
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+    <!-- Category filter chips -->
+    <div class="flex items-center flex-wrap gap-2">
+      <button
+        @click="selectedCategoryFilter = 'all'"
+        class="flex items-center px-3 py-1.5 rounded-full text-xs border transition-colors"
+        :class="selectedCategoryFilter === 'all' ? 'bg-primary/15 text-primary border-primary/40' : 'bg-base text-textMuted border-border hover:text-textMain'"
+      >
+        全部
+        <span class="ml-1.5 text-[10px] opacity-75">{{ projectCountByCategory.all }}</span>
+      </button>
+      <button
+        @click="selectedCategoryFilter = 'default'"
+        class="flex items-center px-3 py-1.5 rounded-full text-xs border transition-colors"
+        :class="selectedCategoryFilter === 'default' ? 'bg-primary/15 text-primary border-primary/40' : 'bg-base text-textMuted border-border hover:text-textMain'"
+      >
+        默认
+        <span class="ml-1.5 text-[10px] opacity-75">{{ projectCountByCategory.default }}</span>
+      </button>
+      <button
+        v-for="c in projectStore.categories"
+        :key="c.id"
+        @click="selectedCategoryFilter = c.id"
+        class="flex items-center px-3 py-1.5 rounded-full text-xs border transition-colors"
+        :class="selectedCategoryFilter === c.id ? 'bg-primary/15 text-primary border-primary/40' : `${categoryChipClass(c.color)} hover:opacity-90`"
+      >
+        <Tag class="w-3 h-3 mr-1.5" />
+        {{ c.name }}
+        <span class="ml-1.5 text-[10px] opacity-75">{{ projectCountByCategory[c.id] || 0 }}</span>
+      </button>
+    </div>
+
+    <!-- Card view -->
+    <div v-if="viewMode === 'card'" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
       <div
-        v-for="project in projectStore.projects"
+        v-for="project in filteredProjects"
         :key="project.id"
         class="group bg-panel border border-border rounded-xl p-5 hover:border-primary/50 transition-all shadow-sm cursor-pointer relative overflow-hidden"
         @click="goToDetail(project.id)"
       >
         <div class="absolute top-0 left-0 w-1 h-full" :class="project.status === 'success' ? 'bg-success' : project.status === 'failed' ? 'bg-danger' : 'bg-primary'"></div>
-        
+
         <div class="flex justify-between items-start mb-4">
           <div class="flex items-center space-x-3">
             <div class="p-2 rounded-lg bg-base border border-border group-hover:border-primary/30 transition-colors">
@@ -387,14 +637,22 @@ function closeBatchModal() {
           </div>
         </div>
 
-        <p class="text-sm text-textMuted mb-5 line-clamp-2 min-h-[40px]">
+        <p class="text-sm text-textMuted mb-3 line-clamp-2 min-h-[40px]">
           {{ project.description || '暂无描述' }}
         </p>
 
+        <div class="flex items-center flex-wrap gap-1.5 mb-3">
+          <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] border" :class="categoryChipClass(categoryMap.get(project.categoryId || '')?.color)">
+            <Tag class="w-3 h-3 mr-1" />
+            {{ categoryNameOf(project.categoryId) }}
+          </span>
+          <span v-if="project.env" class="inline-flex items-center px-2 py-0.5 rounded text-[10px] border bg-base text-textMuted border-border font-mono">{{ project.env }}</span>
+        </div>
+
         <div class="flex items-center justify-between border-t border-border pt-4 text-xs text-textMuted">
-          <div class="flex items-center">
+          <div class="flex items-center" :title="project.lastDeployAt ? new Date(project.lastDeployAt).toLocaleString() : '从未部署'">
             <Clock class="w-3.5 h-3.5 mr-1.5" />
-            <span>{{ new Date(project.updatedAt).toLocaleDateString() }}</span>
+            <span>{{ formatRelativeTime(project.lastDeployAt) }}</span>
           </div>
           <div class="flex items-center space-x-3">
             <button
@@ -412,6 +670,72 @@ function closeBatchModal() {
           </div>
         </div>
       </div>
+      <div v-if="filteredProjects.length === 0" class="col-span-full text-center py-16 text-textMuted text-sm">
+        当前分类下没有项目
+      </div>
+    </div>
+
+    <!-- List view -->
+    <div v-else class="bg-panel border border-border rounded-xl overflow-hidden">
+      <table class="w-full text-sm">
+        <thead class="text-xs text-textMuted bg-base/40">
+          <tr>
+            <th class="text-left font-medium px-4 py-3">项目名</th>
+            <th class="text-left font-medium px-4 py-3">部署目录</th>
+            <th class="text-left font-medium px-4 py-3 w-28">分类</th>
+            <th class="text-left font-medium px-4 py-3 w-24">环境</th>
+            <th class="text-left font-medium px-4 py-3 w-36">上次部署</th>
+            <th class="text-left font-medium px-4 py-3 w-20">状态</th>
+            <th class="text-right font-medium px-4 py-3 w-12"></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr
+            v-for="project in filteredProjects"
+            :key="project.id"
+            class="border-t border-border hover:bg-white/5 cursor-pointer"
+            @click="goToDetail(project.id)"
+          >
+            <td class="px-4 py-3">
+              <div class="flex items-center space-x-2">
+                <Server class="w-4 h-4 text-textMuted" />
+                <div>
+                  <div class="text-textMain font-medium">{{ project.name }}</div>
+                  <div class="text-[11px] text-textMuted font-mono">{{ project.id }}</div>
+                </div>
+              </div>
+            </td>
+            <td class="px-4 py-3 text-textMuted font-mono text-xs break-all max-w-xs">{{ project.destPath || '—' }}</td>
+            <td class="px-4 py-3">
+              <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] border" :class="categoryChipClass(categoryMap.get(project.categoryId || '')?.color)">
+                <Tag class="w-3 h-3 mr-1" />
+                {{ categoryNameOf(project.categoryId) }}
+              </span>
+            </td>
+            <td class="px-4 py-3">
+              <span v-if="project.env" class="inline-flex items-center px-2 py-0.5 rounded text-[10px] border bg-base text-textMuted border-border font-mono">{{ project.env }}</span>
+              <span v-else class="text-textMuted text-xs">—</span>
+            </td>
+            <td class="px-4 py-3 text-textMuted text-xs" :title="project.lastDeployAt ? new Date(project.lastDeployAt).toLocaleString() : '从未部署'">
+              {{ formatRelativeTime(project.lastDeployAt) }}
+            </td>
+            <td class="px-4 py-3">
+              <span class="inline-flex items-center text-xs" :class="project.status === 'success' ? 'text-success' : project.status === 'failed' ? 'text-danger' : 'text-primary'">
+                <span class="w-2 h-2 rounded-full mr-1.5" :class="project.status === 'success' ? 'bg-success' : project.status === 'failed' ? 'bg-danger' : 'bg-primary'"></span>
+                {{ project.status === 'success' ? '正常' : project.status === 'failed' ? '异常' : '空闲' }}
+              </span>
+            </td>
+            <td class="px-4 py-3 text-right">
+              <button class="p-1 dark:hover:bg-white/10 hover:bg-black/10 rounded-md text-textMuted hover:text-textMain" @click.stop="toggleDropdown(project.id, $event)">
+                <MoreVertical class="w-4 h-4" />
+              </button>
+            </td>
+          </tr>
+          <tr v-if="filteredProjects.length === 0">
+            <td colspan="7" class="px-4 py-12 text-center text-textMuted text-sm">当前分类下没有项目</td>
+          </tr>
+        </tbody>
+      </table>
     </div>
 
     <!-- Card dropdown (teleported to body to avoid being clipped by card's overflow:hidden) -->
@@ -444,6 +768,47 @@ function closeBatchModal() {
             <ScrollText class="w-3.5 h-3.5 mr-2 text-textMuted" />
             部署日志
           </button>
+          <div class="border-t border-border my-1"></div>
+          <div class="relative">
+            <button
+              class="flex items-center justify-between w-full px-3 py-2 text-sm text-textMain hover:bg-white/5 transition-colors"
+              @click="openMoveSubmenu($event)"
+            >
+              <span class="flex items-center">
+                <FolderTree class="w-3.5 h-3.5 mr-2 text-textMuted" />
+                移动到分类
+              </span>
+              <ChevronRight class="w-3.5 h-3.5 text-textMuted" />
+            </button>
+            <div
+              v-if="moveSubmenuOpen"
+              class="absolute top-0 right-full mr-1 bg-panel border border-border rounded-lg shadow-xl py-1 min-w-[160px] max-h-64 overflow-auto"
+              style="z-index: 61"
+              @click.stop
+            >
+              <button
+                class="flex items-center w-full px-3 py-2 text-sm text-textMain hover:bg-white/5 transition-colors"
+                :disabled="isMovingCategory"
+                @click="openDropdownId && moveProjectToCategory(openDropdownId, null)"
+              >
+                <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] border bg-base text-textMuted border-border">默认</span>
+              </button>
+              <button
+                v-for="c in projectStore.categories"
+                :key="c.id"
+                class="flex items-center w-full px-3 py-2 text-sm text-textMain hover:bg-white/5 transition-colors"
+                :disabled="isMovingCategory"
+                @click="openDropdownId && moveProjectToCategory(openDropdownId, c.id)"
+              >
+                <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] border" :class="categoryChipClass(c.color)">
+                  <Tag class="w-3 h-3 mr-1" />{{ c.name }}
+                </span>
+              </button>
+              <div v-if="projectStore.categories.length === 0" class="px-3 py-2 text-xs text-textMuted">
+                还没有分类，请先在「管理分类」中创建
+              </div>
+            </div>
+          </div>
           <div class="border-t border-border my-1"></div>
           <button
             class="flex items-center w-full px-3 py-2 text-sm text-danger hover:bg-danger/10 transition-colors"
@@ -493,6 +858,17 @@ function closeBatchModal() {
               <code class="font-mono text-textMain">kite push --env {`{name}`}</code> 可精准推送到对应环境。
               <span class="text-primary/80">常见场景：同一项目部署到测试/预发/生产等不同机器。</span>
             </p>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-textMuted mb-1.5">分类 (可选)</label>
+            <select
+              v-model="newProject.categoryId"
+              class="w-full bg-base border border-border rounded-md px-3 py-2 text-textMain focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all text-sm"
+            >
+              <option value="">默认</option>
+              <option v-for="c in projectStore.categories" :key="c.id" :value="c.id">{{ c.name }}</option>
+            </select>
           </div>
 
           <div>
@@ -757,6 +1133,127 @@ function closeBatchModal() {
             <Trash2 v-else class="w-4 h-4 mr-2" />
             {{ isDeleting ? '正在删除...' : '永久删除' }}
           </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Manage Categories Modal -->
+    <div
+      v-if="showCategoryModal"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      @click.self="showCategoryModal = false"
+    >
+      <div class="bg-panel border border-border rounded-xl w-full max-w-2xl shadow-2xl flex flex-col" style="max-height: 85vh;">
+        <div class="flex items-center justify-between px-6 py-4 border-b border-border">
+          <div>
+            <h2 class="text-xl font-bold text-textMain">管理分类</h2>
+            <p class="text-xs text-textMuted mt-1">创建、编辑、删除分类。删除分类后，相关项目将回落到「默认」。</p>
+          </div>
+          <button @click="showCategoryModal = false" class="text-textMuted hover:text-textMain p-1">
+            <XCircle class="w-5 h-5" />
+          </button>
+        </div>
+
+        <div class="px-6 py-4 border-b border-border">
+          <label class="block text-sm font-medium text-textMuted mb-2">新建分类</label>
+          <div class="flex items-center gap-2">
+            <input
+              v-model="newCategoryName"
+              type="text"
+              placeholder="如：前端 / 后端 / 测试环境"
+              :disabled="isCreatingCategory"
+              class="flex-1 bg-base border border-border rounded-md px-3 py-2 text-textMain focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all text-sm disabled:opacity-60"
+              @keydown.enter.prevent="submitCreateCategory"
+            />
+            <select
+              v-model="newCategoryColor"
+              :disabled="isCreatingCategory"
+              class="bg-base border border-border rounded-md px-2 py-2 text-textMain focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all text-sm disabled:opacity-60"
+            >
+              <option value="">无颜色</option>
+              <option v-for="c in ALL_COLORS" :key="c" :value="c">{{ c }}</option>
+            </select>
+            <button
+              @click="submitCreateCategory"
+              :disabled="isCreatingCategory || !newCategoryName.trim()"
+              class="px-4 py-2 text-sm font-medium bg-primary text-white rounded-md hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center"
+            >
+              <RefreshCw v-if="isCreatingCategory" class="w-4 h-4 mr-2 animate-spin" />
+              <Plus v-else class="w-4 h-4 mr-1" />
+              新建
+            </button>
+          </div>
+        </div>
+
+        <div class="flex-1 overflow-auto px-6 py-4">
+          <div v-if="projectStore.categories.length === 0" class="text-center py-8 text-textMuted text-sm">
+            还没有分类，新建一个吧
+          </div>
+          <ul v-else class="divide-y divide-border">
+            <li
+              v-for="c in projectStore.categories"
+              :key="c.id"
+              class="py-3 flex items-center justify-between gap-3"
+            >
+              <template v-if="editingCategoryId === c.id">
+                <input
+                  v-model="editCategoryName"
+                  type="text"
+                  :disabled="isSavingCategory"
+                  class="flex-1 bg-base border border-border rounded-md px-3 py-2 text-textMain focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all text-sm disabled:opacity-60"
+                  @keydown.enter.prevent="submitEditCategory"
+                />
+                <select
+                  v-model="editCategoryColor"
+                  :disabled="isSavingCategory"
+                  class="bg-base border border-border rounded-md px-2 py-2 text-textMain focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all text-sm disabled:opacity-60"
+                >
+                  <option value="">无颜色</option>
+                  <option v-for="opt in ALL_COLORS" :key="opt" :value="opt">{{ opt }}</option>
+                </select>
+                <button
+                  @click="submitEditCategory"
+                  :disabled="isSavingCategory || !editCategoryName.trim()"
+                  class="px-3 py-1.5 text-xs font-medium bg-primary text-white rounded-md hover:bg-primary/90 disabled:opacity-50 transition-colors"
+                >保存</button>
+                <button
+                  @click="cancelEditCategory"
+                  :disabled="isSavingCategory"
+                  class="px-3 py-1.5 text-xs font-medium text-textMuted hover:text-textMain transition-colors"
+                >取消</button>
+              </template>
+              <template v-else>
+                <span class="inline-flex items-center px-2 py-1 rounded text-xs border" :class="categoryChipClass(c.color)">
+                  <Tag class="w-3 h-3 mr-1.5" />
+                  {{ c.name }}
+                </span>
+                <span class="text-xs text-textMuted flex-1">{{ projectCountByCategory[c.id] || 0 }} 个项目</span>
+                <button
+                  @click="startEditCategory(c)"
+                  class="px-3 py-1.5 text-xs font-medium text-textMuted hover:text-textMain transition-colors flex items-center"
+                >
+                  <Pencil class="w-3 h-3 mr-1" />
+                  编辑
+                </button>
+                <button
+                  @click="deleteCategoryAction(c)"
+                  :disabled="deletingCategoryId === c.id"
+                  class="px-3 py-1.5 text-xs font-medium text-danger hover:bg-danger/10 rounded-md transition-colors flex items-center disabled:opacity-50"
+                >
+                  <RefreshCw v-if="deletingCategoryId === c.id" class="w-3 h-3 mr-1 animate-spin" />
+                  <Trash2 v-else class="w-3 h-3 mr-1" />
+                  删除
+                </button>
+              </template>
+            </li>
+          </ul>
+        </div>
+
+        <div class="flex items-center justify-end px-6 py-4 border-t border-border">
+          <button
+            @click="showCategoryModal = false"
+            class="px-4 py-2 text-sm font-medium text-textMuted hover:text-textMain dark:hover:bg-white/5 hover:bg-black/5 rounded-md transition-colors"
+          >完成</button>
         </div>
       </div>
     </div>

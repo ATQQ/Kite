@@ -15,7 +15,18 @@ export interface Project {
   env?: string
   cleanMode?: 'merge' | 'clean' | 'clean-all' | null
   protectPaths?: string | null
+  categoryId?: string | null
+  lastDeployAt?: string | null
   status: 'running' | 'success' | 'failed' | 'idle'
+  updatedAt: string
+}
+
+export interface Category {
+  id: string
+  name: string
+  color?: string | null
+  sortOrder?: number
+  createdAt: string
   updatedAt: string
 }
 
@@ -61,6 +72,7 @@ export const useProjectStore = defineStore('project', () => {
   
   const projects = ref<Project[]>([])
   const logs = ref<DeploymentLog[]>([])
+  const categories = ref<Category[]>([])
 
   // Helper fetch function
   async function apiFetch(endpoint: string, options: RequestInit & { silent401?: boolean } = {}) {
@@ -103,6 +115,8 @@ export const useProjectStore = defineStore('project', () => {
         env: p.env || '',
         cleanMode: p.cleanMode ?? null,
         protectPaths: p.protectPaths ?? null,
+        categoryId: p.categoryId ?? null,
+        lastDeployAt: p.lastDeployAt ?? null,
       }))
     } catch (e) {
       console.error('Failed to fetch projects', e)
@@ -129,7 +143,8 @@ export const useProjectStore = defineStore('project', () => {
           name: project.name,
           description: project.description,
           deployPath: project.destPath || '/tmp/default-deploy',
-          env: project.env || undefined
+          env: project.env || undefined,
+          categoryId: project.categoryId ?? undefined,
         })
       })
       if (data.success) {
@@ -164,6 +179,7 @@ export const useProjectStore = defineStore('project', () => {
       if (payload.destPath !== undefined) apiPayload.deployPath = payload.destPath
       if (payload.cleanMode !== undefined) apiPayload.cleanMode = payload.cleanMode
       if (payload.protectPaths !== undefined) apiPayload.protectPaths = payload.protectPaths
+      if (payload.categoryId !== undefined) apiPayload.categoryId = payload.categoryId
 
       const data = await apiFetch(`/projects/${id}`, {
         method: 'PUT',
@@ -405,12 +421,69 @@ export const useProjectStore = defineStore('project', () => {
     localStorage.removeItem('adminToken')
     projects.value = []
     logs.value = []
+    categories.value = []
+  }
+
+  async function fetchCategories() {
+    try {
+      const data = await apiFetch('/categories')
+      categories.value = Array.isArray(data) ? data : []
+    } catch (e) {
+      console.error('Failed to fetch categories', e)
+    }
+  }
+
+  async function createCategory(payload: { name: string; color?: string | null; sortOrder?: number }): Promise<{ ok: boolean; error?: string; conflictCategory?: string; category?: Category }> {
+    try {
+      const data = await apiFetch('/categories', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      })
+      if (data.success) {
+        await fetchCategories()
+        return { ok: true, category: data.category }
+      }
+      return { ok: false, error: data.error }
+    } catch (e: any) {
+      return { ok: false, error: e?.message, conflictCategory: e?.data?.conflictCategory }
+    }
+  }
+
+  async function updateCategory(id: string, payload: { name?: string; color?: string | null; sortOrder?: number }): Promise<{ ok: boolean; error?: string; conflictCategory?: string; category?: Category }> {
+    try {
+      const data = await apiFetch(`/categories/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      })
+      if (data.success) {
+        await fetchCategories()
+        return { ok: true, category: data.category }
+      }
+      return { ok: false, error: data.error }
+    } catch (e: any) {
+      return { ok: false, error: e?.message, conflictCategory: e?.data?.conflictCategory }
+    }
+  }
+
+  async function deleteCategory(id: string): Promise<{ ok: boolean; detachedProjects?: number; error?: string }> {
+    try {
+      const data = await apiFetch(`/categories/${id}`, { method: 'DELETE' })
+      if (data.success) {
+        await fetchCategories()
+        await fetchProjects()
+        return { ok: true, detachedProjects: data.detachedProjects }
+      }
+      return { ok: false, error: data.error }
+    } catch (e: any) {
+      return { ok: false, error: e?.message }
+    }
   }
 
   return {
     adminToken,
     projects,
     logs,
+    categories,
     fetchProjects,
     fetchLogs,
     getProjectById,
@@ -438,6 +511,10 @@ export const useProjectStore = defineStore('project', () => {
     fetchFileContent,
     fetchFsHome,
     fetchFsList,
+    fetchCategories,
+    createCategory,
+    updateCategory,
+    deleteCategory,
     login,
     logout
   }

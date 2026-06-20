@@ -18,7 +18,8 @@ const project = computed(() => projectStore.getProjectById(projectId))
 const formData = ref({
   destPath: '',
   preDeploy: '',
-  postDeploy: ''
+  postDeploy: '',
+  categoryId: '' as string
 })
 
 const cleanForm = ref<{
@@ -46,10 +47,12 @@ const cliEnv = ref('')
 onMounted(async () => {
   serverUrl.value = window.location.origin
   await projectStore.fetchProjects()
+  await projectStore.fetchCategories()
   if (project.value) {
     formData.value.destPath = project.value.destPath || ''
     formData.value.preDeploy = project.value.preDeploy || ''
     formData.value.postDeploy = project.value.postDeploy || ''
+    formData.value.categoryId = project.value.categoryId || ''
     cliEnv.value = project.value.env || ''
     const rawMode = (project.value as any).cleanMode
     cleanForm.value.cleanMode = (rawMode === 'clean' || rawMode === 'clean-all') ? rawMode : 'merge'
@@ -182,7 +185,12 @@ function formatStart(s: string) {
 
 const saveConfig = async () => {
   try {
-    await projectStore.updateProject(projectId, formData.value)
+    await projectStore.updateProject(projectId, {
+      destPath: formData.value.destPath,
+      preDeploy: formData.value.preDeploy,
+      postDeploy: formData.value.postDeploy,
+      categoryId: formData.value.categoryId || null,
+    })
     toast.success('配置已保存')
   } catch (e: any) {
     const conflict = e?.data?.conflictProject
@@ -701,6 +709,18 @@ async function confirmDelete() {
               placeholder="e.g. /var/www/my-project"
             />
             <p class="text-xs text-textMuted mt-2">在服务端解压和部署该项目文件的绝对路径。</p>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-textMain mb-2">所属分类</label>
+            <select
+              v-model="formData.categoryId"
+              class="w-full bg-base border border-border rounded-md px-4 py-3 text-textMain text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all"
+            >
+              <option value="">默认（未分类）</option>
+              <option v-for="c in projectStore.categories" :key="c.id" :value="c.id">{{ c.name }}</option>
+            </select>
+            <p class="text-xs text-textMuted mt-2">用于在项目列表中按分类筛选。在「项目管理 → 管理分类」中创建更多分类。</p>
           </div>
 
           <div>

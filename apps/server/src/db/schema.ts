@@ -13,6 +13,17 @@ export const projects = sqliteTable('projects', {
   status: text('status').default('idle'), // 'idle' | 'success' | 'failed' | 'running'
   cleanMode: text('clean_mode'),             // 'merge' (default/null) | 'clean' | 'clean-all'
   protectPaths: text('protect_paths'),       // JSON string array of globs
+  categoryId: text('category_id'),           // nullable: NULL = 默认（未分类）
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+// 项目分类表（NULL category_id 视为默认/未分类，故无需种子默认行）
+export const categories = sqliteTable('categories', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull().unique(),
+  color: text('color'),                      // 前端枚举: blue|green|yellow|purple|pink|cyan|gray
+  sortOrder: integer('sort_order').default(0),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 });

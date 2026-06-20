@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { createClient } from '@libsql/client';
 import { drizzle } from 'drizzle-orm/libsql';
 import * as schema from './schema.js';
-import { eq, desc, and, gte, lte } from 'drizzle-orm';
+import { eq, desc, asc, and, gte, lte } from 'drizzle-orm';
 import path from 'node:path';
 
 // Initialize libSQL client (using local file for now, can be swapped to Turso URL)
@@ -36,6 +36,22 @@ const initDb = async () => {
   // Migration: add clean_mode / protect_paths for rollback feature (#1)
   try { await client.execute(`ALTER TABLE projects ADD COLUMN clean_mode TEXT`); } catch { /* exists */ }
   try { await client.execute(`ALTER TABLE projects ADD COLUMN protect_paths TEXT`); } catch { /* exists */ }
+
+  // Migration: add category_id for project categorization
+  try { await client.execute(`ALTER TABLE projects ADD COLUMN category_id TEXT`); } catch { /* exists */ }
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_projects_category_id ON projects(category_id);`);
+
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS categories (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      color TEXT,
+      sort_order INTEGER DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_categories_sort_order ON categories(sort_order);`);
 
   await client.execute(`
     CREATE TABLE IF NOT EXISTS settings (
@@ -191,6 +207,23 @@ export const db = {
       await ensureDbReady();
       return await ormDb.select().from(schema.projects);
     },
+    async findAllWithMeta() {
+      await ensureDbReady();
+      const rows = await ormDb.select().from(schema.projects);
+      if (rows.length === 0) return [];
+      const aggRes = await client.execute(
+        `SELECT project_id AS pid, MAX(start_time) AS last
+           FROM deployments
+           GROUP BY project_id`,
+      );
+      const map = new Map<string, string | null>();
+      for (const r of aggRes.rows) {
+        const pid = r.pid == null ? '' : String(r.pid);
+        const last = r.last == null ? null : String(r.last);
+        if (pid) map.set(pid, last);
+      }
+      return rows.map((p) => ({ ...p, lastDeployAt: map.get(p.id) ?? null }));
+    },
     async findById(id: string) {
       await ensureDbReady();
       const result = await ormDb.select().from(schema.projects).where(eq(schema.projects.id, id)).limit(1);
@@ -227,6 +260,65 @@ export const db = {
       await ormDb.delete(schema.projects).where(eq(schema.projects.id, id));
       return true;
     }
+  },
+  categories: {
+    async findAll() {
+      await ensureDbReady();
+      return await ormDb.select().from(schema.categories)
+        .orderBy(asc(schema.categories.sortOrder), asc(schema.categories.name));
+    },
+    async findById(id: string) {
+      await ensureDbReady();
+      const result = await ormDb.select().from(schema.categories).where(eq(schema.categories.id, id)).limit(1);
+      return result[0] || null;
+    },
+    async findByName(name: string) {
+      await ensureDbReady();
+      const result = await ormDb.select().from(schema.categories).where(eq(schema.categories.name, name)).limit(1);
+      return result[0] || null;
+    },
+    async create(data: { id?: string; name: string; color?: string | null; sortOrder?: number | null }) {
+      await ensureDbReady();
+      const now = new Date().toISOString();
+      const row = {
+        id: data.id || 'cat_' + randomUUID().replace(/-/g, '').substring(0, 12),
+        name: data.name,
+        color: data.color ?? null,
+        sortOrder: data.sortOrder ?? 0,
+        createdAt: now,
+        updatedAt: now,
+      };
+      await ormDb.insert(schema.categories).values(row);
+      return row;
+    },
+    async update(id: string, data: { name?: string; color?: string | null; sortOrder?: number | null }) {
+      await ensureDbReady();
+      const patch: Record<string, any> = { updatedAt: new Date().toISOString() };
+      if (data.name !== undefined) patch.name = data.name;
+      if (data.color !== undefined) patch.color = data.color;
+      if (data.sortOrder !== undefined) patch.sortOrder = data.sortOrder;
+      await ormDb.update(schema.categories).set(patch).where(eq(schema.categories.id, id));
+      return this.findById(id);
+    },
+    async remove(id: string) {
+      await ensureDbReady();
+      const cat = await this.findById(id);
+      if (!cat) return false;
+      // Detach projects: NULL = 默认
+      await ormDb.update(schema.projects)
+        .set({ categoryId: null })
+        .where(eq(schema.projects.categoryId, id));
+      await ormDb.delete(schema.categories).where(eq(schema.categories.id, id));
+      return true;
+    },
+    async countProjects(id: string) {
+      await ensureDbReady();
+      const result = await client.execute({
+        sql: 'SELECT COUNT(*) as count FROM projects WHERE category_id = ?',
+        args: [id],
+      });
+      return Number(result.rows[0]?.count ?? 0);
+    },
   },
   deployments: {
     async insert(data: any) {

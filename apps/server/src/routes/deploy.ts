@@ -98,7 +98,7 @@ export const deployRoutes = new Elysia()
   })
   .get('/api/projects', async ({ headers, set }) => {
     if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
-    return await db.projects.findAll();
+    return await db.projects.findAllWithMeta();
   })
   .post('/api/projects', async ({ headers, body, set }) => {
     if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
@@ -109,8 +109,16 @@ export const deployRoutes = new Elysia()
       set.status = 409;
       return { error: '该部署目录已被项目占用', conflictProject: conflict.name };
     }
+    // Validate categoryId if provided
+    let categoryId: string | null = null;
+    if (body.categoryId !== undefined && body.categoryId !== null && body.categoryId !== '') {
+      const cat = await db.categories.findById(body.categoryId);
+      if (!cat) { set.status = 400; return { error: '分类不存在' }; }
+      categoryId = cat.id;
+    }
     const project = await db.projects.create({
       ...body,
+      categoryId,
       id: 'proj_' + randomUUID().replace(/-/g, '').substring(0, 12),
       token: 'kt_' + randomUUID().replace(/-/g, ''),
     });
@@ -129,7 +137,8 @@ export const deployRoutes = new Elysia()
       name: t.String(),
       description: t.Optional(t.String()),
       deployPath: t.String(),
-      env: t.Optional(t.String())
+      env: t.Optional(t.String()),
+      categoryId: t.Optional(t.Union([t.String(), t.Null()])),
     })
   })
   .get('/api/projects/:id', async ({ headers, params, set }) => {
@@ -186,6 +195,18 @@ export const deployRoutes = new Elysia()
         return { error: 'protectPaths must be string[] or null' };
       }
     }
+    if (typeof patch.categoryId !== 'undefined') {
+      if (patch.categoryId === null || patch.categoryId === '') {
+        patch.categoryId = null;
+      } else if (typeof patch.categoryId === 'string') {
+        const cat = await db.categories.findById(patch.categoryId);
+        if (!cat) { set.status = 400; return { error: '分类不存在' }; }
+        patch.categoryId = cat.id;
+      } else {
+        set.status = 400;
+        return { error: 'categoryId must be string or null' };
+      }
+    }
     const after = await db.projects.update(params.id, patch);
     if (!after) { set.status = 404; return { error: 'Project not found' }; }
     const diff = diffFields(before as any, after as any, Object.keys(patch));
@@ -211,6 +232,7 @@ export const deployRoutes = new Elysia()
       env: t.Optional(t.String()),
       cleanMode: t.Optional(t.Union([t.Literal('merge'), t.Literal('clean'), t.Literal('clean-all'), t.Null()])),
       protectPaths: t.Optional(t.Union([t.Array(t.String()), t.Null()])),
+      categoryId: t.Optional(t.Union([t.String(), t.Null()])),
     })
   })
   .delete('/api/projects/:id', async ({ headers, params, set }) => {
