@@ -10,11 +10,24 @@ const verifyAdminToken = (headers: Record<string, string | undefined>) => {
 };
 
 const ALLOWED_COLORS = new Set(['blue', 'green', 'yellow', 'purple', 'pink', 'cyan', 'gray']);
+const COLOR_PALETTE = ['blue', 'green', 'yellow', 'purple', 'pink', 'cyan', 'gray'];
 
 function normalizeColor(input: unknown): string | null {
   if (input === null || input === undefined || input === '') return null;
   if (typeof input !== 'string') return null;
   return ALLOWED_COLORS.has(input) ? input : null;
+}
+
+async function pickFreeColor(): Promise<string> {
+  const list = await db.categories.findAll();
+  const used = new Set<string>();
+  for (const c of list) {
+    if (c.color) used.add(c.color);
+  }
+  for (const color of COLOR_PALETTE) {
+    if (!used.has(color)) return color;
+  }
+  return COLOR_PALETTE[list.length % COLOR_PALETTE.length];
 }
 
 function normalizeName(input: unknown): string {
@@ -34,7 +47,8 @@ export const categoryRoutes = new Elysia()
     if (name.length > 50) { set.status = 400; return { error: '分类名过长（最多 50 字符）' }; }
     const exist = await db.categories.findByName(name);
     if (exist) { set.status = 409; return { error: '分类名已存在', conflictCategory: exist.name }; }
-    const color = normalizeColor(body.color);
+    let color = normalizeColor(body.color);
+    if (!color) color = await pickFreeColor();
     const sortOrder = typeof body.sortOrder === 'number' ? body.sortOrder : 0;
     const created = await db.categories.create({ name, color, sortOrder });
     await writeAudit({ headers }, {

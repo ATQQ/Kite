@@ -254,6 +254,7 @@ interface BatchRow {
   destPath: string
   env: string
   description: string
+  categoryId: string
   status: BatchStatus
   errorMsg?: string
 }
@@ -278,9 +279,13 @@ function onFolderPicked(paths: string[]) {
     destPath: p,
     env: '',
     description: '',
+    categoryId: selectedCategoryFilter.value && selectedCategoryFilter.value !== 'all' && selectedCategoryFilter.value !== 'default'
+      ? selectedCategoryFilter.value
+      : '',
     status: 'pending' as BatchStatus,
   }))
   showBatchModal.value = true
+  projectStore.fetchCategories()
 }
 
 function addRowsFromPicker(paths: string[]) {
@@ -293,6 +298,7 @@ function addRowsFromPicker(paths: string[]) {
       destPath: p,
       env: '',
       description: '',
+      categoryId: '',
       status: 'pending',
     })
   }
@@ -381,6 +387,7 @@ async function submitBatch() {
         description: row.description?.trim() || undefined,
         destPath: row.destPath,
         env: row.env?.trim() || undefined,
+        categoryId: row.categoryId || null,
       })
       if (result.ok) {
         row.status = 'success'
@@ -438,20 +445,29 @@ async function moveProjectToCategory(projectId: string, categoryId: string | nul
 // ---------- Manage categories modal ----------
 const showCategoryModal = ref(false)
 const newCategoryName = ref('')
-const newCategoryColor = ref<string>('')
 const isCreatingCategory = ref(false)
 const editingCategoryId = ref<string | null>(null)
 const editCategoryName = ref('')
-const editCategoryColor = ref<string>('')
 const isSavingCategory = ref(false)
 const deletingCategoryId = ref<string | null>(null)
 
 const ALL_COLORS = ['blue', 'green', 'yellow', 'purple', 'pink', 'cyan', 'gray']
 
+function pickFreeColor(excludeId?: string | null): string {
+  const used = new Set<string>()
+  for (const c of projectStore.categories) {
+    if (excludeId && c.id === excludeId) continue
+    if (c.color) used.add(c.color)
+  }
+  for (const color of ALL_COLORS) {
+    if (!used.has(color)) return color
+  }
+  return ALL_COLORS[projectStore.categories.length % ALL_COLORS.length]
+}
+
 function openCategoryModal() {
   showCategoryModal.value = true
   newCategoryName.value = ''
-  newCategoryColor.value = ''
   editingCategoryId.value = null
   projectStore.fetchCategories()
 }
@@ -461,11 +477,10 @@ async function submitCreateCategory() {
   if (!name) return
   isCreatingCategory.value = true
   try {
-    const res = await projectStore.createCategory({ name, color: newCategoryColor.value || null })
+    const res = await projectStore.createCategory({ name, color: pickFreeColor() })
     if (res.ok) {
       toast.success('分类创建成功')
       newCategoryName.value = ''
-      newCategoryColor.value = ''
     } else {
       toast.error('创建失败', res.conflictCategory ? `分类名「${res.conflictCategory}」已存在` : res.error || '请稍后重试')
     }
@@ -477,13 +492,11 @@ async function submitCreateCategory() {
 function startEditCategory(c: Category) {
   editingCategoryId.value = c.id
   editCategoryName.value = c.name
-  editCategoryColor.value = c.color || ''
 }
 
 function cancelEditCategory() {
   editingCategoryId.value = null
   editCategoryName.value = ''
-  editCategoryColor.value = ''
 }
 
 async function submitEditCategory() {
@@ -492,7 +505,7 @@ async function submitEditCategory() {
   if (!name) return
   isSavingCategory.value = true
   try {
-    const res = await projectStore.updateCategory(editingCategoryId.value, { name, color: editCategoryColor.value || null })
+    const res = await projectStore.updateCategory(editingCategoryId.value, { name })
     if (res.ok) {
       toast.success('分类已更新')
       cancelEditCategory()
@@ -574,7 +587,7 @@ async function deleteCategoryAction(c: Category) {
           class="flex items-center px-4 py-2 border border-border hover:border-primary/50 text-textMain rounded-md transition-all font-medium text-sm"
         >
           <Plus class="w-4 h-4 mr-2" />
-          手动填写
+          新建项目
         </button>
       </div>
     </div>
@@ -931,10 +944,11 @@ async function deleteCategoryAction(c: Category) {
           <table class="w-full text-sm table-fixed">
             <thead class="text-xs text-textMuted sticky top-0 bg-panel">
               <tr class="border-b border-border">
-                <th class="text-left font-medium px-3 py-2 w-[20%]">项目名</th>
-                <th class="text-left font-medium px-3 py-2 w-[42%]">部署目录</th>
-                <th class="text-left font-medium px-3 py-2 w-[14%]">环境标识</th>
-                <th class="text-left font-medium px-3 py-2 w-[24%]">描述</th>
+                <th class="text-left font-medium px-3 py-2 w-[18%]">项目名</th>
+                <th class="text-left font-medium px-3 py-2 w-[36%]">部署目录</th>
+                <th class="text-left font-medium px-3 py-2 w-[10%]">环境标识</th>
+                <th class="text-left font-medium px-3 py-2 w-[14%]">分类</th>
+                <th class="text-left font-medium px-3 py-2 w-[22%]">描述</th>
               </tr>
             </thead>
             <tbody>
@@ -977,6 +991,16 @@ async function deleteCategoryAction(c: Category) {
                   />
                 </td>
                 <td class="px-3 py-2">
+                  <select
+                    v-model="row.categoryId"
+                    :disabled="row.status === 'success' || isBatchSubmitting"
+                    class="w-full bg-base border border-border rounded px-2 py-1.5 text-textMain text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 disabled:opacity-60"
+                  >
+                    <option value="">默认</option>
+                    <option v-for="c in projectStore.categories" :key="c.id" :value="c.id">{{ c.name }}</option>
+                  </select>
+                </td>
+                <td class="px-3 py-2">
                   <div class="flex items-start gap-2">
                     <input
                       v-model="row.description"
@@ -998,7 +1022,7 @@ async function deleteCategoryAction(c: Category) {
                 </td>
               </tr>
               <tr v-if="batchRows.length === 0">
-                <td colspan="4" class="px-3 py-8 text-center text-textMuted text-sm">没有待创建的项目</td>
+                <td colspan="5" class="px-3 py-8 text-center text-textMuted text-sm">没有待创建的项目</td>
               </tr>
             </tbody>
           </table>
@@ -1165,14 +1189,6 @@ async function deleteCategoryAction(c: Category) {
               class="flex-1 bg-base border border-border rounded-md px-3 py-2 text-textMain focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all text-sm disabled:opacity-60"
               @keydown.enter.prevent="submitCreateCategory"
             />
-            <select
-              v-model="newCategoryColor"
-              :disabled="isCreatingCategory"
-              class="bg-base border border-border rounded-md px-2 py-2 text-textMain focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all text-sm disabled:opacity-60"
-            >
-              <option value="">无颜色</option>
-              <option v-for="c in ALL_COLORS" :key="c" :value="c">{{ c }}</option>
-            </select>
             <button
               @click="submitCreateCategory"
               :disabled="isCreatingCategory || !newCategoryName.trim()"
@@ -1183,6 +1199,7 @@ async function deleteCategoryAction(c: Category) {
               新建
             </button>
           </div>
+          <p class="text-xs text-textMuted mt-2">颜色将自动分配，不同分类之间不重复。</p>
         </div>
 
         <div class="flex-1 overflow-auto px-6 py-4">
@@ -1203,14 +1220,6 @@ async function deleteCategoryAction(c: Category) {
                   class="flex-1 bg-base border border-border rounded-md px-3 py-2 text-textMain focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all text-sm disabled:opacity-60"
                   @keydown.enter.prevent="submitEditCategory"
                 />
-                <select
-                  v-model="editCategoryColor"
-                  :disabled="isSavingCategory"
-                  class="bg-base border border-border rounded-md px-2 py-2 text-textMain focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all text-sm disabled:opacity-60"
-                >
-                  <option value="">无颜色</option>
-                  <option v-for="opt in ALL_COLORS" :key="opt" :value="opt">{{ opt }}</option>
-                </select>
                 <button
                   @click="submitEditCategory"
                   :disabled="isSavingCategory || !editCategoryName.trim()"
