@@ -62,6 +62,18 @@ function categoryChipClass(color?: string | null) {
   return 'bg-base text-textMuted border-border'
 }
 
+const ENV_COLOR_PALETTE = ['blue', 'green', 'yellow', 'purple', 'pink', 'cyan', 'gray'] as const
+function envChipClass(env?: string | null): string {
+  const key = (env || '').trim().toLowerCase()
+  if (!key) return 'bg-base text-textMuted border-border'
+  let hash = 0
+  for (let i = 0; i < key.length; i++) {
+    hash = (hash * 31 + key.charCodeAt(i)) >>> 0
+  }
+  const color = ENV_COLOR_PALETTE[hash % ENV_COLOR_PALETTE.length]
+  return categoryColorClass[color]
+}
+
 function categoryNameOf(categoryId?: string | null): string {
   if (!categoryId) return '默认'
   return categoryMap.value.get(categoryId)?.name ?? '默认'
@@ -659,7 +671,7 @@ async function deleteCategoryAction(c: Category) {
             <Tag class="w-3 h-3 mr-1" />
             {{ categoryNameOf(project.categoryId) }}
           </span>
-          <span v-if="project.env" class="inline-flex items-center px-2 py-0.5 rounded text-[10px] border bg-base text-textMuted border-border font-mono">{{ project.env }}</span>
+          <span v-if="project.env" class="inline-flex items-center px-2 py-0.5 rounded text-[10px] border font-mono" :class="envChipClass(project.env)">{{ project.env }}</span>
         </div>
 
         <div class="flex items-center justify-between border-t border-border pt-4 text-xs text-textMuted">
@@ -726,7 +738,7 @@ async function deleteCategoryAction(c: Category) {
               </span>
             </td>
             <td class="px-4 py-3">
-              <span v-if="project.env" class="inline-flex items-center px-2 py-0.5 rounded text-[10px] border bg-base text-textMuted border-border font-mono">{{ project.env }}</span>
+              <span v-if="project.env" class="inline-flex items-center px-2 py-0.5 rounded text-[10px] border font-mono" :class="envChipClass(project.env)">{{ project.env }}</span>
               <span v-else class="text-textMuted text-xs">—</span>
             </td>
             <td class="px-4 py-3 text-textMuted text-xs" :title="project.lastDeployAt ? new Date(project.lastDeployAt).toLocaleString() : '从未部署'">
