@@ -304,3 +304,36 @@ Authorization: Bearer <YOUR_ADMIN_TOKEN>
     "successRate": 90
   }
   ```
+
+## 6. 健康检查接口
+
+### 6.1 公开健康探针
+* **URL**: `/api/health`
+* **Method**: `GET`
+* **鉴权**: 无（供 LB / 容器探活）
+* **Response 200**:
+  ```json
+  { "status": "ok", "uptime": 1234, "version": "dev" }
+  ```
+* **Response 503**: 同结构，`status` 非 `ok` 时下游应判定为不健康。
+
+### 6.2 管理员健康详情
+* **URL**: `/api/health/detail`
+* **Method**: `GET`
+* **鉴权**: `Authorization: Bearer <ADMIN_TOKEN>`
+* **Response 200**（节选）:
+  ```json
+  {
+    "version": "dev",
+    "runtime": { "name": "node", "version": "v24.16.0" },
+    "uptimeSec": 263,
+    "serverTime": "2026-06-17T07:06:20.818Z",
+    "db": { "ok": true, "latencyMs": 9.6, "path": "~/.kite/kite.db" },
+    "disk": { "freeBytes": 298276696064, "totalBytes": 494384795648, "percentUsed": 40 },
+    "kiteHome": { "path": "~/.kite", "writable": true, "tmpWritable": true },
+    "deploy": { "last5": [], "successRate": null },
+    "memoryMB": { "rss": 65, "heapUsed": 85 }
+  }
+  ```
+* **Response 503**: 同结构，触发条件：`db.ok=false` / `kiteHome.writable=false` / `disk.percentUsed>=95`。
+* **平台说明**: Windows 下 `disk` 字段全部为 `null`。

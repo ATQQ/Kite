@@ -1,12 +1,16 @@
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useProjectStore } from '../store/project'
-import { ArrowLeft, Save, Key, Copy, RefreshCw, Trash2, CheckCircle2, TerminalSquare, FolderOpen } from 'lucide-vue-next'
+import { useProjectStore, type CleanPreviewResult, type DeploymentLog } from '../store/project'
+import { ArrowLeft, Save, Key, Copy, RefreshCw, Trash2, CheckCircle2, TerminalSquare, FolderOpen, AlertTriangle, XCircle, ScrollText, Eye, Shield, ShieldAlert, Plus, History, RotateCcw, Archive, ArchiveX, CheckCheck } from 'lucide-vue-next'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
+import CleanPreviewDialog from '../components/CleanPreviewDialog.vue'
+import { useToast } from '../composables/useToast'
 
 const route = useRoute()
 const router = useRouter()
 const projectStore = useProjectStore()
+const toast = useToast()
 
 const projectId = route.params.id as string
 const project = computed(() => projectStore.getProjectById(projectId))
@@ -14,8 +18,25 @@ const project = computed(() => projectStore.getProjectById(projectId))
 const formData = ref({
   destPath: '',
   preDeploy: '',
-  postDeploy: ''
+  postDeploy: '',
+  categoryId: '' as string
 })
+
+const cleanForm = ref<{
+  cleanMode: 'merge' | 'clean' | 'clean-all'
+  protectPaths: string[]
+}>({
+  cleanMode: 'merge',
+  protectPaths: [],
+})
+const protectInput = ref('')
+const isSavingClean = ref(false)
+const showCleanAllConfirm = ref(false)
+
+const showPreview = ref(false)
+const previewLoading = ref(false)
+const previewError = ref('')
+const previewData = ref<CleanPreviewResult | null>(null)
 
 const isTokenVisible = ref(false)
 const isCopied = ref(false)
@@ -26,19 +47,218 @@ const cliEnv = ref('')
 onMounted(async () => {
   serverUrl.value = window.location.origin
   await projectStore.fetchProjects()
+  await projectStore.fetchCategories()
   if (project.value) {
     formData.value.destPath = project.value.destPath || ''
     formData.value.preDeploy = project.value.preDeploy || ''
     formData.value.postDeploy = project.value.postDeploy || ''
+    formData.value.categoryId = project.value.categoryId || ''
     cliEnv.value = project.value.env || ''
+    const rawMode = (project.value as any).cleanMode
+    cleanForm.value.cleanMode = (rawMode === 'clean' || rawMode === 'clean-all') ? rawMode : 'merge'
+    const rawProtect = (project.value as any).protectPaths
+    if (typeof rawProtect === 'string' && rawProtect.length > 0) {
+      try {
+        const parsed = JSON.parse(rawProtect)
+        cleanForm.value.protectPaths = Array.isArray(parsed) ? parsed.filter((s) => typeof s === 'string') : []
+      } catch {
+        cleanForm.value.protectPaths = []
+      }
+    } else {
+      cleanForm.value.protectPaths = []
+    }
   } else {
     router.replace('/projects')
   }
+  await loadDeployments()
 })
 
+const deployments = ref<DeploymentLog[]>([])
+const isLoadingDeployments = ref(false)
+const showRollbackConfirm = ref(false)
+const isRollingBack = ref(false)
+const rollbackTarget = ref<DeploymentLog | null>(null)
+
+async function loadDeployments() {
+  isLoadingDeployments.value = true
+  try {
+    await projectStore.fetchLogs()
+    deployments.value = projectStore.logs
+      .filter(l => l.projectId === projectId)
+      .slice(0, 10)
+  } catch (e) {
+    deployments.value = []
+  } finally {
+    isLoadingDeployments.value = false
+  }
+}
+
+function shortId(id?: string | null) {
+  if (!id) return ''
+  return id.slice(0, 8)
+}
+
+const copiedDeployId = ref<string>('')
+async function copyDeploymentId(id: string, evt?: Event) {
+  if (evt) {
+    evt.stopPropagation()
+    evt.preventDefault()
+  }
+  if (!id) return
+  try {
+    await navigator.clipboard.writeText(id)
+    copiedDeployId.value = id
+    toast.success('已复制部署 ID', shortId(id))
+    setTimeout(() => {
+      if (copiedDeployId.value === id) copiedDeployId.value = ''
+    }, 2000)
+  } catch (e: any) {
+    toast.error('复制失败', e?.message || '请手动选择文本复制')
+  }
+}
+
+const currentDeploymentId = computed(() => {
+  const sorted = [...deployments.value].sort((a, b) => {
+    const ta = new Date(a.startTime).getTime() || 0
+    const tb = new Date(b.startTime).getTime() || 0
+    return tb - ta
+  })
+  return sorted.find(l => l.status === 'success' && (l as any).triggerSource !== 'rollback')?.id || ''
+})
+
+function canRollbackLog(log: DeploymentLog): boolean {
+  if (!log) return false
+  if (log.status === 'running') return false
+  if ((log as any).triggerSource === 'rollback') return false
+  return !!log.artifactPath
+}
+
+function rollbackDisabledReason(log: DeploymentLog): string {
+  if (!log) return ''
+  if (log.status === 'running') return '部署进行中，无法回滚'
+  if ((log as any).triggerSource === 'rollback') return '回滚记录不可再被回滚'
+  if (!log.artifactPath) return '该版本归档已被清理或过早，无法回滚'
+  return ''
+}
+
+function openRollback(log: DeploymentLog) {
+  if (!canRollbackLog(log)) return
+  rollbackTarget.value = log
+  showRollbackConfirm.value = true
+}
+
+async function confirmRollback() {
+  const sourceId = rollbackTarget.value?.id
+  if (!sourceId) return
+  isRollingBack.value = true
+  try {
+    const data = await projectStore.rollbackDeployment(sourceId)
+    toast.success('回滚已完成', `新部署 ${shortId(data.deployId)}`)
+    showRollbackConfirm.value = false
+    rollbackTarget.value = null
+    await loadDeployments()
+  } catch (e: any) {
+    toast.error('回滚失败', e?.message || '未知错误')
+  } finally {
+    isRollingBack.value = false
+  }
+}
+
+function goLogBoard(log?: DeploymentLog) {
+  if (log) {
+    router.push({ path: '/logs', query: { id: log.id, projectId } })
+  } else {
+    router.push({ path: '/logs', query: { projectId } })
+  }
+}
+
+function formatStart(s: string) {
+  if (!s) return '—'
+  try {
+    const d = new Date(s)
+    if (isNaN(d.getTime())) return s
+    return d.toLocaleString()
+  } catch {
+    return s
+  }
+}
+
 const saveConfig = async () => {
-  await projectStore.updateProject(projectId, formData.value)
-  alert('配置已保存')
+  try {
+    await projectStore.updateProject(projectId, {
+      destPath: formData.value.destPath,
+      preDeploy: formData.value.preDeploy,
+      postDeploy: formData.value.postDeploy,
+      categoryId: formData.value.categoryId || null,
+    })
+    toast.success('配置已保存')
+  } catch (e: any) {
+    const conflict = e?.data?.conflictProject
+    if (e?.status === 409 && conflict) {
+      toast.error('保存失败', `部署目录已被项目「${conflict}」占用，请更换目录或修改对方项目`)
+    } else {
+      toast.error('保存失败', e?.message || '请稍后重试')
+    }
+  }
+}
+
+function addProtectPath() {
+  const v = protectInput.value.trim()
+  if (!v) return
+  if (cleanForm.value.protectPaths.includes(v)) {
+    protectInput.value = ''
+    return
+  }
+  cleanForm.value.protectPaths.push(v)
+  protectInput.value = ''
+}
+function removeProtectPath(g: string) {
+  cleanForm.value.protectPaths = cleanForm.value.protectPaths.filter(x => x !== g)
+}
+
+async function commitCleanForm() {
+  isSavingClean.value = true
+  try {
+    await projectStore.updateProject(projectId, {
+      cleanMode: cleanForm.value.cleanMode,
+      protectPaths: cleanForm.value.protectPaths.length ? cleanForm.value.protectPaths : null,
+    })
+    toast.success('清理策略已保存', cleanForm.value.cleanMode === 'merge' ? '将沿用合并模式（零破坏）' : `下次部署会按 ${cleanForm.value.cleanMode} 执行`)
+  } catch (e: any) {
+    toast.error('保存失败', e?.message)
+  } finally {
+    isSavingClean.value = false
+    showCleanAllConfirm.value = false
+  }
+}
+
+async function saveCleanConfig() {
+  if (cleanForm.value.cleanMode === 'clean-all') {
+    showCleanAllConfirm.value = true
+    return
+  }
+  await commitCleanForm()
+}
+
+async function openPreview() {
+  if (cleanForm.value.cleanMode === 'merge') {
+    toast.info('merge 模式不会删除任何文件，无需预览')
+    return
+  }
+  showPreview.value = true
+  previewLoading.value = true
+  previewError.value = ''
+  previewData.value = null
+  try {
+    previewData.value = await projectStore.cleanPreview(projectId, {
+      cleanMode: cleanForm.value.cleanMode,
+      protectPaths: cleanForm.value.protectPaths,
+    })
+  } catch (e: any) {
+    previewError.value = e?.message || '预览失败'
+  } finally {
+    previewLoading.value = false
+  }
 }
 
 const copyToken = () => {
@@ -78,21 +298,67 @@ const configFilesExamples = [
   { label: '混合配置', files: ['dist/**/*', 'server.js', 'config/*.json'] },
 ]
 
-const refreshToken = async () => {
-  if (confirm('重新生成 Token 将导致旧 Token 立即失效，是否继续？')) {
+const showRefreshTokenModal = ref(false)
+const isRefreshingToken = ref(false)
+const refreshToken = () => {
+  showRefreshTokenModal.value = true
+}
+const confirmRefreshToken = async () => {
+  isRefreshingToken.value = true
+  try {
     await projectStore.generateToken(projectId)
     isTokenVisible.value = true
+    showRefreshTokenModal.value = false
+    toast.success('Token 已重新生成', '旧 Token 已立即失效')
+  } catch (e: any) {
+    toast.error('Token 重置失败', e?.message)
+  } finally {
+    isRefreshingToken.value = false
   }
 }
 
-const removeProject = async () => {
-  if (confirm(`确定要永久删除项目 ${project.value?.name} 吗？此操作不可恢复。`)) {
+const showDeleteModal = ref(false)
+const deleteConfirmText = ref('')
+const isDeleting = ref(false)
+const deleteError = ref('')
+
+const expectedConfirmName = computed(() => project.value?.name?.trim() || '')
+const canConfirmDelete = computed(() =>
+  !isDeleting.value &&
+  expectedConfirmName.value.length > 0 &&
+  deleteConfirmText.value.trim() === expectedConfirmName.value
+)
+
+function openDeleteModal() {
+  deleteConfirmText.value = ''
+  deleteError.value = ''
+  isDeleting.value = false
+  showDeleteModal.value = true
+}
+
+function closeDeleteModal() {
+  if (isDeleting.value) return
+  showDeleteModal.value = false
+  deleteConfirmText.value = ''
+  deleteError.value = ''
+}
+
+async function confirmDelete() {
+  if (!canConfirmDelete.value) return
+  isDeleting.value = true
+  deleteError.value = ''
+  try {
     const success = await projectStore.removeProject(projectId)
     if (success) {
+      showDeleteModal.value = false
       router.replace('/projects')
     } else {
-      alert('删除失败，请稍后重试')
+      deleteError.value = '删除失败，请稍后重试'
     }
+  } catch (e: any) {
+    deleteError.value = e?.message || '删除失败，请稍后重试'
+  } finally {
+    isDeleting.value = false
   }
 }
 </script>
@@ -122,6 +388,13 @@ const removeProject = async () => {
           >
             <FolderOpen class="w-3.5 h-3.5 mr-1.5" />
             查看文件
+          </router-link>
+          <router-link
+            :to="`/audit?targetId=${projectId}`"
+            class="inline-flex items-center px-3 py-1.5 text-xs font-medium bg-base border border-border hover:border-primary/50 hover:text-primary text-textMuted rounded-md transition-all"
+          >
+            <ScrollText class="w-3.5 h-3.5 mr-1.5" />
+            操作历史
           </router-link>
         </div>
         <p class="text-sm text-textMuted mt-1 font-mono">{{ project.id }}</p>
@@ -185,6 +458,122 @@ const removeProject = async () => {
               <strong class="text-primary font-medium">CLI 用法:</strong> 将此 Token 保存到全局配置后，<code class="bg-base px-1 py-0.5 rounded font-mono text-xs text-textMain border border-border">kite push</code> 时无需再传。
             </p>
           </div>
+        </div>
+      </div>
+
+      <!-- Deployment History Card -->
+      <div class="bg-panel border border-border rounded-xl shadow-sm overflow-hidden">
+        <div class="px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02] flex items-center justify-between">
+          <div>
+            <h2 class="text-lg font-semibold text-textMain flex items-center">
+              <History class="w-5 h-5 mr-2 text-primary" />
+              部署历史
+            </h2>
+            <p class="text-sm text-textMuted mt-1">最近 10 次部署。点击行查看完整日志，行末可对已归档版本一键回滚。</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <button
+              @click="loadDeployments"
+              :disabled="isLoadingDeployments"
+              class="inline-flex items-center px-3 py-1.5 text-xs font-medium bg-base border border-border hover:border-primary/50 hover:text-primary text-textMuted rounded-md transition-all disabled:opacity-50"
+            >
+              <RefreshCw class="w-3.5 h-3.5 mr-1.5" :class="{ 'animate-spin': isLoadingDeployments }" />
+              刷新
+            </button>
+            <button
+              @click="goLogBoard()"
+              class="inline-flex items-center px-3 py-1.5 text-xs font-medium bg-base border border-border hover:border-primary/50 hover:text-primary text-textMuted rounded-md transition-all"
+            >
+              <ScrollText class="w-3.5 h-3.5 mr-1.5" />
+              查看全部
+            </button>
+          </div>
+        </div>
+
+        <div class="p-6">
+          <div v-if="isLoadingDeployments && deployments.length === 0" class="py-10 text-center text-sm text-textMuted">
+            加载中…
+          </div>
+          <div v-else-if="deployments.length === 0" class="py-10 text-center text-sm text-textMuted">
+            该项目暂无部署记录。
+          </div>
+          <ul v-else class="divide-y divide-border">
+            <li
+              v-for="log in deployments"
+              :key="log.id"
+              class="flex items-center gap-3 py-3 hover:bg-black/[0.02] dark:hover:bg-white/[0.02] -mx-2 px-2 rounded-md transition-colors"
+            >
+              <button
+                @click="goLogBoard(log)"
+                class="flex-1 min-w-0 text-left"
+              >
+                <div class="flex items-center gap-2">
+                  <span
+                    class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium border"
+                    :class="{
+                      'bg-success/10 border-success/20 text-success': log.status === 'success',
+                      'bg-danger/10 border-danger/20 text-danger': log.status === 'failed',
+                      'bg-primary/10 border-primary/20 text-primary': log.status === 'running',
+                    }"
+                  >
+                    {{ log.status }}
+                  </span>
+                  <span
+                    v-if="(log as any).triggerSource === 'rollback'"
+                    class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-warning/10 border border-warning/20 text-warning"
+                    title="该部署是一次回滚"
+                  >
+                    RB
+                  </span>
+                  <Archive
+                    v-if="log.artifactPath"
+                    class="w-3.5 h-3.5 text-success/70"
+                    aria-label="已归档"
+                  />
+                  <ArchiveX
+                    v-else
+                    class="w-3.5 h-3.5 text-textMuted/50"
+                    aria-label="无归档"
+                  />
+                  <span
+                    role="button"
+                    tabindex="0"
+                    class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-base border border-border font-mono text-[10px] text-textMuted hover:text-primary hover:border-primary/40 transition-colors cursor-pointer"
+                    :title="`点击复制完整 ID: ${log.id}`"
+                    @click.stop.prevent="copyDeploymentId(log.id, $event)"
+                    @keydown.enter.stop.prevent="copyDeploymentId(log.id, $event)"
+                  >
+                    <CheckCheck v-if="copiedDeployId === log.id" class="w-3 h-3 text-success" />
+                    <Copy v-else class="w-3 h-3" />
+                    {{ shortId(log.id) }}
+                  </span>
+                  <span
+                    v-if="log.id === currentDeploymentId"
+                    class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-success/10 border border-success/30 text-success"
+                    title="该版本为当前线上版本"
+                  >当前版本</span>
+                  <span class="text-xs text-textMuted">·</span>
+                  <span class="text-xs text-textMuted truncate">{{ formatStart(log.startTime) }}</span>
+                  <span v-if="log.duration" class="text-xs text-textMuted">· {{ log.duration }}</span>
+                </div>
+              </button>
+              <button
+                v-if="canRollbackLog(log)"
+                @click.stop="openRollback(log)"
+                class="inline-flex items-center px-2.5 py-1 text-xs font-medium bg-warning/10 text-warning border border-warning/20 hover:bg-warning hover:text-white rounded-md transition-all"
+              >
+                <RotateCcw class="w-3 h-3 mr-1" />
+                回滚到此版本
+              </button>
+              <span
+                v-else
+                class="inline-flex items-center px-2.5 py-1 text-xs font-medium bg-base text-textMuted/60 border border-border rounded-md cursor-not-allowed"
+                :title="rollbackDisabledReason(log)"
+              >
+                不可回滚
+              </span>
+            </li>
+          </ul>
         </div>
       </div>
 
@@ -323,6 +712,18 @@ const removeProject = async () => {
           </div>
 
           <div>
+            <label class="block text-sm font-medium text-textMain mb-2">所属分类</label>
+            <select
+              v-model="formData.categoryId"
+              class="w-full bg-base border border-border rounded-md px-4 py-3 text-textMain text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all"
+            >
+              <option value="">默认（未分类）</option>
+              <option v-for="c in projectStore.categories" :key="c.id" :value="c.id">{{ c.name }}</option>
+            </select>
+            <p class="text-xs text-textMuted mt-2">用于在项目列表中按分类筛选。在「项目管理 → 管理分类」中创建更多分类。</p>
+          </div>
+
+          <div>
             <label class="block text-sm font-medium text-textMain mb-2">前置脚本 (Pre-Deploy)</label>
             <div class="relative">
               <div class="absolute left-0 top-0 bottom-0 w-8 bg-base border-r border-border rounded-l-md flex flex-col items-center py-3 text-textMuted font-mono text-xs select-none">
@@ -366,6 +767,115 @@ const removeProject = async () => {
         </div>
       </div>
 
+      <!-- Clean Strategy Card -->
+      <div class="bg-panel border border-border rounded-xl shadow-sm overflow-hidden">
+        <div class="px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02]">
+          <h2 class="text-lg font-semibold text-textMain flex items-center">
+            <Shield class="w-5 h-5 mr-2 text-primary" />
+            部署清理策略
+          </h2>
+          <p class="text-sm text-textMuted mt-1">每次部署解压前，对目标目录执行的清理动作。默认 <code class="font-mono text-textMain">merge</code> 沿用旧行为（零破坏）。</p>
+        </div>
+        <div class="p-6 space-y-5">
+          <!-- Mode picker -->
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <label
+              v-for="opt in [
+                { value: 'merge', title: 'merge', desc: '不清理，直接覆盖。旧行为，零破坏。', tone: 'primary' as const },
+                { value: 'clean', title: 'clean', desc: '清空目录，但保留 protectPaths 命中的文件，以及 .kite-* 内部目录。', tone: 'warning' as const },
+                { value: 'clean-all', title: 'clean-all', desc: '清空全部内容（仅保留 .kite-*），protectPaths 也被忽略。', tone: 'danger' as const },
+              ]"
+              :key="opt.value"
+              class="relative flex flex-col p-4 rounded-lg border-2 cursor-pointer transition-all"
+              :class="cleanForm.cleanMode === opt.value
+                ? (opt.tone === 'danger' ? 'border-danger bg-danger/5' : opt.tone === 'warning' ? 'border-yellow-400 bg-yellow-400/5' : 'border-primary bg-primary/5')
+                : 'border-border hover:border-textMuted/50 bg-base'"
+            >
+              <input type="radio" v-model="cleanForm.cleanMode" :value="opt.value" class="sr-only" />
+              <span class="text-sm font-semibold font-mono"
+                :class="opt.tone === 'danger' ? 'text-danger' : opt.tone === 'warning' ? 'text-yellow-400' : 'text-primary'"
+              >{{ opt.title }}</span>
+              <span class="text-xs text-textMuted mt-1 leading-relaxed">{{ opt.desc }}</span>
+              <CheckCircle2
+                v-if="cleanForm.cleanMode === opt.value"
+                class="absolute top-2 right-2 w-4 h-4"
+                :class="opt.tone === 'danger' ? 'text-danger' : opt.tone === 'warning' ? 'text-yellow-400' : 'text-primary'"
+              />
+            </label>
+          </div>
+
+          <!-- ProtectPaths -->
+          <div v-if="cleanForm.cleanMode === 'clean'">
+            <label class="block text-sm font-medium text-textMain mb-2">保护路径 (protectPaths)</label>
+            <p class="text-xs text-textMuted mb-2">
+              支持 minimatch glob，命中文件不会被删除。<code class="font-mono text-textMain">.kite-*</code> 始终自动保护，无需添加。
+              常见示例：<code class="font-mono text-textMain">uploads/**</code>、<code class="font-mono text-textMain">.env</code>、<code class="font-mono text-textMain">config/*.json</code>
+            </p>
+            <div class="flex gap-2 mb-3">
+              <input
+                v-model="protectInput"
+                type="text"
+                class="flex-1 bg-base border border-border rounded-md px-3 py-2 text-textMain font-mono text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all"
+                placeholder="如 uploads/**"
+                @keydown.enter.prevent="addProtectPath"
+              />
+              <button
+                @click="addProtectPath"
+                type="button"
+                class="flex items-center px-3 bg-base border border-border hover:border-primary/50 hover:text-primary text-textMain rounded-md transition-all"
+              >
+                <Plus class="w-4 h-4 mr-1" />
+                添加
+              </button>
+            </div>
+            <div v-if="cleanForm.protectPaths.length" class="flex flex-wrap gap-2">
+              <span
+                v-for="g in cleanForm.protectPaths"
+                :key="g"
+                class="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-success/10 border border-success/30 text-success font-mono"
+              >
+                {{ g }}
+                <button @click="removeProtectPath(g)" type="button" class="text-success/70 hover:text-danger">
+                  <XCircle class="w-3 h-3" />
+                </button>
+              </span>
+            </div>
+            <p v-else class="text-xs text-textMuted italic">尚未设置保护路径。clean 模式下会清空整个部署目录（仅保留 .kite-*）。</p>
+          </div>
+
+          <div v-if="cleanForm.cleanMode === 'clean-all'" class="p-3 rounded-md bg-danger/10 border border-danger/30 flex items-start gap-2">
+            <ShieldAlert class="w-4 h-4 text-danger shrink-0 mt-0.5" />
+            <p class="text-xs text-danger leading-relaxed">
+              clean-all 会清空目标目录下<strong>所有</strong>文件（仅保留 <code class="font-mono bg-base px-1 rounded">.kite-*</code>）。protectPaths 设置在此模式下被忽略。请务必通过预览确认。
+            </p>
+          </div>
+
+          <!-- Action bar -->
+          <div class="pt-3 border-t border-border flex items-center justify-end gap-3">
+            <button
+              v-if="cleanForm.cleanMode !== 'merge'"
+              @click="openPreview"
+              type="button"
+              class="flex items-center px-4 py-2 text-sm bg-base border border-border hover:border-yellow-400/50 hover:text-yellow-400 text-textMain rounded-md transition-all"
+            >
+              <Eye class="w-4 h-4 mr-2" />
+              预览将删除的文件 (DRY-RUN)
+            </button>
+            <button
+              @click="saveCleanConfig"
+              :disabled="isSavingClean"
+              class="flex items-center px-6 py-2.5 text-sm font-medium rounded-md transition-all disabled:opacity-50"
+              :class="cleanForm.cleanMode === 'clean-all'
+                ? 'bg-danger text-white hover:bg-danger/90'
+                : 'bg-primary text-white hover:bg-primary/90 shadow-[0_0_15px_rgba(59,130,246,0.3)]'"
+            >
+              <Save class="w-4 h-4 mr-2" />
+              {{ isSavingClean ? '保存中...' : '保存清理策略' }}
+            </button>
+          </div>
+        </div>
+      </div>
+
       <!-- Danger Zone -->
       <div class="bg-panel border border-danger/20 rounded-xl shadow-sm overflow-hidden">
         <div class="px-6 py-4">
@@ -373,15 +883,151 @@ const removeProject = async () => {
             <Trash2 class="w-4 h-4 mr-2" />
             危险操作区
           </h3>
-          <div class="mt-4 flex items-center justify-between">
-            <p class="text-sm text-textMuted">删除该项目将清空所有配置与日志，且不可恢复。</p>
-            <button @click="removeProject" class="px-4 py-2 bg-danger/10 hover:bg-danger text-danger hover:text-white border border-danger/20 hover:border-danger rounded-md transition-colors text-sm font-medium">
+          <div class="mt-4 flex items-start justify-between gap-4">
+            <div class="text-sm text-textMuted space-y-1">
+              <p>删除该项目将同时清空数据库中的项目配置与全部部署历史日志，且不可恢复。</p>
+              <p class="text-textMuted/80">部署目录中的实际文件不会被删除，需要时请手动清理。</p>
+            </div>
+            <button @click="openDeleteModal" class="shrink-0 px-4 py-2 bg-danger/10 hover:bg-danger text-danger hover:text-white border border-danger/20 hover:border-danger rounded-md transition-colors text-sm font-medium">
               删除项目
             </button>
           </div>
         </div>
       </div>
-      
+
     </div>
+
+    <!-- Delete Confirmation Modal -->
+    <div
+      v-if="showDeleteModal"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      @click.self="closeDeleteModal"
+    >
+      <div class="bg-panel border border-danger/30 rounded-xl w-full max-w-lg p-6 shadow-2xl">
+        <div class="flex items-start space-x-3 mb-5">
+          <div class="p-2 rounded-lg bg-danger/10 border border-danger/20 shrink-0">
+            <AlertTriangle class="w-5 h-5 text-danger" />
+          </div>
+          <div class="flex-1 min-w-0">
+            <h2 class="text-lg font-semibold text-textMain">确认删除项目</h2>
+            <p class="text-sm text-textMuted mt-1">
+              即将删除项目
+              <span class="font-mono text-textMain">{{ project?.name }}</span>
+              （<span class="font-mono text-textMuted">{{ projectId }}</span>），此操作不可恢复。
+            </p>
+          </div>
+        </div>
+
+        <div class="space-y-3 mb-5">
+          <div class="bg-danger/5 border border-danger/20 rounded-lg p-3">
+            <p class="text-xs font-medium text-danger mb-2 flex items-center">
+              <XCircle class="w-3.5 h-3.5 mr-1.5" />
+              将被永久删除的内容
+            </p>
+            <ul class="text-xs text-textMain/90 space-y-1 list-disc list-inside marker:text-danger/60">
+              <li>该项目在数据库中的配置（名称、描述、部署目录、部署脚本、Token、环境标识等）</li>
+              <li>该项目的<span class="font-medium">全部部署历史日志</span>（部署日志面板中将不再可见）</li>
+            </ul>
+          </div>
+
+          <div class="bg-success/5 border border-success/20 rounded-lg p-3">
+            <p class="text-xs font-medium text-success mb-2 flex items-center">
+              <CheckCircle2 class="w-3.5 h-3.5 mr-1.5" />
+              不会被删除的内容
+            </p>
+            <ul class="text-xs text-textMain/90 space-y-1 list-disc list-inside marker:text-success/60">
+              <li>
+                部署目录
+                <code class="font-mono text-textMain bg-base px-1 py-0.5 rounded text-[11px]">{{ project?.destPath || '—' }}</code>
+                下的所有实际文件
+              </li>
+              <li>其他项目的数据、全局设置、Admin Token</li>
+              <li>项目源码中的 <code class="font-mono text-textMain bg-base px-1 py-0.5 rounded text-[11px]">kite.config*.json</code> / <code class="font-mono text-textMain bg-base px-1 py-0.5 rounded text-[11px]">.env.local</code> 等本地配置</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="mb-2">
+          <label class="block text-sm font-medium text-textMuted mb-1.5">
+            请输入项目名称
+            <span class="font-mono text-textMain">{{ expectedConfirmName }}</span>
+            以确认删除
+          </label>
+          <input
+            v-model="deleteConfirmText"
+            type="text"
+            :disabled="isDeleting"
+            :placeholder="expectedConfirmName"
+            class="w-full bg-base border border-border rounded-md px-3 py-2 text-textMain font-mono focus:outline-none focus:border-danger focus:ring-1 focus:ring-danger/50 transition-all text-sm disabled:opacity-60"
+            @keydown.enter.prevent="confirmDelete"
+          />
+        </div>
+
+        <p v-if="deleteError" class="text-xs text-danger mt-2">{{ deleteError }}</p>
+
+        <div class="mt-6 flex justify-end space-x-3">
+          <button
+            @click="closeDeleteModal"
+            :disabled="isDeleting"
+            class="px-4 py-2 text-sm font-medium text-textMuted hover:text-textMain dark:hover:bg-white/5 hover:bg-black/5 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            取消
+          </button>
+          <button
+            @click="confirmDelete"
+            :disabled="!canConfirmDelete"
+            class="px-4 py-2 text-sm font-medium bg-danger text-white rounded-md hover:bg-danger/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center"
+          >
+            <RefreshCw v-if="isDeleting" class="w-4 h-4 mr-2 animate-spin" />
+            <Trash2 v-else class="w-4 h-4 mr-2" />
+            {{ isDeleting ? '正在删除...' : '永久删除' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <ConfirmDialog
+      v-model:open="showRefreshTokenModal"
+      tone="warning"
+      title="重新生成项目 Token？"
+      message="旧 Token 将立即失效。所有正在使用旧 Token 的 CLI / Webhook 调用都会被拒绝，请记得同步更新。"
+      confirm-text="重新生成"
+      cancel-text="取消"
+      :loading="isRefreshingToken"
+      @confirm="confirmRefreshToken"
+    />
+
+    <CleanPreviewDialog
+      v-model:open="showPreview"
+      :loading="previewLoading"
+      :error="previewError"
+      :preview="previewData"
+      :mode="cleanForm.cleanMode === 'merge' ? 'clean' : cleanForm.cleanMode"
+      :protect-paths="cleanForm.protectPaths"
+    />
+
+    <ConfirmDialog
+      v-model:open="showCleanAllConfirm"
+      tone="danger"
+      title="确认启用 clean-all 模式？"
+      message="后续每次部署都会清空部署目录下除 .kite-* 之外的全部内容，protectPaths 在此模式下被忽略。请输入项目名以确认。"
+      confirm-text="启用 clean-all"
+      cancel-text="取消"
+      :require-text="expectedConfirmName"
+      :require-text-hint="`请输入项目名 ${expectedConfirmName} 以确认`"
+      :loading="isSavingClean"
+      @confirm="commitCleanForm"
+    />
+
+    <ConfirmDialog
+      v-model:open="showRollbackConfirm"
+      tone="warning"
+      title="确认回滚到此版本？"
+      :message="rollbackTarget ? `将以归档 ${shortId(rollbackTarget.id)} 重新部署到项目 ${rollbackTarget.projectName}。会按当前项目的 cleanMode / protectPaths 执行清理后再解压，运行时数据按保护规则保留。` : ''"
+      confirm-text="确认回滚"
+      cancel-text="取消"
+      :loading="isRollingBack"
+      @confirm="confirmRollback"
+    />
   </div>
 </template>

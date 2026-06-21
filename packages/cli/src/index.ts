@@ -10,6 +10,12 @@ import { uploadZip } from './upload.js';
 import { getConfigPath, getKiteHome, randomToken, readGlobalConfig, readLocalEnv, setGlobalConfig, writeGlobalConfig, writeLocalEnvValue, listProjectEnvs, resolveProjectConfig, envTokenKey, type ResolvedProjectConfig } from './home.js';
 import { LocalStore } from './local-store.js';
 import { startServe } from './serve.js';
+import { parseIgnoreOption } from './ignore.js';
+import { runExport } from './export.js';
+import { runImport } from './import.js';
+import { runVerify } from './verify.js';
+import { runDoctor } from './doctor.js';
+import { runList, runStatus, runLogs, runRollback } from './ops.js';
 
 // @ts-ignore
 const cli = cac('kite');
@@ -517,6 +523,8 @@ const displayPackResult = (result: PackResult) => {
 cli.command('build', 'Pack project files and verify packaging (no upload)')
   .option('--env <name>', 'Environment name (selects kite.config.<name>.json)')
   .option('--out <dir>', 'Output directory to pack')
+  .option('--ignore <patterns>', 'Extra ignore patterns (comma separated, may repeat)')
+  .option('--no-ignore-builtin', 'Disable built-in ignore patterns (node_modules, .git, .env*, etc.)')
   .action(async (options: any) => {
     try {
       const allEnvs = listProjectEnvs();
@@ -550,10 +558,23 @@ cli.command('build', 'Pack project files and verify packaging (no upload)')
         process.exit(1);
       }
 
+      const cliIgnore = parseIgnoreOption(options.ignore);
+      const ignore = cliIgnore.length > 0
+        ? cliIgnore
+        : (Array.isArray(projectConfig.ignore) ? projectConfig.ignore : []);
+      // cac: --no-ignore-builtin 时 options.ignoreBuiltin === false；未传时 true
+      const ignoreBuiltin = options.ignoreBuiltin === false
+        ? true
+        : (projectConfig.ignoreBuiltin === true);
+
       const spinner = ora('Packing files...').start();
       const zipFilePath = path.resolve(process.cwd(), '.deploy-archive.zip');
 
-      const result = await packProject(sourceDir, zipFilePath, files.length > 0 ? files : undefined);
+      const result = await packProject(sourceDir, zipFilePath, {
+        files: files.length > 0 ? files : undefined,
+        ignore,
+        ignoreBuiltin,
+      });
       spinner.succeed(chalk.green('Pack successful!'));
       displayPackResult(result);
       console.log(chalk.gray(`  Archive: ${zipFilePath}`));
@@ -576,7 +597,10 @@ cli.command('push', 'Push and deploy project')
   .option('--post <script>', 'Post-deploy script (Server side)')
   .option('--command <script>', 'Deploy command alias, same as --post')
   .option('--set-env <vars>', 'Environment variables as JSON or KEY=VALUE (overrides config)')
+  .option('--ignore <patterns>', 'Extra ignore patterns (comma separated, may repeat)')
+  .option('--no-ignore-builtin', 'Disable built-in ignore patterns (node_modules, .git, .env*, etc.)')
   .action(async (options: any) => {
+    const pushStartedAt = new Date().toISOString();
     try {
       // 1. 解析环境配置
       const allEnvs = listProjectEnvs();
@@ -669,10 +693,23 @@ cli.command('push', 'Push and deploy project')
       }
 
       // 5. 打包文件
+      const cliIgnore = parseIgnoreOption(options.ignore);
+      const ignore = cliIgnore.length > 0
+        ? cliIgnore
+        : (Array.isArray(projectConfig.ignore) ? projectConfig.ignore : []);
+      // cac: --no-ignore-builtin 时 options.ignoreBuiltin === false；未传时 true
+      const ignoreBuiltin = options.ignoreBuiltin === false
+        ? true
+        : (projectConfig.ignoreBuiltin === true);
+
       const spinner = ora('Packing files...').start();
       const zipFilePath = path.resolve(process.cwd(), '.deploy-archive.zip');
 
-      const packResult = await packProject(sourceDir, zipFilePath, files.length > 0 ? files : undefined);
+      const packResult = await packProject(sourceDir, zipFilePath, {
+        files: files.length > 0 ? files : undefined,
+        ignore,
+        ignoreBuiltin,
+      });
       spinner.succeed(chalk.green('Packed successfully'));
       displayPackResult(packResult);
 
@@ -686,12 +723,19 @@ cli.command('push', 'Push and deploy project')
         projectId,
         preDeploy,
         postDeploy,
-        env: deployEnv
+        env: deployEnv,
+        startedAt: pushStartedAt
       });
       if (result.success) {
         console.log(chalk.green(`\nDeployed successfully! (${result.duration})`));
+        if (result.traceId) {
+          console.log(chalk.gray(`  trace: ${result.traceId}`));
+        }
       } else {
         console.error(chalk.red('\nDeployment failed'));
+        if (result.traceId) {
+          console.error(chalk.gray(`  trace: ${result.traceId}`));
+        }
         process.exit(1);
       }
 
@@ -704,6 +748,162 @@ cli.command('push', 'Push and deploy project')
       if (fs.existsSync(zipFilePath)) {
         fs.unlinkSync(zipFilePath);
       }
+    }
+  });
+
+// ==========================
+// Migration commands: export / import
+// ==========================
+cli.command('export', 'Export Kite database (and optional artifacts) to a portable archive')
+  .option('--out <file>', 'Output file path (default: kite-export-<timestamp>.zip)')
+  .option('--no-include-artifacts', 'Skip packing each project deployPath contents (default: include)')
+  .option('--no-include-logs', 'Skip deployment history (default: include)')
+  .option('--projects <ids>', 'Comma separated project ids to include (default: all)')
+  .option('--ignore <patterns>', 'Extra ignore patterns for artifacts (comma separated, may repeat)')
+  .option('--no-ignore-builtin', 'Disable built-in ignore patterns when packing artifacts')
+  .action(async (options: any) => {
+    try {
+      const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf-8'));
+      const ignoreBuiltin = options.ignoreBuiltin === false;
+      await runExport({
+        out: options.out,
+        includeArtifacts: options.includeArtifacts !== false,
+        includeLogs: options.includeLogs !== false,
+        projects: options.projects,
+        ignore: options.ignore,
+        ignoreBuiltin,
+      }, pkg.version || '0.0.0');
+    } catch (error: any) {
+      console.error(chalk.red(`\nExport failed: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+cli.command('import <file>', 'Import Kite database from an export archive')
+  .option('--strategy <mode>', 'Conflict strategy: merge | overwrite | skip-existing', { default: 'skip-existing' })
+  .option('--no-restore-artifacts', 'Skip restoring each project deployPath from the archive (default: restore when archive contains artifacts)')
+  .option('--dry-run', 'Show summary without writing')
+  .option('--yes', 'Confirm destructive --strategy overwrite')
+  .action(async (file: string, options: any) => {
+    try {
+      await runImport(file, {
+        strategy: options.strategy,
+        restoreArtifacts: options.restoreArtifacts !== false,
+        dryRun: !!options.dryRun,
+        yes: !!options.yes,
+      });
+    } catch (error: any) {
+      console.error(chalk.red(`\nImport failed: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+cli.command('verify', 'Verify ~/.kite migration integrity (db, deploy paths, tokens, optional server health)')
+  .option('--check-server', 'Also probe configured serverUrl with HTTP GET')
+  .option('--timeout <ms>', 'Server probe timeout in ms', { default: 5000 })
+  .action(async (options: any) => {
+    try {
+      await runVerify({
+        checkServer: !!options.checkServer,
+        timeout: Number(options.timeout) || 5000,
+      });
+    } catch (error: any) {
+      console.error(chalk.red(`\nVerify failed: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+cli.command('doctor', 'Run local + remote health diagnostics')
+  .option('--server <url>', 'Override server URL (defaults to global config / KITE_SERVER_URL)')
+  .option('--token <token>', 'Override admin token (defaults to global config / KITE_TOKEN)')
+  .action(async (options: any) => {
+    try {
+      const code = await runDoctor({ server: options.server, token: options.token });
+      process.exit(code);
+    } catch (error: any) {
+      console.error(chalk.red(`\nDoctor failed: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+cli.command('list', 'List projects on Kite server')
+  .option('--server <url>', 'Override server URL')
+  .option('--token <token>', 'Override admin token')
+  .option('--env <name>', 'Filter by project env')
+  .option('--json', 'Output JSON (no colors)')
+  .action(async (options: any) => {
+    try {
+      const code = await runList({ server: options.server, token: options.token, env: options.env, json: options.json });
+      process.exit(code);
+    } catch (error: any) {
+      console.error(chalk.red(`\nList failed: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+cli.command('status [projectId]', 'Show recent deployments of a project')
+  .option('--server <url>', 'Override server URL')
+  .option('--token <token>', 'Override admin token')
+  .option('--env <name>', 'Pick kite.config.<env>.json when no projectId given')
+  .option('--limit <n>', 'Number of deployments to show (default 5, max 50)')
+  .option('--json', 'Output JSON')
+  .action(async (projectId: string | undefined, options: any) => {
+    try {
+      const code = await runStatus(projectId, {
+        server: options.server,
+        token: options.token,
+        env: options.env,
+        limit: options.limit ? Number(options.limit) : undefined,
+        json: options.json,
+      });
+      process.exit(code);
+    } catch (error: any) {
+      console.error(chalk.red(`\nStatus failed: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+cli.command('logs <deployId>', 'Print deployment logs (or follow live with -f)')
+  .option('--server <url>', 'Override server URL')
+  .option('--token <token>', 'Override admin token')
+  .option('-f, --follow', 'Stream live logs via SSE until the deployment finishes')
+  .option('--json', 'Output JSON (only without --follow)')
+  .action(async (deployId: string, options: any) => {
+    try {
+      const code = await runLogs(deployId, {
+        server: options.server,
+        token: options.token,
+        follow: options.follow,
+        json: options.json,
+      });
+      process.exit(code);
+    } catch (error: any) {
+      console.error(chalk.red(`\nLogs failed: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+cli.command('rollback [projectId]', 'Rollback a project to a previous successful deployment')
+  .option('--server <url>', 'Override server URL')
+  .option('--token <token>', 'Override admin token (admin required)')
+  .option('--env <name>', 'Pick kite.config.<env>.json when no projectId given')
+  .option('--to <deployId>', 'Target deployment to roll back to (default: previous success)')
+  .option('--yes', 'Skip interactive confirmation (required in non-TTY)')
+  .option('--json', 'Output JSON on success')
+  .action(async (projectId: string | undefined, options: any) => {
+    try {
+      const code = await runRollback(projectId, {
+        server: options.server,
+        token: options.token,
+        env: options.env,
+        to: options.to,
+        yes: options.yes,
+        json: options.json,
+      });
+      process.exit(code);
+    } catch (error: any) {
+      console.error(chalk.red(`\nRollback failed: ${error.message}`));
+      process.exit(1);
     }
   });
 

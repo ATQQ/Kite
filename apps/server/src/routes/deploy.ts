@@ -5,16 +5,32 @@ import AdmZip from 'adm-zip';
 import { db } from '../db/index.js';
 import { randomUUID } from 'node:crypto';
 import { spawn, writeFile } from '../runtime.js';
+import { writeAudit, diffFields, sanitize } from '../lib/audit.js';
+import { moduleLogger, pickTraceId } from '../lib/logger.js';
+import {
+  archiveZip,
+  gcArtifacts,
+  getArtifactKeepN,
+} from '../lib/artifact.js';
+import {
+  applyCleanStrategy,
+  buildPreviewTree,
+  normalizeMode,
+  parseProtectPaths,
+  type CleanMode,
+} from '../lib/clean.js';
+import {
+  verifyAdminToken,
+  verifyAdminTokenValue,
+  extractBearerToken,
+  safeEqual,
+  loginGuard,
+  loginFailure,
+  loginSuccess,
+  pickClientKey,
+} from '../lib/auth.js';
 
-// Token verification helper
-const verifyAdminToken = (headers: Record<string, string | undefined>) => {
-  const authHeader = headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) return false;
-  const token = authHeader.split(' ')[1];
-
-  // Verify against the ADMIN_TOKEN loaded via Bun env
-  return token === process.env.ADMIN_TOKEN;
-};
+const deployLog = moduleLogger('deploy');
 
 // SSE broadcast: deployId -> Set of controllers
 const deploySubscribers = new Map<string, Set<ReadableStreamDefaultController>>();
@@ -63,11 +79,35 @@ async function* runShellCommand(command: string, cwd: string, env?: Record<strin
 }
 
 export const deployRoutes = new Elysia()
-  .post('/api/auth/login', async ({ body, set }) => {
+  .post('/api/auth/login', async ({ body, headers, set }) => {
+    const clientKey = pickClientKey(headers as Record<string, string | undefined>);
+    const guard = await loginGuard(clientKey);
+    if (guard.locked) {
+      const retrySec = Math.ceil(guard.retryAfterMs / 1000);
+      set.status = 429;
+      set.headers = { ...(set.headers || {}), 'Retry-After': String(retrySec) };
+      await writeAudit({ headers }, {
+        action: 'auth.login_failed',
+        targetType: 'auth',
+        summary: `Admin 登录被限流（剩余 ${retrySec}s）`,
+        status: 'failed',
+        errorMessage: 'Too many attempts',
+      });
+      return { success: false, message: 'Too many attempts, please retry later', retryAfter: retrySec };
+    }
     const { token } = body;
-    if (token === process.env.ADMIN_TOKEN) {
+    if (verifyAdminTokenValue(token)) {
+      loginSuccess(clientKey);
       return { success: true, message: 'Login successful' };
     }
+    loginFailure(clientKey);
+    await writeAudit({ headers }, {
+      action: 'auth.login_failed',
+      targetType: 'auth',
+      summary: 'Admin 登录失败',
+      status: 'failed',
+      errorMessage: 'Invalid token',
+    });
     set.status = 401;
     return { success: false, message: 'Invalid token' };
   }, {
@@ -75,14 +115,38 @@ export const deployRoutes = new Elysia()
   })
   .get('/api/projects', async ({ headers, set }) => {
     if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
-    return await db.projects.findAll();
+    return await db.projects.findAllWithMeta();
   })
   .post('/api/projects', async ({ headers, body, set }) => {
     if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
+    // Check deployPath uniqueness
+    const allProjects = await db.projects.findAll();
+    const conflict = allProjects.find((p) => p.deployPath === body.deployPath);
+    if (conflict) {
+      set.status = 409;
+      return { error: '该部署目录已被项目占用', conflictProject: conflict.name };
+    }
+    // Validate categoryId if provided
+    let categoryId: string | null = null;
+    if (body.categoryId !== undefined && body.categoryId !== null && body.categoryId !== '') {
+      const cat = await db.categories.findById(body.categoryId);
+      if (!cat) { set.status = 400; return { error: '分类不存在' }; }
+      categoryId = cat.id;
+    }
     const project = await db.projects.create({
       ...body,
+      categoryId,
       id: 'proj_' + randomUUID().replace(/-/g, '').substring(0, 12),
       token: 'kt_' + randomUUID().replace(/-/g, ''),
+    });
+    await writeAudit({ headers }, {
+      action: 'project.create',
+      targetType: 'project',
+      targetId: project.id,
+      targetName: project.name,
+      before: null,
+      after: sanitize(project),
+      summary: `创建项目 ${project.name}`,
     });
     return { success: true, project };
   }, {
@@ -90,7 +154,8 @@ export const deployRoutes = new Elysia()
       name: t.String(),
       description: t.Optional(t.String()),
       deployPath: t.String(),
-      env: t.Optional(t.String())
+      env: t.Optional(t.String()),
+      categoryId: t.Optional(t.Union([t.String(), t.Null()])),
     })
   })
   .get('/api/projects/:id', async ({ headers, params, set }) => {
@@ -101,29 +166,127 @@ export const deployRoutes = new Elysia()
   })
   .put('/api/projects/:id', async ({ headers, params, body, set }) => {
     if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
-    const project = await db.projects.update(params.id, body);
-    if (!project) { set.status = 404; return { error: 'Project not found' }; }
-    return { success: true, project };
+    const before = await db.projects.findById(params.id);
+    if (!before) { set.status = 404; return { error: 'Project not found' }; }
+    // Normalise / validate clean-mode related fields before write
+    const patch: Record<string, any> = { ...body };
+    // Check deployPath uniqueness when it's being changed
+    if (typeof patch.deployPath === 'string') {
+      const allProjects = await db.projects.findAll();
+      const conflict = allProjects.find((p) => p.deployPath === patch.deployPath && p.id !== params.id);
+      if (conflict) {
+        set.status = 409;
+        return { error: '该部署目录已被项目占用', conflictProject: conflict.name };
+      }
+    }
+    // Check name uniqueness when it's being changed
+    if (typeof patch.name === 'string') {
+      if (!patch.name.trim()) {
+        set.status = 400;
+        return { error: '项目名不能为空' };
+      }
+      const allProjects = await db.projects.findAll();
+      const conflict = allProjects.find((p) => p.name === patch.name && p.id !== params.id);
+      if (conflict) {
+        set.status = 409;
+        return { error: '项目名已存在' };
+      }
+    }
+    if (typeof patch.cleanMode !== 'undefined') {
+      const allowed = ['merge', 'clean', 'clean-all', null, ''];
+      if (!allowed.includes(patch.cleanMode)) {
+        set.status = 400;
+        return { error: `Invalid cleanMode (must be merge|clean|clean-all)` };
+      }
+      if (patch.cleanMode === '' || patch.cleanMode === 'merge') patch.cleanMode = null;
+    }
+    if (typeof patch.protectPaths !== 'undefined') {
+      if (Array.isArray(patch.protectPaths)) {
+        patch.protectPaths = JSON.stringify(
+          patch.protectPaths.filter((s: unknown) => typeof s === 'string' && (s as string).length > 0),
+        );
+      } else if (patch.protectPaths === null || patch.protectPaths === '') {
+        patch.protectPaths = null;
+      } else if (typeof patch.protectPaths !== 'string') {
+        set.status = 400;
+        return { error: 'protectPaths must be string[] or null' };
+      }
+    }
+    if (typeof patch.categoryId !== 'undefined') {
+      if (patch.categoryId === null || patch.categoryId === '') {
+        patch.categoryId = null;
+      } else if (typeof patch.categoryId === 'string') {
+        const cat = await db.categories.findById(patch.categoryId);
+        if (!cat) { set.status = 400; return { error: '分类不存在' }; }
+        patch.categoryId = cat.id;
+      } else {
+        set.status = 400;
+        return { error: 'categoryId must be string or null' };
+      }
+    }
+    const after = await db.projects.update(params.id, patch);
+    if (!after) { set.status = 404; return { error: 'Project not found' }; }
+    const diff = diffFields(before as any, after as any, Object.keys(patch));
+    if (Object.keys(diff.after).length > 0) {
+      await writeAudit({ headers }, {
+        action: 'project.update',
+        targetType: 'project',
+        targetId: params.id,
+        targetName: after.name,
+        before: diff.before,
+        after: diff.after,
+        summary: `更新项目配置：${Object.keys(diff.after).join(', ')}`,
+      });
+    }
+    return { success: true, project: after };
   }, {
     body: t.Object({
+      name: t.Optional(t.String()),
       preDeployScript: t.Optional(t.String()),
       postDeployScript: t.Optional(t.String()),
-      deployPath: t.Optional(t.String())
+      deployPath: t.Optional(t.String()),
+      description: t.Optional(t.String()),
+      env: t.Optional(t.String()),
+      cleanMode: t.Optional(t.Union([t.Literal('merge'), t.Literal('clean'), t.Literal('clean-all'), t.Null()])),
+      protectPaths: t.Optional(t.Union([t.Array(t.String()), t.Null()])),
+      categoryId: t.Optional(t.Union([t.String(), t.Null()])),
     })
   })
   .delete('/api/projects/:id', async ({ headers, params, set }) => {
     if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
-    
-    // params.id 会获取 URL 路径参数，比如 "proj_xxxxx"
+
+    const before = await db.projects.findById(params.id);
+    if (!before) { set.status = 404; return { error: 'Project not found' }; }
+    const deploymentCount = await db.deployments.countByProject(params.id);
+
     const success = await db.projects.remove(params.id);
     if (!success) { set.status = 404; return { error: 'Project not found' }; }
-    
+
+    await writeAudit({ headers }, {
+      action: 'project.delete',
+      targetType: 'project',
+      targetId: before.id,
+      targetName: before.name,
+      before: { ...sanitize(before) as any, deploymentCount },
+      after: null,
+      summary: `删除项目 ${before.name}（连带 ${deploymentCount} 条部署历史）`,
+    });
+
     return { success: true, message: 'Project deleted successfully' };
   })
   .post('/api/projects/:id/token', async ({ headers, params, set }) => {
     if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
     const project = await db.projects.update(params.id, { token: 'kt_' + randomUUID().replace(/-/g, '') });
     if (!project) { set.status = 404; return { error: 'Project not found' }; }
+    await writeAudit({ headers }, {
+      action: 'project.token.rotate',
+      targetType: 'project',
+      targetId: project.id,
+      targetName: project.name,
+      before: { token: '****' },
+      after: { token: '****' },
+      summary: `重新生成项目 ${project.name} 的 Token`,
+    });
     return { success: true, token: project.token };
   })
   .get('/api/logs', async ({ headers, set }) => {
@@ -174,13 +337,12 @@ export const deployRoutes = new Elysia()
   })
   .post('/api/deploy/upload', async ({ body, headers, set }) => {
     try {
-      const authHeader = headers.authorization;
-      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      const token = extractBearerToken(headers as Record<string, string | undefined>);
+      if (!token) {
         set.status = 401;
         return { error: 'Missing or invalid Authorization header' };
       }
 
-      const token = authHeader.split(' ')[1];
       let project = await db.projects.findByToken(token);
 
       const file = body.file as File;
@@ -188,7 +350,7 @@ export const deployRoutes = new Elysia()
 
       if (!project) {
         const globalToken = await db.settings.get('global_deploy_token');
-        if (!globalToken || token !== globalToken) {
+        if (!globalToken || !safeEqual(token, globalToken)) {
           set.status = 403;
           return { error: 'Invalid Token' };
         }
@@ -212,24 +374,45 @@ export const deployRoutes = new Elysia()
         } catch { /* ignore invalid env */ }
       }
 
-      console.log(`[Deploy] Received zip for project: ${projectId}`);
+      const reqTraceId = pickTraceId(headers as Record<string, string | undefined>);
+      const deployTraceId = reqTraceId || randomUUID();
+      const reqLog = deployLog.child({ traceId: deployTraceId, projectId });
+      reqLog.info('received zip for deploy');
 
-      const deployLog = await db.deployments.insert({
+      // 将 traceId 注入子进程 env，方便 pre/post 脚本里串联日志
+      deployEnv = { ...(deployEnv || {}), KITE_DEPLOY_TRACE_ID: deployTraceId };
+
+      // 优先使用 CLI push 时间作为 startTime；非法或缺失时回退到 server 当前时间
+      let startTimeIso = new Date().toISOString();
+      if (typeof body.startedAt === 'string' && body.startedAt) {
+        const t = new Date(body.startedAt).getTime();
+        const now = Date.now();
+        if (!Number.isNaN(t) && t <= now + 10_000 && t >= now - 24 * 60 * 60 * 1000) {
+          startTimeIso = new Date(t).toISOString();
+        }
+      }
+
+      const deploymentRow = await db.deployments.insert({
+        id: deployTraceId,
         projectId: project.id,
         projectName: project.name,
         status: 'running',
         triggerSource: 'cli',
-        startTime: new Date().toISOString(),
+        startTime: startTimeIso,
         output: ''
       });
 
       await db.projects.update(project.id, { status: 'running' });
 
+      // Snapshot project cleaning policy at upload time so concurrent edits don't bite us
+      const effectiveMode: CleanMode = normalizeMode(project.cleanMode);
+      const effectiveProtect = parseProtectPaths(project.protectPaths);
+
       let fullOutput = '';
       const appendLog = async (text: string) => {
         fullOutput += text + '\n';
-        await db.deployments.update(deployLog.id, { output: fullOutput });
-        broadcastToSubscribers(deployLog.id, 'log', text);
+        await db.deployments.update(deploymentRow.id, { output: fullOutput });
+        broadcastToSubscribers(deploymentRow.id, 'log', text);
       };
 
       // Stream NDJSON response to CLI
@@ -254,6 +437,24 @@ export const deployRoutes = new Elysia()
             sendEvent(controller, 'log', { data: `[Kite Deploy] Saved temp zip` });
             await appendLog(`[Kite Deploy] Saved temp zip`);
 
+            // Archive immediately so a later step failure doesn't lose the upload
+            try {
+              const { artifactPath, artifactSize } = await archiveZip({
+                projectId: project.id,
+                deployId: deploymentRow.id,
+                sourceZip: tempZipPath,
+                traceId: deployTraceId,
+              });
+              await db.deployments.update(deploymentRow.id, { artifactPath, artifactSize });
+              const sizeKb = (artifactSize / 1024).toFixed(1);
+              sendEvent(controller, 'log', { data: `[Kite Deploy] Archived zip (${sizeKb} KB) for rollback` });
+              await appendLog(`[Kite Deploy] Archived zip (${sizeKb} KB) for rollback`);
+            } catch (archiveErr: any) {
+              const msg = `[Kite Deploy] WARN: failed to archive zip (${archiveErr?.message}); rollback for this deploy will be unavailable`;
+              sendEvent(controller, 'log', { data: msg });
+              await appendLog(msg);
+            }
+
             const destPath = path.resolve(process.cwd(), project.deployPath);
             await fs.mkdir(destPath, { recursive: true });
             sendEvent(controller, 'log', { data: `[Kite Deploy] Target deploy path: ${destPath}` });
@@ -274,6 +475,17 @@ export const deployRoutes = new Elysia()
                 }
               }
               if (failed) throw new Error('Pre-deploy failed');
+            }
+
+            // Apply cleaning strategy (no-op when mode=merge)
+            if (effectiveMode !== 'merge') {
+              const cleanMsg = `[Kite Deploy] Applying clean strategy: ${effectiveMode} (protect ${effectiveProtect.length} patterns)`;
+              sendEvent(controller, 'log', { data: cleanMsg });
+              await appendLog(cleanMsg);
+              const cleanRes = await applyCleanStrategy(destPath, effectiveMode, effectiveProtect, { traceId: deployTraceId });
+              const cleanSummary = `[Kite Deploy] Clean done: removed ${cleanRes.totalDeleteFiles} files (${(cleanRes.totalDeleteSize / 1024).toFixed(1)} KB), kept ${cleanRes.totalSkipFiles}`;
+              sendEvent(controller, 'log', { data: cleanSummary });
+              await appendLog(cleanSummary);
             }
 
             // Extract
@@ -305,11 +517,25 @@ export const deployRoutes = new Elysia()
             sendEvent(controller, 'log', { data: successMsg });
             await appendLog(successMsg);
 
-            await db.deployments.update(deployLog.id, { status: 'success', duration: durationStr, endTime: new Date().toISOString() });
+            await db.deployments.update(deploymentRow.id, { status: 'success', duration: durationStr, endTime: new Date().toISOString() });
             await db.projects.update(project.id, { status: 'success' });
 
-            sendEvent(controller, 'status', { status: 'success', duration: durationStr, deployId: deployLog.id });
-            broadcastToSubscribers(deployLog.id, 'status', JSON.stringify({ status: 'success', duration: durationStr }));
+            // GC older archives beyond keepN (non-fatal on errors)
+            try {
+              const keepN = await getArtifactKeepN();
+              const gc = await gcArtifacts({ projectId: project.id, keepN, traceId: deployTraceId });
+              if (gc.removedFiles > 0 || gc.detached > 0) {
+                const gcMsg = `[Kite Deploy] GC: removed ${gc.removedFiles} archive(s) (${(gc.removedBytes / 1024).toFixed(1)} KB), preserved ${gc.preserved} shared`;
+                sendEvent(controller, 'log', { data: gcMsg });
+                await appendLog(gcMsg);
+              }
+            } catch (gcErr: any) {
+              reqLog.warn({ err: { name: gcErr?.name, message: gcErr?.message } }, 'artifact gc failed');
+            }
+
+            sendEvent(controller, 'status', { status: 'success', duration: durationStr, deployId: deploymentRow.id });
+            broadcastToSubscribers(deploymentRow.id, 'status', JSON.stringify({ status: 'success', duration: durationStr }));
+            reqLog.info({ ms: Date.now() - startTime }, 'deploy success');
 
           } catch (err: any) {
             const durationStr = ((Date.now() - startTime) / 1000).toFixed(1) + 's';
@@ -317,11 +543,12 @@ export const deployRoutes = new Elysia()
             sendEvent(controller, 'log', { data: failMsg });
             await appendLog(failMsg);
 
-            await db.deployments.update(deployLog.id, { status: 'failed', duration: durationStr, endTime: new Date().toISOString() });
+            await db.deployments.update(deploymentRow.id, { status: 'failed', duration: durationStr, endTime: new Date().toISOString() });
             await db.projects.update(project.id, { status: 'failed' });
 
-            sendEvent(controller, 'status', { status: 'failed', duration: durationStr, deployId: deployLog.id });
-            broadcastToSubscribers(deployLog.id, 'status', JSON.stringify({ status: 'failed', duration: durationStr }));
+            sendEvent(controller, 'status', { status: 'failed', duration: durationStr, deployId: deploymentRow.id });
+            broadcastToSubscribers(deploymentRow.id, 'status', JSON.stringify({ status: 'failed', duration: durationStr }));
+            reqLog.error({ ms: Date.now() - startTime, err: { name: err?.name, message: err?.message } }, 'deploy failed');
           } finally {
             controller.close();
           }
@@ -336,7 +563,7 @@ export const deployRoutes = new Elysia()
       });
 
     } catch (error: any) {
-      console.error('[Deploy] Error:', error);
+      deployLog.error({ err: { name: error?.name, message: error?.message, stack: error?.stack } }, 'unhandled error in /api/deploy/upload');
       set.status = 500;
       return { error: error.message };
     }
@@ -346,7 +573,8 @@ export const deployRoutes = new Elysia()
       projectId: t.String(),
       preDeploy: t.Optional(t.String()),
       postDeploy: t.Optional(t.String()),
-      env: t.Optional(t.Any())
+      env: t.Optional(t.Any()),
+      startedAt: t.Optional(t.String())
     })
   })
   .get('/api/projects/:id/files', async ({ headers, params, query, set }) => {
@@ -460,4 +688,232 @@ export const deployRoutes = new Elysia()
       set.status = 500;
       return { error: err.message };
     }
+  })
+  .post('/api/projects/:id/clean-preview', async ({ headers, params, body, set }) => {
+    if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
+    const project = await db.projects.findById(params.id);
+    if (!project) { set.status = 404; return { error: 'Project not found' }; }
+
+    const reqMode: CleanMode = normalizeMode(body.cleanMode ?? null);
+    const reqProtect = Array.isArray(body.protectPaths)
+      ? body.protectPaths.filter((s) => typeof s === 'string' && s.length > 0)
+      : [];
+
+    if (reqMode === 'merge') {
+      return {
+        tree: { name: '', path: '', type: 'dir', size: 0, willDelete: false, children: [] },
+        summary: { totalFiles: 0, deleteFiles: 0, deleteBytes: 0, protectFiles: 0, truncated: false },
+        mode: reqMode,
+      };
+    }
+
+    const cacheKey = `${project.id}::${reqMode}::${reqProtect.slice().sort().join('|')}`;
+    const cached = cleanPreviewCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return { ...cached.payload, cached: true };
+    }
+
+    const destPath = path.resolve(process.cwd(), project.deployPath);
+    try {
+      await fs.access(destPath);
+    } catch {
+      return {
+        tree: { name: '', path: '', type: 'dir', size: 0, willDelete: false, children: [] },
+        summary: { totalFiles: 0, deleteFiles: 0, deleteBytes: 0, protectFiles: 0, truncated: false },
+        mode: reqMode,
+        warning: 'deployPath does not exist yet',
+      };
+    }
+
+    const result = await applyCleanStrategy(destPath, reqMode, reqProtect, { dryRun: true });
+    const tree = buildPreviewTree(result);
+    const payload = {
+      tree,
+      summary: {
+        totalFiles: result.totalDeleteFiles + result.totalSkipFiles,
+        deleteFiles: result.totalDeleteFiles,
+        deleteBytes: result.totalDeleteSize,
+        protectFiles: result.totalSkipFiles,
+        truncated: result.truncated,
+      },
+      mode: reqMode,
+    };
+    cleanPreviewCache.set(cacheKey, { expiresAt: Date.now() + 30_000, payload });
+    pruneCleanPreviewCache();
+    return payload;
+  }, {
+    body: t.Object({
+      cleanMode: t.Optional(t.Union([t.Literal('merge'), t.Literal('clean'), t.Literal('clean-all'), t.Null()])),
+      protectPaths: t.Optional(t.Array(t.String())),
+    })
+  })
+  .post('/api/deployments/:id/rollback', async ({ headers, params, set }) => {
+    if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
+
+    const source = await db.deployments.findById(params.id);
+    if (!source) { set.status = 404; return { error: 'Deployment not found' }; }
+    if (!source.artifactPath) {
+      set.status = 404;
+      return { error: 'Artifact not archived for this deployment', code: 'ARTIFACT_NOT_FOUND' };
+    }
+
+    try {
+      await fs.access(source.artifactPath);
+    } catch {
+      // file vanished on disk - clear DB pointer so it shows as un-rollbackable
+      await db.deployments.clearArtifactPath(source.id);
+      set.status = 404;
+      return { error: 'Archive file missing on disk', code: 'ARTIFACT_NOT_FOUND' };
+    }
+
+    const project = await db.projects.findById(source.projectId);
+    if (!project) { set.status = 404; return { error: 'Project not found' }; }
+
+    const reqTraceId = pickTraceId(headers as Record<string, string | undefined>);
+    const rollbackTraceId = reqTraceId || randomUUID();
+    const reqLog = deployLog.child({ traceId: rollbackTraceId, projectId: project.id, rollbackOf: source.id });
+    reqLog.info('rollback start');
+
+    const effectiveMode: CleanMode = normalizeMode(project.cleanMode);
+    const effectiveProtect = parseProtectPaths(project.protectPaths);
+
+    const newDeployId = randomUUID();
+    const startedAt = new Date().toISOString();
+
+    const deploymentRow = await db.deployments.insert({
+      id: newDeployId,
+      projectId: project.id,
+      projectName: project.name,
+      status: 'running',
+      triggerSource: 'rollback',
+      startTime: startedAt,
+      output: '',
+      rollbackOf: source.id,
+      // Share the same artifact file (reference-counted GC handles unlink safely)
+      artifactPath: source.artifactPath,
+      artifactSize: source.artifactSize ?? null,
+    });
+    void deploymentRow;
+    await db.projects.update(project.id, { status: 'running' });
+
+    let fullOutput = '';
+    const appendLog = async (text: string) => {
+      fullOutput += text + '\n';
+      await db.deployments.update(newDeployId, { output: fullOutput });
+      broadcastToSubscribers(newDeployId, 'log', text);
+    };
+
+    const startTime = Date.now();
+    const env: Record<string, string> = { KITE_DEPLOY_TRACE_ID: rollbackTraceId };
+    const destPath = path.resolve(process.cwd(), project.deployPath);
+
+    try {
+      await appendLog(`[Kite Rollback] Restoring deploy ${source.id.slice(0, 8)} for ${project.name}`);
+      await fs.mkdir(destPath, { recursive: true });
+
+      // pre-deploy
+      if (project.preDeployScript) {
+        await appendLog(`[Kite Rollback] Running Pre-deploy: ${project.preDeployScript}`);
+        let failed = false;
+        for await (const line of runShellCommand(project.preDeployScript, destPath, env)) {
+          if (line.startsWith('\x00EXIT:')) {
+            if (parseInt(line.slice(6)) !== 0) failed = true;
+          } else {
+            await appendLog(line);
+          }
+        }
+        if (failed) throw new Error('Pre-deploy failed');
+      }
+
+      if (effectiveMode !== 'merge') {
+        await appendLog(`[Kite Rollback] Applying clean strategy: ${effectiveMode} (protect ${effectiveProtect.length} patterns)`);
+        const cleanRes = await applyCleanStrategy(destPath, effectiveMode, effectiveProtect, { traceId: rollbackTraceId });
+        await appendLog(`[Kite Rollback] Clean done: removed ${cleanRes.totalDeleteFiles} files (${(cleanRes.totalDeleteSize / 1024).toFixed(1)} KB), kept ${cleanRes.totalSkipFiles}`);
+      }
+
+      await appendLog(`[Kite Rollback] Extracting archive...`);
+      new AdmZip(source.artifactPath).extractAllTo(destPath, true);
+
+      if (project.postDeployScript) {
+        await appendLog(`[Kite Rollback] Running Post-deploy: ${project.postDeployScript}`);
+        let failed = false;
+        for await (const line of runShellCommand(project.postDeployScript, destPath, env)) {
+          if (line.startsWith('\x00EXIT:')) {
+            if (parseInt(line.slice(6)) !== 0) failed = true;
+          } else {
+            await appendLog(line);
+          }
+        }
+        if (failed) throw new Error('Post-deploy failed');
+      }
+
+      const durationStr = ((Date.now() - startTime) / 1000).toFixed(1) + 's';
+      await appendLog(`[Kite Rollback] Rollback completed successfully in ${durationStr}.`);
+      await db.deployments.update(newDeployId, { status: 'success', duration: durationStr, endTime: new Date().toISOString() });
+      await db.projects.update(project.id, { status: 'success' });
+      broadcastToSubscribers(newDeployId, 'status', JSON.stringify({ status: 'success', duration: durationStr }));
+
+      await writeAudit({ headers, traceId: rollbackTraceId }, {
+        action: 'deployment.rollback',
+        targetType: 'deployment',
+        targetId: newDeployId,
+        targetName: project.name,
+        before: { deployId: source.id, startTime: source.startTime },
+        after: { deployId: newDeployId, startTime: startedAt, duration: durationStr, status: 'success' },
+        summary: `回滚项目 ${project.name} 到部署 ${source.id.slice(0, 8)}`,
+      });
+
+      reqLog.info({ ms: Date.now() - startTime }, 'rollback success');
+      return {
+        success: true,
+        deployId: newDeployId,
+        rollbackOf: source.id,
+        duration: durationStr,
+        traceId: rollbackTraceId,
+      };
+    } catch (err: any) {
+      const durationStr = ((Date.now() - startTime) / 1000).toFixed(1) + 's';
+      const failMsg = `[Kite Rollback] Rollback failed: ${err.message}`;
+      await appendLog(failMsg);
+      await db.deployments.update(newDeployId, { status: 'failed', duration: durationStr, endTime: new Date().toISOString() });
+      await db.projects.update(project.id, { status: 'failed' });
+      broadcastToSubscribers(newDeployId, 'status', JSON.stringify({ status: 'failed', duration: durationStr }));
+
+      await writeAudit({ headers, traceId: rollbackTraceId }, {
+        action: 'deployment.rollback',
+        targetType: 'deployment',
+        targetId: newDeployId,
+        targetName: project.name,
+        before: { deployId: source.id, startTime: source.startTime },
+        after: { deployId: newDeployId, startTime: startedAt, duration: durationStr, status: 'failed' },
+        summary: `回滚项目 ${project.name} 到部署 ${source.id.slice(0, 8)} 失败`,
+        status: 'failed',
+        errorMessage: err?.message,
+      });
+
+      reqLog.error({ ms: Date.now() - startTime, err: { name: err?.name, message: err?.message } }, 'rollback failed');
+      set.status = 500;
+      return { success: false, error: err?.message, deployId: newDeployId, traceId: rollbackTraceId };
+    }
   });
+
+// ---- helpers ---------------------------------------------------------------
+
+interface CleanPreviewCacheEntry {
+  expiresAt: number;
+  payload: unknown;
+}
+const cleanPreviewCache = new Map<string, CleanPreviewCacheEntry>();
+const CLEAN_PREVIEW_CACHE_MAX = 64;
+function pruneCleanPreviewCache() {
+  if (cleanPreviewCache.size <= CLEAN_PREVIEW_CACHE_MAX) return;
+  const now = Date.now();
+  for (const [k, v] of cleanPreviewCache) {
+    if (v.expiresAt <= now) cleanPreviewCache.delete(k);
+  }
+  while (cleanPreviewCache.size > CLEAN_PREVIEW_CACHE_MAX) {
+    const oldest = cleanPreviewCache.keys().next().value;
+    if (oldest === undefined) break;
+    cleanPreviewCache.delete(oldest);
+  }
+}

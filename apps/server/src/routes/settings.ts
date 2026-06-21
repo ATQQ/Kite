@@ -2,13 +2,17 @@ import { Elysia, t } from 'elysia';
 import { db } from '../db/index.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-
-const verifyAdminToken = (headers: Record<string, string | undefined>) => {
-  const authHeader = headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) return false;
-  const token = authHeader.split(' ')[1];
-  return token === process.env.ADMIN_TOKEN;
-};
+import { writeAudit, diffFields } from '../lib/audit.js';
+import {
+  verifyAdminToken,
+  verifyAdminTokenValue,
+  validateAdminTokenStrength,
+  validateDeployTokenStrength,
+  loginGuard,
+  loginFailure,
+  loginSuccess,
+  pickClientKey,
+} from '../lib/auth.js';
 
 const serverStartTime = Date.now();
 
@@ -30,14 +34,34 @@ export const settingsRoutes = new Elysia()
   })
   .put('/api/settings', async ({ headers, body, set }) => {
     if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
-    const allowed = ['webhook_url', 'webhook_events', 'default_deploy_path', 'max_upload_size', 'global_deploy_token'];
+    const allowed = ['webhook_url', 'webhook_events', 'default_deploy_path', 'max_upload_size', 'global_deploy_token', 'artifact_keep_n'];
+    const beforeAll = await db.settings.getAll();
     const entries: Record<string, string> = {};
     for (const [key, value] of Object.entries(body)) {
       if (allowed.includes(key)) {
         entries[key] = String(value);
       }
     }
+    if (Object.prototype.hasOwnProperty.call(entries, 'global_deploy_token')) {
+      const result = validateDeployTokenStrength(entries.global_deploy_token);
+      if (!result.ok) {
+        set.status = 400;
+        return { error: `global_deploy_token 强度不足：${result.reason}` };
+      }
+    }
     await db.settings.setMany(entries);
+    const afterAll = await db.settings.getAll();
+    const changedKeys = Object.keys(entries);
+    const diff = diffFields(beforeAll as any, afterAll as any, changedKeys);
+    if (Object.keys(diff.after).length > 0) {
+      await writeAudit({ headers }, {
+        action: 'settings.update',
+        targetType: 'settings',
+        before: diff.before,
+        after: diff.after,
+        summary: `更新系统设置：${Object.keys(diff.after).join(', ')}`,
+      });
+    }
     return { success: true, message: 'Settings updated' };
   }, {
     body: t.Object({
@@ -46,18 +70,37 @@ export const settingsRoutes = new Elysia()
       default_deploy_path: t.Optional(t.String()),
       max_upload_size: t.Optional(t.String()),
       global_deploy_token: t.Optional(t.String()),
+      artifact_keep_n: t.Optional(t.String()),
     })
   })
   .post('/api/settings/token', async ({ headers, body, set }) => {
     if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
+    const clientKey = pickClientKey(headers as Record<string, string | undefined>);
+    const guard = await loginGuard(clientKey);
+    if (guard.locked) {
+      const retrySec = Math.ceil(guard.retryAfterMs / 1000);
+      set.status = 429;
+      set.headers = { ...(set.headers || {}), 'Retry-After': String(retrySec) };
+      return { error: `Too many attempts, please retry after ${retrySec}s` };
+    }
     const { oldToken, newToken } = body;
-    if (oldToken !== process.env.ADMIN_TOKEN) {
+    if (!verifyAdminTokenValue(oldToken)) {
+      loginFailure(clientKey);
+      await writeAudit({ headers }, {
+        action: 'admin_token.change',
+        targetType: 'admin_token',
+        summary: '修改 Admin Token 失败（旧 Token 不正确）',
+        status: 'failed',
+        errorMessage: '旧 Token 不正确',
+      });
       set.status = 400;
       return { error: '旧 Token 不正确' };
     }
-    if (!newToken || newToken.length < 8) {
+    loginSuccess(clientKey);
+    const strength = validateAdminTokenStrength(newToken);
+    if (!strength.ok) {
       set.status = 400;
-      return { error: '新 Token 长度不能少于 8 位' };
+      return { error: `新 Token 强度不足：${strength.reason}` };
     }
     // Update .env.local
     const envPath = path.join(process.cwd(), '.env.local');
@@ -72,6 +115,13 @@ export const settingsRoutes = new Elysia()
     await fs.writeFile(envPath, lines.join('\n') + '\n');
     // Update runtime env
     process.env.ADMIN_TOKEN = newToken;
+    await writeAudit({ headers }, {
+      action: 'admin_token.change',
+      targetType: 'admin_token',
+      before: { adminToken: '****' },
+      after: { adminToken: '****' },
+      summary: '修改 Admin Token',
+    });
     return { success: true, message: 'Token 已更新，下次登录请使用新 Token' };
   }, {
     body: t.Object({

@@ -5,3 +5,5 @@ build
 .temp_deploy
 cache
 .env.local
+.deployments
+plan

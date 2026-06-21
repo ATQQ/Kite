@@ -42,6 +42,12 @@ kite serve --runtime bun
 kite serve --host 0.0.0.0 --port 5431
 ```
 
+> 安全提示：`kite serve` 默认监听 `127.0.0.1`，仅本机可访问。若显式指定非本地地址（如 `--host 0.0.0.0` 或公网 IP），CLI 启动时会打印黄色 `[warn]` 提示，请务必在 Nginx/Caddy 等前置代理上配置 TLS 与限速。
+>
+> Admin Token 强度策略：长度 ≥ 24，且至少包含字母和数字，去重字符数 ≥ 8。当 `.env.local` 中的 `ADMIN_TOKEN` 不满足该策略时，`kite serve` 启动会打印 `[warn]` 但不会阻塞启动；建议执行 `kite reset-password --random` 重新生成强随机 Token，或手工替换为更强的随机字符串。
+>
+> 登录限流：管理端登录 (`POST /api/auth/login`) 与修改 Admin Token (`POST /api/settings/token`) 共享内存级限流，按客户端 IP（取 `X-Forwarded-For` / `X-Real-IP` 首项）累计失败次数；10 分钟内累计 8 次失败将锁定 5 分钟并返回 `429 Retry-After`。
+
 ### 后台运行 (pm2)
 
 `kite serve` 支持通过 pm2 实现后台守护运行，适合部署在内网/云服务器上长期提供服务。
@@ -304,10 +310,20 @@ kite init --project proj_1a2b3c4d5e --token <DEPLOY_TOKEN> --token-store local
 *   `projectId` (必填): 对应 Web 管理面板中生成的项目唯一 ID。
 *   `outputDir` (可选): 要打包的根目录（相对路径），默认是 `./`。如果是前端项目通常是 `./dist`。
 *   `files` (可选): 字符串数组。指定**仅上传**该目录下的哪些特定文件或子目录。如果为空或不传，默认打包 `outputDir` 下所有文件（自动忽略 `.git` 和 `node_modules` 等）。
+*   `ignore` (可选): 字符串数组，glob 模式。在内置忽略规则之外**追加**的自定义忽略模式。仅作用于通配打包（`files` 留空或写 glob 时），对 `files` 中点名的真实文件/目录**不生效**——明确指定即视为需要。
+*   `ignoreBuiltin` (可选): 布尔。设为 `true` 时**禁用**内置忽略规则（默认 `false`，保留内置规则）。等价于命令行 `--no-ignore-builtin`。
 *   `serverUrl` (可选): 部署服务地址。优先级：CLI `--server` > `.env.local` `KITE_SERVER_URL` > **`kite.config.json`** > 全局配置。
 *   `env` (可选): 键值对对象，部署时注入到 `preDeploy` / `postDeploy` 脚本的环境变量。CLI `--set-env` 可覆盖。
 *   `preDeploy` (可选): 在**服务端**解压前执行的前置脚本（注意：不是本地构建）。适合做清理、备份等准备工作。
 *   `postDeploy` (可选): 在**服务端**解压完成后，在目标部署目录执行的后置脚本（例如重启服务、构建、nginx reload 等）。
+
+> **关于忽略规则**
+>
+> 内置忽略集（默认启用）：`.git/**`、`node_modules/**`、`.next/**`、`.nuxt/**`、`.turbo/**`、`.cache/**`、`.vite/**`、`coverage/**`、`.DS_Store`、`*.log`、`.env*`、`.deploy-archive.zip` 等。
+>
+> 优先级：CLI `--ignore <patterns>` > 项目 `ignore` 字段 > 内置默认。
+>
+> **关键语义**：`files` 中写**真实存在的文件/目录路径**（如 `".env"`、`"src"`）会被原样打包，不应用任何忽略规则；只有 glob 通配（如 `"**/*"`、`".env*"`）才会经过 `ignore` 过滤。这意味着如果你确实需要打包 `.env`，把它写到 `files` 即可，无需关闭内置规则。
 
 > **执行顺序与解压行为**
 >
@@ -371,9 +387,9 @@ kite push --token "YOUR_TEMP_TOKEN" --server "http://test-env:5431" --out "./bui
 
 部署配置优先级为：
 
-1. CLI 参数：`--token`、`--server`、`--project`、`--out`、`--pre`、`--post`、`--command`
+1. CLI 参数：`--token`、`--server`、`--project`、`--out`、`--pre`、`--post`、`--command`、`--ignore`、`--no-ignore-builtin`
 2. 本地环境变量：`.env.local`（`KITE_SERVER_URL`、`KITE_TOKEN` 等）
-3. 项目配置：`kite.config.json`（`serverUrl`、`projectId`、`outputDir` 等）
+3. 项目配置：`kite.config.json`（`serverUrl`、`projectId`、`outputDir`、`ignore`、`ignoreBuiltin` 等）
 4. 全局配置：`~/.kite/config.json`（`serverUrl`、`token`、`projectToken`）
 
 ## 十二、部署流程示例
@@ -385,3 +401,206 @@ kite push --token "YOUR_TEMP_TOKEN" --server "http://test-env:5431" --out "./bui
 5.  服务端接收并校验 Token 成功后，自动解压至该项目预先设定的服务器绝对路径。
 6.  服务端在解压目录下执行 `postDeploy` 指令（如 `pm2 restart` 或 `nginx -s reload`）。
 7.  部署完成，CLI 终端打印出服务端返回的执行日志。你可以登录 Web 管理后台查看详细的流式日志记录。
+
+## 十三、数据迁移 (kite export / kite import)
+
+当你需要把 Kite 从一台机器迁到另一台机器（例如换服务器、灾备恢复），可以用 `kite export` / `kite import` 把整套元数据、部署历史与线上产物打包搬运。导入端会自动写回 CLI 全局 token 配置，开发机仅需修改 `serverUrl` 即可继续使用原有 token 部署。
+
+### 导出 (kite export)
+
+在**源机器**执行（前提：该机器跑过 `kite serve`，`~/.kite/kite.db` 已存在）：
+
+```bash
+# 完整迁移包：默认包含项目元数据 + 部署历史 + 每个项目 deployPath 的产物
+kite export --out kite-backup.zip
+
+# 仅迁移指定项目（仍默认包含 artifacts/logs）
+kite export --projects proj_abc,proj_def --out kite-backup.zip
+
+# 不需要产物（最小元数据包，体积最小）
+kite export --no-include-artifacts --no-include-logs --out kite-backup.zip
+```
+
+可选参数：
+
+| 选项 | 说明 |
+|---|---|
+| `--out <file>` | 输出文件路径，默认 `./kite-export-<时间戳>.zip` |
+| `--no-include-artifacts` | 不打包每个项目的 `deployPath` 目录（默认包含） |
+| `--no-include-logs` | 不包含 `deployments` 表（默认包含） |
+| `--projects <ids>` | 逗号分隔的 projectId，只导出这些项目（同时过滤 deployments） |
+| `--ignore <patterns>` | artifacts 打包时的额外忽略模式 |
+| `--no-ignore-builtin` | artifacts 打包时禁用内置忽略规则 |
+
+导出包结构（zip）：
+
+```
+kite-export/
+├── manifest.json     # 版本号 / 时间戳 / 包含项 / 项目 id 列表 / artifacts 索引
+├── settings.json     # settings 表
+├── projects.json     # projects 表（含 token）
+├── deployments.json  # （默认包含；--no-include-logs 时省略）
+└── artifacts/        # （默认包含；--no-include-artifacts 时省略）
+    ├── proj_abc.zip
+    └── proj_def.zip
+```
+
+### 导入 (kite import)
+
+在**目标机器**执行：
+
+```bash
+# 先 dry-run 看摘要
+kite import kite-backup.zip --dry-run
+
+# 默认 skip-existing：仅写入目标库不存在的记录；包内有 artifacts 时自动恢复 deployPath
+kite import kite-backup.zip
+
+# 只导入元数据，不解压 deployPath
+kite import kite-backup.zip --no-restore-artifacts
+
+# 完整覆盖目标库（强制要求 --yes）
+kite import kite-backup.zip --strategy overwrite --yes
+```
+
+可选参数：
+
+| 选项 | 说明 |
+|---|---|
+| `--strategy <mode>` | 冲突策略：`merge` / `overwrite` / `skip-existing`（默认） |
+| `--no-restore-artifacts` | 不解压 `artifacts/<projectId>.zip` 到对应 `deployPath`（默认在包内有 artifacts 时自动恢复） |
+| `--dry-run` | 仅打印摘要，不写库不解压 |
+| `--yes` | 配合 `--strategy overwrite` 二次确认 |
+
+冲突策略语义：
+
+- **skip-existing**（默认）：同 `id` 的 project / 同 `key` 的 setting / 同 `id` 的 deployment 跳过，不做修改。最稳。
+- **merge**：行为上等同 `skip-existing`，仅写入目标库不存在的记录。
+- **overwrite**：使用 `INSERT ... ON CONFLICT DO UPDATE` 完整覆盖目标库已有记录。**会改写目标机器的现有 token 等数据**，必须显式 `--yes`。
+
+### 自动恢复 CLI 全局配置
+
+`kite import` 在写完 DB 之后，会把每个新导入的项目 token 自动写回 `~/.kite/config.json` 的 `projectToken`（key 为 `projectId`），让开发机执行 `kite push` 时无需再 `kite config:set token`：
+
+- `skip-existing` / `merge`：仅写入目标机器全局配置中**不存在**的项目 token，已有同 key 的值保留。
+- `overwrite`：覆盖目标机器同 key 的 token。
+- 若目标机器的 `~/.kite/config.json` 中没有 `serverUrl`，会写入默认本地地址 `http://127.0.0.1:5431`（适配"刚装好 CLI + `kite serve` 本地部署"的最常见场景）。需要指向远端 server 时执行 `kite config:set serverUrl <url>` 覆盖。
+
+### 迁移自检 (kite verify)
+
+`kite import` 完成后，可在目标机器执行 `kite verify` 做一次完整性自检：
+
+```bash
+kite verify                  # 只查本地 db / config / 各 project deploy_path
+kite verify --check-server   # 额外探活 serverUrl（要求 server 已启动）
+```
+
+检查项：
+
+| 项 | 说明 |
+|---|---|
+| `kite.db` 三表结构 | `projects` 表存在；`deployments` 引用的 `project_id` 不孤立 |
+| 各项目 `deploy_path` | 路径存在且是目录（artifacts 已正确还原） |
+| 全局 `projectToken` | `~/.kite/config.json` 中每个 project 都有 token；与 DB token 一致 |
+| 全局 `serverUrl` | 已配置 |
+| Server 健康 | `--check-server` 时 GET `serverUrl/`，5xx / 网络错误视为失败 |
+
+退出码：错误 = `exit 1`；仅警告 = `exit 0`；纯通过 = `exit 0`。
+
+### 健康诊断 (kite doctor)
+
+`kite doctor` 在 `kite verify` 之外补一份「实时探活」视角：本地段验 Node 版本/Kite Home/磁盘/全局配置，远端段直接打 `/api/health` 与 `/api/health/detail`。
+
+```bash
+kite doctor                                           # 用全局配置的 serverUrl + token
+kite doctor --server http://localhost:5431            # 仅探活，不需要 token
+kite doctor --server http://localhost:5431 --token x  # 显式覆盖
+```
+
+输出示例：
+
+```
+[Local]
+  ✓ Node.js                v24.16.0 (>=18 required)
+  ✓ Kite Home              ~/.kite
+  ✓ Disk free              276.68 GB free (40% used)
+  ✓ Global config          serverUrl=http://127.0.0.1:5431
+
+[Remote http://127.0.0.1:5431]
+  ✓ GET /api/health        status=ok uptime=239s version=dev
+  ✓ Remote DB              ~/.kite/kite.db (14.3ms)
+  ✓ Remote Kite Home       ~/.kite writable=true tmp=true
+  ✓ Remote Disk            276.68 GB free (40% used)
+  ! Recent deploys         last 0 success rate=n/a
+  ✓ Remote runtime         node v24.16.0 uptime=239s
+
+Doctor: passed with warnings.
+```
+
+退出码：任一 `✗` → `exit 1`；只有 `!` → `exit 0`；全 `✓` → `exit 0`。Web 后台的 *系统设置 → 服务健康* 卡片调用同一接口（仅远端段）。
+
+### 典型迁移流程
+
+```bash
+# 1. 源机器
+kite export --out kite-backup.zip
+scp kite-backup.zip user@new-server:/tmp/
+
+# 2. 目标机器
+npm install -g @kitecd/cli
+kite serve            # 首次启动会初始化 ~/.kite/kite.db
+# Ctrl+C 退出 server 后导入
+kite import /tmp/kite-backup.zip --dry-run
+kite import /tmp/kite-backup.zip
+kite verify           # 自检三表 + deploy_path + token 完备
+kite serve            # 再次启动，dashboard 即可看到所有项目和历史
+
+# 3. 开发机（无需重发 token）
+kite config:set serverUrl https://new-server.example.com
+kite push
+```
+
+### 注意事项
+
+- 导入时若目标机器上某 project 的 `deployPath` 与源机器不同，请用 `--strategy overwrite --yes` 或先手动调整目标机器的项目配置后再重新导入。
+- artifacts 还原**只覆盖同名文件，不删除目标目录多余文件**，避免误删。如需完全镜像，请先手动清空 `deployPath`。
+- `manifest.schemaVersion` 当前为 `1`。未来若 schema 升级，旧 CLI 拒绝导入更高版本的包，请升级 CLI 后重试。
+
+### Web 端数据迁移
+
+除了 CLI，Web 管理端也内置了导入/导出面板，入口在左侧菜单 **数据迁移**（路由 `/migration`）。适合不想登录服务器执行命令的场景：
+
+- **导出**：勾选要迁移的项目，可选择是否包含 artifacts、是否包含部署日志，日志多时还能设置"每项目最近 N 条"。点击"导出选中项目"即可下载 `kite-export-<timestamp>.zip`。
+- **导入**：选择本地 zip，选择冲突策略（`skip-existing` / `merge` / `overwrite`）和是否还原 artifacts；`overwrite` 会触发二次确认并要求请求头带 `X-Confirm-Overwrite: yes`。导入完成后面板会展示项目 / 设置 / 部署日志 / artifacts 的逐项摘要。
+
+Web 端与 CLI 共用 `manifest.schemaVersion=1` 的 zip 格式，因此 CLI 导出的包可以从 Web 导入，反之亦然。与 CLI `kite import` 不同的是，Web 导入不会改写 `~/.kite/config.json`（server 本身就是目标端），开发机的 `kite push` 仍按现有 token 工作。
+
+## 十四、运维命令 (kite list / status / logs / rollback)
+
+无需打开浏览器即可查看服务端上项目、部署历史和实时日志，并支持回滚到上一个成功版本。这些命令均通过 admin token 与 server 通信，配置链与 `kite doctor` 一致：`--token` 参数 > `KITE_TOKEN` > `~/.kite/config.json` 中的 `token`。
+
+| 命令 | 说明 |
+|------|------|
+| `kite list` | 列出 server 上所有项目（ID / 名称 / env / 状态 / 更新时间）。`--env <name>` 过滤；`--json` 输出 JSON 便于 CI 消费。 |
+| `kite status [projectId]` | 查看指定项目最近若干次部署。不传 `projectId` 时读取当前目录 `kite.config*.json`。`--limit <n>` 默认 5、上限 50；`--json` 输出原始 JSON。 |
+| `kite logs <deployId>` | 打印一次部署的完整输出。加 `-f / --follow` 通过 SSE 实时跟随，直到部署结束（success 退出码 0、failed 退出码 1）。 |
+| `kite rollback [projectId]` | 回滚到指定历史部署。`--to <deployId>` 指定目标；不传时自动取最近一次有归档的成功部署。`--yes` 跳过二次确认（非 TTY 必填）。 |
+
+```bash
+# 列出所有项目，过滤生产环境
+kite list --env prod
+
+# 查看某项目最近 10 条部署
+kite status proj_abcdef --limit 10
+
+# 实时跟随某次部署的日志（CI 中常用）
+kite logs 1f2a3b4c-... -f
+
+# 一键回滚到上一次成功部署（开发机交互模式）
+kite rollback proj_abcdef
+# CI 中必须显式 --yes，否则退出码 1
+kite rollback proj_abcdef --to 1f2a3b4c-... --yes
+```
+
+> `rollback` 走 server 端 `POST /api/deployments/:id/rollback` 接口，自动复用源部署的归档 zip（Web 管理端「存储」页面的引用计数会保护这些 zip 不被误删）。失败会保留新的 `triggerSource=rollback` 部署记录，可用 `kite logs <newDeployId>` 排查。
+

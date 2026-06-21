@@ -1,20 +1,95 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch } from 'vue'
+import { ref, onMounted, computed, watch, nextTick } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useProjectStore } from '../store/project'
 import { ansiToHtml } from '../utils/ansi'
 import { useDeployStream } from '../composables/useDeployStream'
-import { Terminal, CheckCircle2, XCircle, Clock, RefreshCw, AlertCircle } from 'lucide-vue-next'
+import { Terminal, CheckCircle2, XCircle, Clock, RefreshCw, AlertCircle, RotateCcw, Archive, ArchiveX, Copy, CheckCheck } from 'lucide-vue-next'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
+import { useToast } from '../composables/useToast'
 
 const projectStore = useProjectStore()
+const route = useRoute()
+const router = useRouter()
+const toast = useToast()
 
-onMounted(() => {
-  projectStore.fetchLogs()
+const searchKeyword = ref('')
+const selectedProjectId = ref<string>('')
+
+const projectOptions = computed(() => {
+  const fromStore = projectStore.projects.map(p => ({ id: p.id, name: p.name }))
+  const seen = new Set(fromStore.map(p => p.id))
+  for (const log of projectStore.logs) {
+    if (!seen.has(log.projectId)) {
+      seen.add(log.projectId)
+      fromStore.push({ id: log.projectId, name: log.projectName })
+    }
+  }
+  return fromStore
 })
 
-const logs = computed(() => projectStore.logs)
+const logs = computed(() => {
+  const kw = searchKeyword.value.trim().toLowerCase()
+  return projectStore.logs.filter(log => {
+    if (selectedProjectId.value && log.projectId !== selectedProjectId.value) return false
+    if (!kw) return true
+    return (
+      log.projectName.toLowerCase().includes(kw) ||
+      log.id.toLowerCase().includes(kw)
+    )
+  })
+})
 
 const selectedLog = ref<any>(null)
 const isRunning = computed(() => selectedLog.value?.status === 'running')
+
+const listItemRefs = ref<Record<string, HTMLElement | null>>({})
+const setItemRef = (id: string) => (el: any) => {
+  listItemRefs.value[id] = el as HTMLElement | null
+}
+
+async function selectById(id: string | null) {
+  if (!id) return
+  const matched = projectStore.logs.find(l => l.id === id)
+  if (!matched) return
+  selectedLog.value = matched
+  await nextTick()
+  const el = listItemRefs.value[id]
+  if (el && typeof el.scrollIntoView === 'function') {
+    el.scrollIntoView({ block: 'nearest' })
+  }
+}
+
+onMounted(async () => {
+  if (projectStore.projects.length === 0) {
+    projectStore.fetchProjects()
+  }
+  await projectStore.fetchLogs()
+  const pid = typeof route.query.projectId === 'string' ? route.query.projectId : ''
+  if (pid) selectedProjectId.value = pid
+  const id = typeof route.query.id === 'string' ? route.query.id : null
+  await selectById(id)
+})
+
+watch(() => route.query.id, async (id) => {
+  if (typeof id === 'string') await selectById(id)
+})
+
+watch(() => route.query.projectId, (pid) => {
+  selectedProjectId.value = typeof pid === 'string' ? pid : ''
+})
+
+watch(selectedProjectId, (pid) => {
+  const currentPid = typeof route.query.projectId === 'string' ? route.query.projectId : ''
+  if (pid === currentPid) return
+  const nextQuery = { ...route.query }
+  if (pid) nextQuery.projectId = pid
+  else delete nextQuery.projectId
+  router.replace({ query: nextQuery })
+  if (selectedLog.value && pid && selectedLog.value.projectId !== pid) {
+    selectedLog.value = null
+  }
+})
 
 // SSE stream for running deployments
 const { lines: streamLines, status: streamStatus } = useDeployStream(
@@ -56,6 +131,100 @@ const refreshLogs = async () => {
 function renderLine(line: string): string {
   return ansiToHtml(line)
 }
+
+const canRollback = computed(() => {
+  const log: any = selectedLog.value
+  if (!log) return false
+  if (log.status === 'running') return false
+  if (log.triggerSource === 'rollback') return false
+  return !!log.artifactPath
+})
+
+const rollbackDisabledReason = computed(() => {
+  const log: any = selectedLog.value
+  if (!log) return ''
+  if (log.status === 'running') return '部署进行中，无法回滚'
+  if (log.triggerSource === 'rollback') return '回滚记录不可再被回滚'
+  if (!log.artifactPath) return '该版本归档已被清理或过早，无法回滚'
+  return ''
+})
+
+const showRollbackConfirm = ref(false)
+const isRollingBack = ref(false)
+
+function shortId(id?: string | null) {
+  if (!id) return ''
+  return id.slice(0, 8)
+}
+
+const copiedId = ref<string>('')
+async function copyDeploymentId(id: string, evt?: Event) {
+  if (evt) {
+    evt.stopPropagation()
+    evt.preventDefault()
+  }
+  if (!id) return
+  try {
+    await navigator.clipboard.writeText(id)
+    copiedId.value = id
+    toast.success('已复制部署 ID', shortId(id))
+    setTimeout(() => {
+      if (copiedId.value === id) copiedId.value = ''
+    }, 2000)
+  } catch (e: any) {
+    toast.error('复制失败', e?.message || '请手动选择文本复制')
+  }
+}
+
+const currentDeploymentByProject = computed(() => {
+  const map: Record<string, string> = {}
+  const sorted = [...projectStore.logs].sort((a, b) => {
+    const ta = new Date(a.startTime).getTime() || 0
+    const tb = new Date(b.startTime).getTime() || 0
+    return tb - ta
+  })
+  for (const log of sorted) {
+    if (log.status !== 'success') continue
+    if ((log as any).triggerSource === 'rollback') continue
+    if (map[log.projectId]) continue
+    map[log.projectId] = log.id
+  }
+  return map
+})
+
+function isCurrentVersion(log: { id: string; projectId: string }) {
+  return currentDeploymentByProject.value[log.projectId] === log.id
+}
+
+function openRollback() {
+  if (!canRollback.value) return
+  showRollbackConfirm.value = true
+}
+
+async function confirmRollback() {
+  const sourceId = selectedLog.value?.id
+  if (!sourceId) return
+  isRollingBack.value = true
+  try {
+    const data = await projectStore.rollbackDeployment(sourceId)
+    toast.success('回滚已完成', `新部署 ${shortId(data.deployId)}`)
+    showRollbackConfirm.value = false
+    await projectStore.fetchLogs()
+    const next = projectStore.logs.find(l => l.id === data.deployId)
+    if (next) {
+      selectedLog.value = next
+      await nextTick()
+      const el = listItemRefs.value[next.id]
+      if (el && typeof el.scrollIntoView === 'function') {
+        el.scrollIntoView({ block: 'nearest' })
+      }
+    }
+  } catch (e: any) {
+    toast.error('回滚失败', e?.message || '未知错误')
+  } finally {
+    isRollingBack.value = false
+  }
+}
 </script>
 
 <template>
@@ -76,18 +245,34 @@ function renderLine(line: string): string {
 
       <!-- Log List -->
       <div class="w-full lg:w-1/3 bg-panel border border-border rounded-xl shadow-sm overflow-hidden flex flex-col h-[400px] lg:h-auto">
-        <div class="p-4 border-b border-border bg-base/50 shrink-0">
+        <div class="p-4 border-b border-border bg-base/50 shrink-0 space-y-2">
+          <select
+            v-model="selectedProjectId"
+            class="w-full bg-base border border-border rounded-md px-3 py-2 text-sm text-textMain focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all"
+          >
+            <option value="">全部项目</option>
+            <option v-for="p in projectOptions" :key="p.id" :value="p.id">{{ p.name }}</option>
+          </select>
           <input
+            v-model="searchKeyword"
             type="text"
             placeholder="搜索项目或记录 ID..."
             class="w-full bg-base border border-border rounded-md px-3 py-2 text-sm text-textMain focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all"
           />
+          <div v-if="selectedProjectId || searchKeyword" class="flex items-center justify-between text-xs text-textMuted">
+            <span>已过滤 {{ logs.length }} 条记录</span>
+            <button
+              @click="selectedProjectId = ''; searchKeyword = ''"
+              class="text-primary hover:underline"
+            >清除过滤</button>
+          </div>
         </div>
 
         <div class="flex-1 overflow-y-auto p-2 space-y-1">
           <div
             v-for="log in logs"
             :key="log.id"
+            :ref="setItemRef(log.id)"
             @click="selectLog(log)"
             class="p-3 rounded-lg cursor-pointer transition-all border border-transparent flex items-start space-x-3"
             :class="selectedLog?.id === log.id ? 'bg-primary/10 border-primary/20 shadow-[inset_2px_0_0_0_#3b82f6]' : 'dark:hover:bg-white/5 hover:bg-black/5'"
@@ -102,7 +287,21 @@ function renderLine(line: string): string {
                 <span class="font-medium text-textMain text-sm truncate">{{ log.projectName }}</span>
                 <span class="text-xs text-textMuted font-mono shrink-0">{{ new Date(log.startTime).toLocaleString() }}</span>
               </div>
-              <div class="flex items-center text-xs text-textMuted space-x-3">
+              <div class="flex items-center text-xs text-textMuted gap-1.5 flex-wrap">
+                <span
+                  class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-base border border-border font-mono text-[10px] text-textMuted hover:text-primary hover:border-primary/40 transition-colors cursor-pointer"
+                  :title="`点击复制完整 ID: ${log.id}`"
+                  @click.stop="copyDeploymentId(log.id, $event)"
+                >
+                  <CheckCheck v-if="copiedId === log.id" class="w-3 h-3 text-success" />
+                  <Copy v-else class="w-3 h-3" />
+                  {{ shortId(log.id) }}
+                </span>
+                <span
+                  v-if="isCurrentVersion(log)"
+                  class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-success/10 border border-success/30 text-success"
+                  title="该版本为当前线上版本"
+                >当前</span>
                 <span class="flex items-center">
                   <Terminal class="w-3 h-3 mr-1" />
                   {{ log.triggerSource }}
@@ -111,8 +310,16 @@ function renderLine(line: string): string {
                   <Clock class="w-3 h-3 mr-1" />
                   {{ log.duration }}
                 </span>
+                <span
+                  v-if="log.triggerSource === 'rollback'"
+                  class="ml-auto text-[10px] font-mono px-1 py-0 rounded bg-yellow-400/10 border border-yellow-400/30 text-yellow-400"
+                >RB</span>
               </div>
             </div>
+          </div>
+          <div v-if="logs.length === 0" class="flex flex-col items-center justify-center py-10 text-textMuted text-sm">
+            <AlertCircle class="w-8 h-8 mb-2 opacity-50" />
+            <p>暂无匹配的部署记录</p>
           </div>
         </div>
       </div>
@@ -120,15 +327,55 @@ function renderLine(line: string): string {
       <!-- Terminal View -->
       <div class="flex-1 bg-[#09090b] border border-border rounded-xl shadow-sm flex flex-col overflow-hidden h-[500px] lg:h-auto font-mono text-sm">
         <!-- Terminal Header -->
-        <div class="h-10 bg-panel border-b border-border flex items-center px-4 shrink-0">
-          <div class="flex space-x-2 mr-4">
+        <div class="h-10 bg-panel border-b border-border flex items-center px-4 shrink-0 gap-2">
+          <div class="flex space-x-2 mr-2">
             <div class="w-3 h-3 rounded-full bg-danger/80"></div>
             <div class="w-3 h-3 rounded-full bg-yellow-500/80"></div>
             <div class="w-3 h-3 rounded-full bg-success/80"></div>
           </div>
-          <div class="flex-1 text-center text-textMuted text-xs font-sans truncate">
-            <template v-if="selectedLog">bash - {{ selectedLog.projectName }} ({{ selectedLog.id }})</template>
+          <div class="flex-1 text-center text-textMuted text-xs font-sans truncate flex items-center justify-center gap-1.5">
+            <template v-if="selectedLog">
+              <span>bash - {{ selectedLog.projectName }}</span>
+              <button
+                type="button"
+                class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-base border border-border font-mono text-[10px] text-textMuted hover:text-primary hover:border-primary/40 transition-colors"
+                :title="`点击复制完整 ID: ${selectedLog.id}`"
+                @click="copyDeploymentId(selectedLog.id, $event)"
+              >
+                <CheckCheck v-if="copiedId === selectedLog.id" class="w-3 h-3 text-success" />
+                <Copy v-else class="w-3 h-3" />
+                {{ shortId(selectedLog.id) }}
+              </button>
+            </template>
             <template v-else>等待选择...</template>
+          </div>
+          <div v-if="selectedLog" class="flex items-center gap-1.5">
+            <span
+              v-if="isCurrentVersion(selectedLog)"
+              class="text-[10px] font-medium px-1.5 py-0.5 rounded bg-success/10 border border-success/30 text-success"
+              title="该版本为当前线上版本"
+            >当前版本</span>
+            <span
+              v-if="selectedLog.triggerSource === 'rollback'"
+              class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-yellow-400/10 border border-yellow-400/30 text-yellow-400"
+              :title="`rollbackOf=${(selectedLog as any).rollbackOf || ''}`"
+            >rollback</span>
+            <Archive v-if="(selectedLog as any).artifactPath" class="w-3.5 h-3.5 text-success/70" title="已归档，可回滚" />
+            <ArchiveX v-else class="w-3.5 h-3.5 text-textMuted/50" title="无归档" />
+            <button
+              v-if="canRollback"
+              @click="openRollback"
+              class="flex items-center px-2.5 py-1 text-[11px] font-medium bg-yellow-400/10 border border-yellow-400/30 text-yellow-400 hover:bg-yellow-400 hover:text-black rounded transition-colors"
+              type="button"
+            >
+              <RotateCcw class="w-3 h-3 mr-1" />
+              回滚到此版本
+            </button>
+            <span
+              v-else-if="rollbackDisabledReason"
+              class="text-[10px] text-textMuted/70 italic"
+              :title="rollbackDisabledReason"
+            >不可回滚</span>
           </div>
         </div>
 
@@ -154,6 +401,17 @@ function renderLine(line: string): string {
       </div>
 
     </div>
+
+    <ConfirmDialog
+      v-model:open="showRollbackConfirm"
+      tone="warning"
+      title="确认回滚到此版本？"
+      :message="`将以归档 ${shortId(selectedLog?.id)} 重新部署到项目 ${selectedLog?.projectName}。会按当前项目的 cleanMode / protectPaths 执行清理后再解压，运行时数据按保护规则保留。`"
+      confirm-text="确认回滚"
+      cancel-text="取消"
+      :loading="isRollingBack"
+      @confirm="confirmRollback"
+    />
   </div>
 </template>
 

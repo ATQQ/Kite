@@ -13,7 +13,20 @@ export interface Project {
   postDeployScript?: string
   token?: string
   env?: string
+  cleanMode?: 'merge' | 'clean' | 'clean-all' | null
+  protectPaths?: string | null
+  categoryId?: string | null
+  lastDeployAt?: string | null
   status: 'running' | 'success' | 'failed' | 'idle'
+  updatedAt: string
+}
+
+export interface Category {
+  id: string
+  name: string
+  color?: string | null
+  sortOrder?: number
+  createdAt: string
   updatedAt: string
 }
 
@@ -27,6 +40,31 @@ export interface DeploymentLog {
   output: string
   startTime: string
   endTime?: string
+  artifactPath?: string | null
+  artifactSize?: number | null
+  rollbackOf?: string | null
+}
+
+export interface CleanPreviewNode {
+  name: string
+  path: string
+  type: 'file' | 'dir'
+  size: number
+  willDelete: boolean
+  children?: CleanPreviewNode[]
+}
+
+export interface CleanPreviewResult {
+  tree: CleanPreviewNode | null
+  summary: {
+    totalFiles: number
+    deleteFiles: number
+    deleteBytes: number
+    protectFiles: number
+    truncated: boolean
+  }
+  mode: 'merge' | 'clean' | 'clean-all'
+  cached?: boolean
 }
 
 export const useProjectStore = defineStore('project', () => {
@@ -34,6 +72,7 @@ export const useProjectStore = defineStore('project', () => {
   
   const projects = ref<Project[]>([])
   const logs = ref<DeploymentLog[]>([])
+  const categories = ref<Category[]>([])
 
   // Helper fetch function
   async function apiFetch(endpoint: string, options: RequestInit & { silent401?: boolean } = {}) {
@@ -56,7 +95,12 @@ export const useProjectStore = defineStore('project', () => {
       throw new Error('Unauthorized')
     }
     const data = await res.json()
-    if (!res.ok) throw new Error(data.error || data.message || 'API request failed')
+    if (!res.ok) {
+      const err: any = new Error(data.error || data.message || 'API request failed')
+      err.status = res.status
+      err.data = data
+      throw err
+    }
     return data
   }
 
@@ -68,7 +112,11 @@ export const useProjectStore = defineStore('project', () => {
         destPath: p.deployPath,
         preDeploy: p.preDeployScript,
         postDeploy: p.postDeployScript,
-        env: p.env || ''
+        env: p.env || '',
+        cleanMode: p.cleanMode ?? null,
+        protectPaths: p.protectPaths ?? null,
+        categoryId: p.categoryId ?? null,
+        lastDeployAt: p.lastDeployAt ?? null,
       }))
     } catch (e) {
       console.error('Failed to fetch projects', e)
@@ -87,7 +135,7 @@ export const useProjectStore = defineStore('project', () => {
     return projects.value.find(p => p.id === id)
   }
 
-  async function addProject(project: Partial<Project>) {
+  async function addProject(project: Partial<Project>): Promise<{ ok: boolean; error?: string; conflictProject?: string }> {
     try {
       const data = await apiFetch('/projects', {
         method: 'POST',
@@ -95,17 +143,19 @@ export const useProjectStore = defineStore('project', () => {
           name: project.name,
           description: project.description,
           deployPath: project.destPath || '/tmp/default-deploy',
-          env: project.env || undefined
+          env: project.env || undefined,
+          categoryId: project.categoryId ?? undefined,
         })
       })
       if (data.success) {
         await fetchProjects()
-        return true
+        return { ok: true }
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('Failed to add project', e)
+      return { ok: false, error: e?.message, conflictProject: e?.data?.conflictProject }
     }
-    return false
+    return { ok: false }
   }
 
   async function removeProject(id: string) {
@@ -120,12 +170,16 @@ export const useProjectStore = defineStore('project', () => {
     }
     return false
   }
-  async function updateProject(id: string, payload: Partial<Project>) {
+  async function updateProject(id: string, payload: Record<string, any>) {
     try {
       const apiPayload: any = {}
+      if (payload.name !== undefined) apiPayload.name = payload.name
       if (payload.preDeploy !== undefined) apiPayload.preDeployScript = payload.preDeploy
       if (payload.postDeploy !== undefined) apiPayload.postDeployScript = payload.postDeploy
       if (payload.destPath !== undefined) apiPayload.deployPath = payload.destPath
+      if (payload.cleanMode !== undefined) apiPayload.cleanMode = payload.cleanMode
+      if (payload.protectPaths !== undefined) apiPayload.protectPaths = payload.protectPaths
+      if (payload.categoryId !== undefined) apiPayload.categoryId = payload.categoryId
 
       const data = await apiFetch(`/projects/${id}`, {
         method: 'PUT',
@@ -136,6 +190,66 @@ export const useProjectStore = defineStore('project', () => {
       }
     } catch (e) {
       console.error('Failed to update project', e)
+      throw e
+    }
+  }
+
+  async function cleanPreview(id: string, payload: { cleanMode: 'clean' | 'clean-all'; protectPaths: string[] }) {
+    return await apiFetch(`/projects/${id}/clean-preview`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }) as CleanPreviewResult
+  }
+
+  async function rollbackDeployment(deploymentId: string) {
+    return await apiFetch(`/deployments/${deploymentId}/rollback`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    })
+  }
+
+  async function fetchDiskOverview() {
+    return await apiFetch('/disk/overview')
+  }
+
+  async function fetchDiskProjects() {
+    return await apiFetch('/disk/projects')
+  }
+
+  async function fetchProjectArtifacts(projectId: string) {
+    return await apiFetch(`/disk/projects/${projectId}/artifacts`)
+  }
+
+  async function deleteArtifact(deployId: string) {
+    return await apiFetch(`/disk/artifacts/${deployId}`, {
+      method: 'DELETE',
+    })
+  }
+
+  async function fetchHeatmap(days = 30) {
+    try {
+      return await apiFetch(`/stats/heatmap?days=${days}`)
+    } catch (e) {
+      console.error('Failed to fetch heatmap', e)
+      return { days, cells: [] }
+    }
+  }
+
+  async function fetchSuccessRate(days = 14) {
+    try {
+      return await apiFetch(`/stats/success-rate?days=${days}`)
+    } catch (e) {
+      console.error('Failed to fetch success rate', e)
+      return { days, points: [] }
+    }
+  }
+
+  async function fetchFailureTop(limit = 5, days = 30) {
+    try {
+      return await apiFetch(`/stats/failure-top?limit=${limit}&days=${days}`)
+    } catch (e) {
+      console.error('Failed to fetch failure top', e)
+      return { days, limit, minTotal: 3, items: [] }
     }
   }
 
@@ -218,6 +332,72 @@ export const useProjectStore = defineStore('project', () => {
     }
   }
 
+  async function fetchHealthDetail() {
+    try {
+      return await apiFetch('/health/detail')
+    } catch (e) {
+      console.error('Failed to fetch health detail', e)
+      return null
+    }
+  }
+
+  async function fetchAuditLogs(params: {
+    action?: string
+    targetId?: string
+    targetType?: string
+    from?: number
+    to?: number
+    limit?: number
+    offset?: number
+  } = {}) {
+    try {
+      const qs = new URLSearchParams()
+      for (const [k, v] of Object.entries(params)) {
+        if (v !== undefined && v !== null && v !== '') qs.append(k, String(v))
+      }
+      const suffix = qs.toString() ? `?${qs.toString()}` : ''
+      return await apiFetch(`/audit-logs${suffix}`)
+    } catch (e) {
+      console.error('Failed to fetch audit logs', e)
+      return { rows: [], total: 0, limit: 50, offset: 0 }
+    }
+  }
+
+  async function fetchAuditLogDetail(id: string) {
+    try {
+      return await apiFetch(`/audit-logs/${id}`)
+    } catch (e) {
+      console.error('Failed to fetch audit log detail', e)
+      return null
+    }
+  }
+
+  async function fetchFsHome() {
+    return await apiFetch('/fs/home') as {
+      home: string
+      cwd: string
+      sep: string
+      roots: string[]
+    }
+  }
+
+  async function fetchFsList(p: string) {
+    return await apiFetch(`/fs/list?path=${encodeURIComponent(p)}`) as {
+      path: string
+      parent: string | null
+      exists: boolean
+      isDir: boolean
+      truncated: boolean
+      entries: Array<{
+        name: string
+        path: string
+        isDir: boolean
+        isHidden: boolean
+        isSymlink: boolean
+      }>
+    }
+  }
+
   async function login(token: string) {
     try {
       const data = await apiFetch('/auth/login', {
@@ -241,25 +421,100 @@ export const useProjectStore = defineStore('project', () => {
     localStorage.removeItem('adminToken')
     projects.value = []
     logs.value = []
+    categories.value = []
+  }
+
+  async function fetchCategories() {
+    try {
+      const data = await apiFetch('/categories')
+      categories.value = Array.isArray(data) ? data : []
+    } catch (e) {
+      console.error('Failed to fetch categories', e)
+    }
+  }
+
+  async function createCategory(payload: { name: string; color?: string | null; sortOrder?: number }): Promise<{ ok: boolean; error?: string; conflictCategory?: string; category?: Category }> {
+    try {
+      const data = await apiFetch('/categories', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      })
+      if (data.success) {
+        await fetchCategories()
+        return { ok: true, category: data.category }
+      }
+      return { ok: false, error: data.error }
+    } catch (e: any) {
+      return { ok: false, error: e?.message, conflictCategory: e?.data?.conflictCategory }
+    }
+  }
+
+  async function updateCategory(id: string, payload: { name?: string; color?: string | null; sortOrder?: number }): Promise<{ ok: boolean; error?: string; conflictCategory?: string; category?: Category }> {
+    try {
+      const data = await apiFetch(`/categories/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      })
+      if (data.success) {
+        await fetchCategories()
+        return { ok: true, category: data.category }
+      }
+      return { ok: false, error: data.error }
+    } catch (e: any) {
+      return { ok: false, error: e?.message, conflictCategory: e?.data?.conflictCategory }
+    }
+  }
+
+  async function deleteCategory(id: string): Promise<{ ok: boolean; detachedProjects?: number; error?: string }> {
+    try {
+      const data = await apiFetch(`/categories/${id}`, { method: 'DELETE' })
+      if (data.success) {
+        await fetchCategories()
+        await fetchProjects()
+        return { ok: true, detachedProjects: data.detachedProjects }
+      }
+      return { ok: false, error: data.error }
+    } catch (e: any) {
+      return { ok: false, error: e?.message }
+    }
   }
 
   return {
     adminToken,
     projects,
     logs,
+    categories,
     fetchProjects,
     fetchLogs,
     getProjectById,
     addProject,
     updateProject,
     removeProject,
+    cleanPreview,
+    rollbackDeployment,
+    fetchDiskOverview,
+    fetchDiskProjects,
+    fetchProjectArtifacts,
+    deleteArtifact,
+    fetchHeatmap,
+    fetchSuccessRate,
+    fetchFailureTop,
     generateToken,
     fetchSettings,
     updateSettings,
     changeAdminToken,
     fetchSystemStatus,
+    fetchHealthDetail,
+    fetchAuditLogs,
+    fetchAuditLogDetail,
     fetchFiles,
     fetchFileContent,
+    fetchFsHome,
+    fetchFsList,
+    fetchCategories,
+    createCategory,
+    updateCategory,
+    deleteCategory,
     login,
     logout
   }

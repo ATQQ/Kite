@@ -1,19 +1,42 @@
 <script setup lang="ts">
-import { LayoutDashboard, FolderArchive, TerminalSquare, Settings, LogOut } from 'lucide-vue-next'
+import { computed } from 'vue'
+import { LayoutDashboard, FolderArchive, TerminalSquare, ScrollText, Database, HardDrive, Settings, LogOut, Sun, Moon, Monitor } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { useProjectStore } from '../store/project'
+import { useThemeStore, type ThemeMode } from '../store/theme'
 import { APP_VERSION } from '../constants'
 import LogoSvg from '../assets/logo.svg'
 
 const route = useRoute()
 const router = useRouter()
 const projectStore = useProjectStore()
+const themeStore = useThemeStore()
 
 const menus = [
   { name: '概览', path: '/', icon: LayoutDashboard },
   { name: '项目管理', path: '/projects', icon: FolderArchive },
   { name: '部署日志', path: '/logs', icon: TerminalSquare },
+  { name: '操作日志', path: '/audit', icon: ScrollText },
+  { name: '存储', path: '/storage', icon: HardDrive },
+  { name: '数据迁移', path: '/migration', icon: Database },
 ]
+
+const THEME_CYCLE: ThemeMode[] = ['light', 'dark', 'system']
+const THEME_LABEL: Record<ThemeMode, string> = {
+  light: '浅色',
+  dark: '深色',
+  system: '跟随系统',
+}
+const themeIcon = computed(() => {
+  if (themeStore.mode === 'system') return Monitor
+  return themeStore.mode === 'dark' ? Moon : Sun
+})
+const themeTitle = computed(() => `外观：${THEME_LABEL[themeStore.mode]}（点击切换）`)
+const cycleTheme = () => {
+  const idx = THEME_CYCLE.indexOf(themeStore.mode)
+  const next = THEME_CYCLE[(idx + 1) % THEME_CYCLE.length]
+  themeStore.setMode(next)
+}
 
 const handleLogout = () => {
   projectStore.logout()
@@ -29,6 +52,14 @@ const handleLogout = () => {
         <img :src="LogoSvg" alt="Kite Logo" class="w-6 h-6 mr-2" />
         <span class="text-lg font-bold text-textMain tracking-wide">KITE</span>
         <span class="ml-2 text-xs bg-primary/20 text-primary px-2 py-0.5 rounded-full">v{{ APP_VERSION }}</span>
+        <button
+          @click="cycleTheme"
+          :title="themeTitle"
+          :aria-label="themeTitle"
+          class="ml-auto p-1.5 rounded-md text-textMuted hover:text-textMain dark:hover:bg-white/5 hover:bg-black/5 transition-colors"
+        >
+          <component :is="themeIcon" class="w-4 h-4" />
+        </button>
       </div>
       
       <nav class="flex-1 py-6 px-3 space-y-1">
@@ -72,6 +103,14 @@ const handleLogout = () => {
       <header class="h-16 border-b border-border bg-panel flex items-center px-4 md:hidden">
         <img :src="LogoSvg" alt="Kite Logo" class="w-6 h-6 mr-2" />
         <span class="text-lg font-bold text-textMain">KITE</span>
+        <button
+          @click="cycleTheme"
+          :title="themeTitle"
+          :aria-label="themeTitle"
+          class="ml-auto p-1.5 rounded-md text-textMuted hover:text-textMain dark:hover:bg-white/5 hover:bg-black/5 transition-colors"
+        >
+          <component :is="themeIcon" class="w-4 h-4" />
+        </button>
       </header>
       
       <!-- Content Scrollable Area -->

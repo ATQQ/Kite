@@ -1,4 +1,5 @@
 import fs from 'fs';
+import { randomUUID } from 'crypto';
 
 interface UploadOptions {
   serverUrl: string;
@@ -8,17 +9,21 @@ interface UploadOptions {
   preDeploy?: string;
   postDeploy?: string;
   env?: Record<string, string>;
+  startedAt?: string;
+  traceId?: string;
 }
 
 interface UploadResult {
   success: boolean;
   deployId?: string;
   duration?: string;
+  traceId?: string;
   error?: string;
 }
 
 export async function uploadZip(options: UploadOptions): Promise<UploadResult> {
-  const { serverUrl, token, zipFilePath, projectId, preDeploy, postDeploy, env } = options;
+  const { serverUrl, token, zipFilePath, projectId, preDeploy, postDeploy, env, startedAt } = options;
+  const traceId = options.traceId || randomUUID();
 
   const fileData = await fs.promises.readFile(zipFilePath);
   const blob = new Blob([fileData], { type: 'application/zip' });
@@ -30,6 +35,7 @@ export async function uploadZip(options: UploadOptions): Promise<UploadResult> {
   if (preDeploy) form.append('preDeploy', preDeploy);
   if (postDeploy) form.append('postDeploy', postDeploy);
   if (env && Object.keys(env).length > 0) form.append('env', JSON.stringify(env));
+  if (startedAt) form.append('startedAt', startedAt);
 
   const endpoint = `${serverUrl.replace(/\/$/, '')}/api/deploy/upload`;
 
@@ -38,6 +44,7 @@ export async function uploadZip(options: UploadOptions): Promise<UploadResult> {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,
+        'X-Kite-Trace-Id': traceId,
       },
       body: form as any,
     });
@@ -58,7 +65,7 @@ export async function uploadZip(options: UploadOptions): Promise<UploadResult> {
     const reader = response.body!.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
-    let result: UploadResult = { success: false };
+    let result: UploadResult = { success: false, traceId };
 
     while (true) {
       const { done, value } = await reader.read();
@@ -79,6 +86,7 @@ export async function uploadZip(options: UploadOptions): Promise<UploadResult> {
               success: event.status === 'success',
               deployId: event.deployId,
               duration: event.duration,
+              traceId,
             };
           }
         } catch {
@@ -93,7 +101,7 @@ export async function uploadZip(options: UploadOptions): Promise<UploadResult> {
         const event = JSON.parse(buffer);
         if (event.event === 'log') process.stdout.write(event.data + '\n');
         if (event.event === 'status') {
-          result = { success: event.status === 'success', deployId: event.deployId, duration: event.duration };
+          result = { success: event.status === 'success', deployId: event.deployId, duration: event.duration, traceId };
         }
       } catch {}
     }

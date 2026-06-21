@@ -1,6 +1,6 @@
 {
   "name": "@kitecd/cli",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "type": "module",
   "bin": {
     "kite": "./bin/kite.js"
@@ -15,7 +15,7 @@
   "scripts": {
     "build": "tsc && rm -rf dist/web && mkdir -p dist/web && cp -R ../../apps/web/dist/. dist/web/",
     "dev": "tsc -w",
-    "release": "bumpp --execute='sh -c \"changelogen --output ../../CHANGELOG.md && git add ../../CHANGELOG.md && cd ../.. && bun run build\"' --tag --push"
+    "release": "bumpp package.json ../../apps/web/package.json ../../apps/server/package.json --execute='sh -c \"changelogen --output ../../CHANGELOG.md && git add ../../CHANGELOG.md && cd ../.. && bun run build\"' --tag --push"
   },
   "dependencies": {
     "adm-zip": "^0.5.17",

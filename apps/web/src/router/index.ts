@@ -38,9 +38,24 @@ const routes = [
         component: () => import('../views/LogBoard.vue')
       },
       {
+        path: 'audit',
+        name: 'AuditLog',
+        component: () => import('../views/AuditLog.vue')
+      },
+      {
         path: 'settings',
         name: 'Settings',
         component: () => import('../views/Settings.vue')
+      },
+      {
+        path: 'storage',
+        name: 'Storage',
+        component: () => import('../views/Storage.vue')
+      },
+      {
+        path: 'migration',
+        name: 'Migration',
+        component: () => import('../views/Migration.vue')
       }
     ]
   }
