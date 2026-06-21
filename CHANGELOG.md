@@ -1,6 +1,62 @@
 # Changelog
 
 
+## v1.2.0
+
+[compare changes](https://github.com/ATQQ/Kite/compare/v1.1.0...feature/v1.2)
+
+### 🚀 Enhancements
+
+- **cli, server, docs:** 新增部署脚本环境变量注入支持 ([6e62e7d](https://github.com/ATQQ/Kite/commit/6e62e7d))
+- 新增部署启动时间追踪、仪表盘平均耗时与日志跳转功能 ([5f93f15](https://github.com/ATQQ/Kite/commit/5f93f15))
+- **cli:** Add export/import/verify for full service migration ([f6ccdb2](https://github.com/ATQQ/Kite/commit/f6ccdb2))
+- 添加Web端数据迁移功能 ([69d168b](https://github.com/ATQQ/Kite/commit/69d168b))
+- **web:** Add project deployment log viewing feature ([51901ad](https://github.com/ATQQ/Kite/commit/51901ad))
+- **project-detail:** Add project delete confirmation modal ([c7d6b9f](https://github.com/ATQQ/Kite/commit/c7d6b9f))
+- 添加操作日志审计功能 ([8c06082](https://github.com/ATQQ/Kite/commit/8c06082))
+- Add toast notification and confirm dialog components, replace alert/confirm ([ee35d85](https://github.com/ATQQ/Kite/commit/ee35d85))
+- 新增健康检查、部署归档与运维诊断能力 ([a1b0129](https://github.com/ATQQ/Kite/commit/a1b0129))
+- 添加部署清理策略与归档回滚功能 ([9a0f9a6](https://github.com/ATQQ/Kite/commit/9a0f9a6))
+- Add storage management page and related APIs ([83d8ece](https://github.com/ATQQ/Kite/commit/83d8ece))
+- **cli:** 新增运维命令list/status/logs/rollback ([fa5b437](https://github.com/ATQQ/Kite/commit/fa5b437))
+- Add deployment stats dashboard with heatmap and success rate charts ([4ef19b2](https://github.com/ATQQ/Kite/commit/4ef19b2))
+- **project-detail:** Add deployment history and rollback feature ([35d18d3](https://github.com/ATQQ/Kite/commit/35d18d3))
+- Add filesystem browser and batch project creation via folder selection ([7b2a6c3](https://github.com/ATQQ/Kite/commit/7b2a6c3))
+- 新增项目重命名、文件查看功能，完善错误处理与校验 ([0ceb9a7](https://github.com/ATQQ/Kite/commit/0ceb9a7))
+- **folderPicker:** Add last visited directory persistence ([bcd93fc](https://github.com/ATQQ/Kite/commit/bcd93fc))
+- Add project categorization system ([a527d56](https://github.com/ATQQ/Kite/commit/a527d56))
+- 实现分类颜色自动分配，添加批量项目分类筛选 ([83d887f](https://github.com/ATQQ/Kite/commit/83d887f))
+- **DefaultLayout:** Add theme toggle button in sidebar and header ([d35681f](https://github.com/ATQQ/Kite/commit/d35681f))
+
+### 🩹 Fixes
+
+- **artifact,web:** 修复部署归档清理逻辑并添加复制ID与当前版本标识 ([164c743](https://github.com/ATQQ/Kite/commit/164c743))
+- 优化项目操作的冲突错误提示 ([a2adf07](https://github.com/ATQQ/Kite/commit/a2adf07))
+- **web:** 优化批量项目表单校验与UI样式 ([4596212](https://github.com/ATQQ/Kite/commit/4596212))
+
+### 💅 Refactors
+
+- **ProjectList:** 优化批量创建项目弹窗表格布局与样式 ([ab1f63f](https://github.com/ATQQ/Kite/commit/ab1f63f))
+- **server:** 抽离鉴权逻辑到公共auth模块，统一管理admin鉴权 ([31c5c51](https://github.com/ATQQ/Kite/commit/31c5c51))
+
+### 📖 Documentation
+
+- 完善官方文档，更新各类指南与API说明 ([7632e2d](https://github.com/ATQQ/Kite/commit/7632e2d))
+- **cli:** 补充完善pm2后台运行的文档说明 ([496f4ea](https://github.com/ATQQ/Kite/commit/496f4ea))
+- Add AGENTS.md and plan/ directory specification ([1368a82](https://github.com/ATQQ/Kite/commit/1368a82))
+
+### 📦 Build
+
+- 移除@tursodatabase/database依赖 ([8bf0c86](https://github.com/ATQQ/Kite/commit/8bf0c86))
+
+### 🏡 Chore
+
+- **release:** 升级包版本至v1.1.0并更新变更日志 ([de6fd6a](https://github.com/ATQQ/Kite/commit/de6fd6a))
+
+### ❤️ Contributors
+
+- Sugar ([@ATQQ](https://github.com/ATQQ))
+
 ## v1.1.0
 
 [compare changes](https://github.com/ATQQ/Kite/compare/v1.0.0...v1.1.0)
