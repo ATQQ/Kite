@@ -190,6 +190,7 @@ const saveConfig = async () => {
       preDeploy: formData.value.preDeploy,
       postDeploy: formData.value.postDeploy,
       categoryId: formData.value.categoryId || null,
+      env: cliEnv.value.trim(),
     })
     toast.success('配置已保存')
   } catch (e: any) {
@@ -199,6 +200,21 @@ const saveConfig = async () => {
     } else {
       toast.error('保存失败', e?.message || '请稍后重试')
     }
+  }
+}
+
+const isSavingEnv = ref(false)
+const envDirty = computed(() => cliEnv.value.trim() !== (project.value?.env || ''))
+async function saveEnv() {
+  if (!envDirty.value || isSavingEnv.value) return
+  isSavingEnv.value = true
+  try {
+    await projectStore.updateProject(projectId, { env: cliEnv.value.trim() })
+    toast.success('部署环境已保存')
+  } catch (e: any) {
+    toast.error('保存失败', e?.message || '请稍后重试')
+  } finally {
+    isSavingEnv.value = false
   }
 }
 
@@ -597,7 +613,18 @@ async function confirmDelete() {
                 type="text"
                 class="flex-1 bg-base border border-border rounded-md px-3 py-2 text-textMain font-mono text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all"
                 placeholder="留空为默认环境，或输入如 test、staging、prod"
+                @keydown.enter.prevent="saveEnv"
               />
+              <button
+                @click="saveEnv"
+                :disabled="!envDirty || isSavingEnv"
+                class="flex items-center px-3 py-2 bg-primary text-white rounded-md text-sm font-medium hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                :title="envDirty ? '保存当前部署环境' : '当前值未变化'"
+              >
+                <RefreshCw v-if="isSavingEnv" class="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                <Save v-else class="w-3.5 h-3.5 mr-1.5" />
+                保存
+              </button>
             </div>
             <p class="text-xs text-textMuted mt-2">
               填写后下方所有指令将自动带上 <code class="font-mono text-textMain">--env</code> 参数，生成的配置文件为

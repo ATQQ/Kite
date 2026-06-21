@@ -180,6 +180,7 @@ export const useProjectStore = defineStore('project', () => {
       if (payload.cleanMode !== undefined) apiPayload.cleanMode = payload.cleanMode
       if (payload.protectPaths !== undefined) apiPayload.protectPaths = payload.protectPaths
       if (payload.categoryId !== undefined) apiPayload.categoryId = payload.categoryId
+      if (payload.env !== undefined) apiPayload.env = payload.env
 
       const data = await apiFetch(`/projects/${id}`, {
         method: 'PUT',
