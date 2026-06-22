@@ -129,6 +129,21 @@ const initDb = async () => {
   await client.execute(`CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);`);
   await client.execute(`CREATE INDEX IF NOT EXISTS idx_audit_logs_target_id ON audit_logs(target_id);`);
 
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS project_log_sources (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id),
+      label TEXT NOT NULL,
+      file_path TEXT NOT NULL,
+      kind TEXT DEFAULT 'plain',
+      sort_order INTEGER DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_project_log_sources_project_id ON project_log_sources(project_id);`);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_project_log_sources_sort_order ON project_log_sources(sort_order);`);
+
   // Seed a demo project on first run (no existing projects)
   if (process.env.KITE_SEED_DEMO_PROJECT !== 'false') {
     const existing = await client.execute('SELECT COUNT(*) as count FROM projects');
@@ -257,9 +272,56 @@ export const db = {
 
       // Simultaneously delete related deployment records
       await ormDb.delete(schema.deployments).where(eq(schema.deployments.projectId, id));
+      await ormDb.delete(schema.projectLogSources).where(eq(schema.projectLogSources.projectId, id));
       await ormDb.delete(schema.projects).where(eq(schema.projects.id, id));
       return true;
     }
+  },
+  logSources: {
+    async findByProject(projectId: string) {
+      await ensureDbReady();
+      return await ormDb.select().from(schema.projectLogSources)
+        .where(eq(schema.projectLogSources.projectId, projectId))
+        .orderBy(asc(schema.projectLogSources.sortOrder), asc(schema.projectLogSources.label));
+    },
+    async findById(id: string) {
+      await ensureDbReady();
+      const result = await ormDb.select().from(schema.projectLogSources)
+        .where(eq(schema.projectLogSources.id, id)).limit(1);
+      return result[0] || null;
+    },
+    async create(data: { projectId: string; label: string; filePath: string; kind?: string | null; sortOrder?: number | null }) {
+      await ensureDbReady();
+      const now = new Date().toISOString();
+      const row = {
+        id: 'lsrc_' + randomUUID().replace(/-/g, '').substring(0, 12),
+        projectId: data.projectId,
+        label: data.label,
+        filePath: data.filePath,
+        kind: data.kind ?? 'plain',
+        sortOrder: data.sortOrder ?? 0,
+        createdAt: now,
+        updatedAt: now,
+      };
+      await ormDb.insert(schema.projectLogSources).values(row);
+      return row;
+    },
+    async update(id: string, data: { label?: string; kind?: string | null; sortOrder?: number | null }) {
+      await ensureDbReady();
+      const patch: Record<string, any> = { updatedAt: new Date().toISOString() };
+      if (data.label !== undefined) patch.label = data.label;
+      if (data.kind !== undefined) patch.kind = data.kind;
+      if (data.sortOrder !== undefined) patch.sortOrder = data.sortOrder;
+      await ormDb.update(schema.projectLogSources).set(patch).where(eq(schema.projectLogSources.id, id));
+      return this.findById(id);
+    },
+    async remove(id: string) {
+      await ensureDbReady();
+      const existing = await this.findById(id);
+      if (!existing) return false;
+      await ormDb.delete(schema.projectLogSources).where(eq(schema.projectLogSources.id, id));
+      return true;
+    },
   },
   categories: {
     async findAll() {

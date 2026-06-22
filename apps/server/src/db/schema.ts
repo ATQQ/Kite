@@ -50,6 +50,18 @@ export const deployments = sqliteTable('deployments', {
   rollbackOf: text('rollback_of'),             // source deployment id when this run is a rollback
 });
 
+// 项目日志源（PM2 / Nginx / 自定义文件路径）
+export const projectLogSources = sqliteTable('project_log_sources', {
+  id: text('id').primaryKey(),
+  projectId: text('project_id').references(() => projects.id).notNull(),
+  label: text('label').notNull(),
+  filePath: text('file_path').notNull(),
+  kind: text('kind').default('plain'),         // 'pm2' | 'nginx' | 'plain'
+  sortOrder: integer('sort_order').default(0),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
 // 操作日志（运维审计）表
 export const auditLogs = sqliteTable('audit_logs', {
   id: text('id').primaryKey(),

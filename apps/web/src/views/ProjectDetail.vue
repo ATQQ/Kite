@@ -2,7 +2,7 @@
 import { computed, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useProjectStore, type CleanPreviewResult, type DeploymentLog } from '../store/project'
-import { ArrowLeft, Save, Key, Copy, RefreshCw, Trash2, CheckCircle2, TerminalSquare, FolderOpen, AlertTriangle, XCircle, ScrollText, Eye, Shield, ShieldAlert, Plus, History, RotateCcw, Archive, ArchiveX, CheckCheck } from 'lucide-vue-next'
+import { ArrowLeft, Save, Key, Copy, RefreshCw, Trash2, CheckCircle2, TerminalSquare, FolderOpen, AlertTriangle, XCircle, ScrollText, Eye, Shield, ShieldAlert, Plus, History, RotateCcw, Archive, ArchiveX, CheckCheck, FileText } from 'lucide-vue-next'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import CleanPreviewDialog from '../components/CleanPreviewDialog.vue'
 import { useToast } from '../composables/useToast'
@@ -444,6 +444,13 @@ async function confirmDelete() {
           >
             <FolderOpen class="w-3.5 h-3.5 mr-1.5" />
             查看文件
+          </router-link>
+          <router-link
+            :to="`/projects/${projectId}/logs`"
+            class="inline-flex items-center px-3 py-1.5 text-xs font-medium bg-base border border-border hover:border-primary/50 hover:text-primary text-textMuted rounded-md transition-all"
+          >
+            <FileText class="w-3.5 h-3.5 mr-1.5" />
+            运行日志
           </router-link>
           <router-link
             :to="`/audit?targetId=${projectId}`"

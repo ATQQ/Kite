@@ -1,18 +1,21 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Folder, FolderOpen, ChevronRight, ArrowUp, Home, RefreshCw, X, Check, AlertTriangle, Eye, EyeOff } from 'lucide-vue-next'
+import { Folder, FolderOpen, ChevronRight, ArrowUp, Home, RefreshCw, X, Check, AlertTriangle, Eye, EyeOff, FileText } from 'lucide-vue-next'
 import { useProjectStore } from '../store/project'
 import { useToast } from '../composables/useToast'
 
 type Mode = 'single' | 'multi'
+type PickKind = 'dir' | 'file'
 
 const props = withDefaults(defineProps<{
   open: boolean
   mode?: Mode
   title?: string
+  pickKind?: PickKind
 }>(), {
   mode: 'multi',
   title: '选择文件夹',
+  pickKind: 'dir',
 })
 
 const emit = defineEmits<{
@@ -47,7 +50,7 @@ const errorMsg = ref('')
 const truncated = ref(false)
 const currentPath = ref('')
 const parentPath = ref<string | null>(null)
-const entries = ref<Array<{ name: string; path: string; isDir: boolean; isHidden: boolean; isSymlink: boolean }>>([])
+const entries = ref<Array<{ name: string; path: string; isDir: boolean; isFile?: boolean; isHidden: boolean; isSymlink: boolean }>>([])
 const sep = ref('/')
 const home = ref('')
 const roots = ref<string[]>(['/'])
@@ -93,6 +96,11 @@ function isSelected(p: string) {
   return selected.value.includes(p)
 }
 
+function canSelectEntry(e: { isDir: boolean; isFile?: boolean }) {
+  if (props.pickKind === 'file') return !!e.isFile
+  return e.isDir
+}
+
 function toggleSelect(p: string) {
   if (props.mode === 'single') {
     selected.value = isSelected(p) ? [] : [p]
@@ -112,7 +120,8 @@ async function loadDir(p: string): Promise<boolean> {
   loading.value = true
   errorMsg.value = ''
   try {
-    const data = await projectStore.fetchFsList(p)
+    const include = props.pickKind === 'file' ? 'both' : 'dirs'
+    const data = await projectStore.fetchFsList(p, include)
     currentPath.value = data.path
     parentPath.value = data.parent
     entries.value = data.entries
@@ -186,7 +195,7 @@ function onCancel() {
 
 function onConfirm() {
   if (selected.value.length === 0) {
-    toast.error('请至少选择一个目录')
+    toast.error(props.pickKind === 'file' ? '请至少选择一个文件' : '请至少选择一个目录')
     return
   }
   emit('confirm', [...selected.value])
@@ -297,16 +306,22 @@ watch(() => props.open, (v) => {
               <input
                 :type="mode === 'single' ? 'radio' : 'checkbox'"
                 :checked="isSelected(e.path)"
-                @click.stop="toggleSelect(e.path)"
-                class="mr-3 accent-primary"
+                :disabled="!canSelectEntry(e)"
+                @click.stop="canSelectEntry(e) && toggleSelect(e.path)"
+                class="mr-3 accent-primary disabled:opacity-30"
               />
-              <Folder class="w-4 h-4 text-primary/80 mr-2 flex-shrink-0" />
+              <component
+                :is="e.isDir ? Folder : FileText"
+                class="w-4 h-4 mr-2 flex-shrink-0"
+                :class="e.isDir ? 'text-primary/80' : 'text-textMuted'"
+              />
               <span
                 class="flex-1 text-sm text-textMain truncate font-mono"
                 @click="onEntryClick(e)"
               >{{ e.name }}</span>
               <span v-if="e.isSymlink" class="text-[10px] text-textMuted mr-2">link</span>
               <ChevronRight
+                v-if="e.isDir"
                 class="w-4 h-4 text-textMuted opacity-0 group-hover:opacity-100"
                 @click.stop="onEntryClick(e)"
               />
@@ -344,6 +359,7 @@ watch(() => props.open, (v) => {
               {{ showHidden ? '隐藏点开头目录' : '显示点开头目录' }}
             </button>
             <button
+              v-if="pickKind === 'dir'"
               @click="selectCurrent"
               :disabled="!currentPath || loading"
               class="flex items-center hover:text-textMain disabled:opacity-40 disabled:cursor-not-allowed"

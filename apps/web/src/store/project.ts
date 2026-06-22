@@ -382,8 +382,9 @@ export const useProjectStore = defineStore('project', () => {
     }
   }
 
-  async function fetchFsList(p: string) {
-    return await apiFetch(`/fs/list?path=${encodeURIComponent(p)}`) as {
+  async function fetchFsList(p: string, include: 'dirs' | 'files' | 'both' = 'dirs') {
+    const qs = `path=${encodeURIComponent(p)}&include=${include}`
+    return await apiFetch(`/fs/list?${qs}`) as {
       path: string
       parent: string | null
       exists: boolean
@@ -393,9 +394,70 @@ export const useProjectStore = defineStore('project', () => {
         name: string
         path: string
         isDir: boolean
+        isFile?: boolean
         isHidden: boolean
         isSymlink: boolean
       }>
+    }
+  }
+
+  async function fetchLogSources(projectId: string) {
+    return await apiFetch(`/projects/${projectId}/log-sources`) as {
+      items: Array<{
+        id: string
+        projectId: string
+        label: string
+        filePath: string
+        kind: string
+        sortOrder: number
+        createdAt: string
+        updatedAt: string
+      }>
+    }
+  }
+
+  async function createLogSources(projectId: string, items: Array<{ label?: string; filePath: string; kind?: string }>) {
+    return await apiFetch(`/projects/${projectId}/log-sources`, {
+      method: 'POST',
+      body: JSON.stringify({ items }),
+    })
+  }
+
+  async function updateLogSource(sourceId: string, patch: { label?: string; kind?: string; sortOrder?: number }) {
+    return await apiFetch(`/log-sources/${sourceId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    })
+  }
+
+  async function deleteLogSource(sourceId: string) {
+    return await apiFetch(`/log-sources/${sourceId}`, { method: 'DELETE' })
+  }
+
+  async function fetchLogSourceMeta(sourceId: string) {
+    return await apiFetch(`/log-sources/${sourceId}/meta`) as {
+      id: string
+      label: string
+      filePath: string
+      resolvedPath: string
+      kind: string
+      size: number
+    }
+  }
+
+  async function fetchLogSourceRange(sourceId: string, opts: { offset?: number; size?: number; direction?: 'forward' | 'backward' } = {}) {
+    const qs = new URLSearchParams()
+    if (opts.offset !== undefined) qs.set('offset', String(opts.offset))
+    if (opts.size !== undefined) qs.set('size', String(opts.size))
+    if (opts.direction) qs.set('direction', opts.direction)
+    return await apiFetch(`/log-sources/${sourceId}/range?${qs.toString()}`) as {
+      startOffset: number
+      endOffset: number
+      fileSize: number
+      lines: string[]
+      truncatedHead: boolean
+      truncatedTail: boolean
+      binary: boolean
     }
   }
 
@@ -516,6 +578,12 @@ export const useProjectStore = defineStore('project', () => {
     createCategory,
     updateCategory,
     deleteCategory,
+    fetchLogSources,
+    createLogSources,
+    updateLogSource,
+    deleteLogSource,
+    fetchLogSourceMeta,
+    fetchLogSourceRange,
     login,
     logout
   }
