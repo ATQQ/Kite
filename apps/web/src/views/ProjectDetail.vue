@@ -285,10 +285,44 @@ const copyToken = () => {
   }
 }
 
+const writeClipboardSync = (text: string): boolean => {
+  try {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.setAttribute('readonly', '')
+    ta.style.position = 'fixed'
+    ta.style.top = '0'
+    ta.style.left = '0'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.focus()
+    ta.select()
+    const ok = document.execCommand('copy')
+    document.body.removeChild(ta)
+    return ok
+  } catch {
+    return false
+  }
+}
+
 const copyCommand = (key: string, value: string) => {
-  navigator.clipboard.writeText(value)
-  copiedCommand.value = key
-  setTimeout(() => copiedCommand.value = '', 2000)
+  if (!value) return
+  const finish = () => {
+    copiedCommand.value = key
+    setTimeout(() => copiedCommand.value = '', 2000)
+  }
+  const syncOk = writeClipboardSync(value)
+  if (syncOk) {
+    finish()
+    return
+  }
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(value).then(finish).catch(() => {
+      window.prompt('请手动复制以下内容（Ctrl/Cmd + C）：', value)
+    })
+  } else {
+    window.prompt('请手动复制以下内容（Ctrl/Cmd + C）：', value)
+  }
 }
 
 const envSuffix = computed(() => cliEnv.value.trim() ? ` --env ${cliEnv.value.trim()}` : '')
@@ -299,6 +333,12 @@ const initCommand = computed(() => `kite init --project ${projectId}${envSuffix.
 const pushCommand = computed(() => `kite push${envSuffix.value}`)
 const directPushCommand = computed(() => `kite push --server ${serverUrl.value} --project ${projectId}${envSuffix.value} --out ./dist`)
 const directPushWithTokenCommand = computed(() => `kite push --server ${serverUrl.value} --project ${projectId} --token ${project.value?.token || '<DEPLOY_TOKEN>'}${envSuffix.value} --out ./dist`)
+const tokenPlaceholder = computed(() => project.value?.token || '<DEPLOY_TOKEN>')
+const tokenSetProjectCommand = computed(() => cliEnv.value.trim()
+  ? `kite config:set token ${tokenPlaceholder.value} --env ${cliEnv.value.trim()}`
+  : `kite config:set token ${tokenPlaceholder.value}`)
+const tokenSetGlobalCommand = computed(() => `kite config:set token ${tokenPlaceholder.value} --global`)
+const tokenEnvLocalLine = computed(() => `KITE_DEPLOY_TOKEN=${tokenPlaceholder.value}`)
 const configExample = computed(() => JSON.stringify({
   projectId,
   outputDir: './dist',
@@ -702,12 +742,52 @@ async function confirmDelete() {
           </div>
 
           <!-- Tip: Token 设置方式 -->
-          <div class="rounded-lg border border-primary/20 bg-primary/5 p-4 space-y-2">
-            <p class="text-sm text-textMuted leading-relaxed">
-              <strong class="text-primary font-medium">Token 设置方式：</strong>
-              <code class="font-mono text-xs bg-base px-1 py-0.5 rounded border border-border">kite config:set token &lt;token&gt;</code> 按项目保存，
-              <code class="font-mono text-xs bg-base px-1 py-0.5 rounded border border-border">kite config:set token &lt;token&gt; --global</code> 设置全局 fallback。
-              也可在 <code class="font-mono">.env.local</code> 中写入 <code class="font-mono">KITE_DEPLOY_TOKEN=&lt;token&gt;</code>。
+          <div class="rounded-lg border border-primary/20 bg-primary/5 p-4 space-y-3">
+            <p class="text-sm text-textMain leading-relaxed">
+              <strong class="text-primary font-medium">Token 设置方式</strong>
+              <span class="text-textMuted">（已自动填充本项目 Token，可一键复制）：</span>
+            </p>
+            <div class="space-y-2">
+              <div class="flex items-center gap-2">
+                <span class="text-xs text-textMuted w-28 shrink-0">按项目保存</span>
+                <code class="flex-1 text-xs text-success font-mono break-all bg-base px-2 py-1 rounded border border-border">{{ tokenSetProjectCommand }}</code>
+                <button
+                  @click="copyCommand('token-set-project', tokenSetProjectCommand)"
+                  :disabled="!project?.token"
+                  class="text-xs text-primary hover:text-textMain disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+                  :title="project?.token ? '复制命令' : '请先生成 Token'"
+                >
+                  {{ copiedCommand === 'token-set-project' ? '已复制' : '复制' }}
+                </button>
+              </div>
+              <p class="text-xs text-textMuted pl-[120px] -mt-1">需在含 <code class="font-mono">{{ configFileName }}</code> 的目录执行，token 会写入 <code class="font-mono">~/.kite/config.json</code> 的项目命名空间。</p>
+              <div class="flex items-center gap-2">
+                <span class="text-xs text-textMuted w-28 shrink-0">全局 fallback</span>
+                <code class="flex-1 text-xs text-success font-mono break-all bg-base px-2 py-1 rounded border border-border">{{ tokenSetGlobalCommand }}</code>
+                <button
+                  @click="copyCommand('token-set-global', tokenSetGlobalCommand)"
+                  :disabled="!project?.token"
+                  class="text-xs text-primary hover:text-textMain disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+                  :title="project?.token ? '复制命令' : '请先生成 Token'"
+                >
+                  {{ copiedCommand === 'token-set-global' ? '已复制' : '复制' }}
+                </button>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="text-xs text-textMuted w-28 shrink-0">.env.local</span>
+                <code class="flex-1 text-xs text-success font-mono break-all bg-base px-2 py-1 rounded border border-border">{{ tokenEnvLocalLine }}</code>
+                <button
+                  @click="copyCommand('token-env-local', tokenEnvLocalLine)"
+                  :disabled="!project?.token"
+                  class="text-xs text-primary hover:text-textMain disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+                  :title="project?.token ? '复制 .env.local 行' : '请先生成 Token'"
+                >
+                  {{ copiedCommand === 'token-env-local' ? '已复制' : '复制' }}
+                </button>
+              </div>
+            </div>
+            <p v-if="!project?.token" class="text-xs text-yellow-500">
+              当前项目尚未生成 Token，请先在上方「项目 Token」区域生成后再复制。
             </p>
             <p class="text-sm text-textMuted leading-relaxed">
               配置优先级：<strong class="text-primary">CLI 参数</strong> &gt; <strong class="text-primary">.env.local</strong> &gt; <strong class="text-primary">项目级 Token</strong> &gt; <strong class="text-primary">全局 Token</strong>。未在 CLI 传入的部署脚本，会回退到本页保存的云端默认脚本。
