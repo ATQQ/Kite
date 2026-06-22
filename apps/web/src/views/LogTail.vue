@@ -47,7 +47,7 @@ const fileSize = ref(0)
 
 const liveLines = ref<string[]>([])
 const liveFollow = ref(true)
-const liveTailLines = ref(200)
+const liveTailLines = ref(20)
 const liveError = ref('')
 const liveLogRef = ref<HTMLDivElement | null>(null)
 
@@ -484,6 +484,11 @@ onUnmounted(() => {
                 <label class="flex items-center space-x-1">
                   <span>尾部行数</span>
                   <select v-model.number="liveTailLines" @change="startLive" class="bg-base border border-border rounded px-2 py-0.5 text-textMain focus:outline-none focus:border-primary">
+                    <option :value="5">5</option>
+                    <option :value="10">10</option>
+                    <option :value="20">20</option>
+                    <option :value="30">30</option>
+                    <option :value="50">50</option>
                     <option :value="100">100</option>
                     <option :value="200">200</option>
                     <option :value="500">500</option>
