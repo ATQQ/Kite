@@ -54,8 +54,8 @@ function fmtPct(n: number | null | undefined): string {
 </script>
 
 <template>
-  <div class="bg-panel border border-border rounded-xl p-6 shadow-sm">
-    <div class="flex items-center justify-between mb-4">
+  <div class="bg-panel border border-border rounded-xl p-4 sm:p-6 shadow-sm">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
       <div>
         <h3 class="text-base font-semibold text-textMain">近 {{ points.length }} 天部署成功率</h3>
         <p class="text-xs text-textMuted mt-1">

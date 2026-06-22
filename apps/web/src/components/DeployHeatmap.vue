@@ -46,8 +46,8 @@ const totalCount = computed(() => props.cells.reduce((s, c) => s + c.count, 0))
 </script>
 
 <template>
-  <div class="bg-panel border border-border rounded-xl p-6 shadow-sm">
-    <div class="flex items-center justify-between mb-4">
+  <div class="bg-panel border border-border rounded-xl p-4 sm:p-6 shadow-sm">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
       <div>
         <h3 class="text-base font-semibold text-textMain">部署频次热力图</h3>
         <p class="text-xs text-textMuted mt-1">最近 {{ cells.length }} 天 · 共 {{ totalCount }} 次</p>

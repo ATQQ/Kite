@@ -54,7 +54,7 @@ const handleLogin = async () => {
       </div>
 
       <!-- Login Card -->
-      <div class="bg-panel border border-border rounded-2xl p-8 shadow-xl">
+      <div class="bg-panel border border-border rounded-2xl p-6 sm:p-8 shadow-xl">
         <h2 class="text-lg font-medium text-textMain mb-6">管理员登录</h2>
         
         <form @submit.prevent="handleLogin" class="space-y-5">

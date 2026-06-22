@@ -224,9 +224,9 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="space-y-6">
+  <div class="space-y-6 p-4 sm:p-0">
     <!-- Page header -->
-    <div class="flex items-center justify-between">
+    <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
       <div>
         <h1 class="text-2xl font-bold text-textMain flex items-center">
           <HardDrive class="w-6 h-6 mr-2 text-primary" />
@@ -237,7 +237,7 @@ onMounted(() => {
       <button
         @click="refresh"
         :disabled="loading"
-        class="flex items-center px-3 py-2 bg-base border border-border rounded-md text-textMuted hover:text-textMain hover:border-primary/50 transition-all disabled:opacity-50"
+        class="self-start sm:self-auto flex items-center px-3 py-2 bg-base border border-border rounded-md text-textMuted hover:text-textMain hover:border-primary/50 transition-all disabled:opacity-50"
         type="button"
       >
         <RefreshCw class="w-4 h-4 mr-2" :class="loading ? 'animate-spin' : ''" />
@@ -252,7 +252,7 @@ onMounted(() => {
 
     <!-- Global overview -->
     <div class="bg-panel border border-border rounded-xl shadow-sm overflow-hidden">
-      <div class="px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02]">
+      <div class="px-4 sm:px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02]">
         <h2 class="text-lg font-semibold text-textMain">~/.kite 数据目录</h2>
         <p class="text-sm text-textMuted mt-1">
           <span v-if="overview?.cached" class="text-yellow-400">使用 30s 内缓存结果</span>
@@ -263,13 +263,13 @@ onMounted(() => {
         </p>
       </div>
 
-      <div v-if="!overview" class="p-6 text-textMuted text-sm text-center">加载中...</div>
-      <div v-else class="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div v-if="!overview" class="p-4 sm:p-6 text-textMuted text-sm text-center">加载中...</div>
+      <div v-else class="p-4 sm:p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
         <!-- Kite home breakdown -->
         <div>
-          <div class="flex items-baseline justify-between mb-3">
-            <span class="text-xs text-textMuted font-mono">{{ overview.kiteHome.path }}</span>
-            <span class="text-2xl font-bold text-textMain font-mono">{{ formatBytes(breakdownTotal) }}</span>
+          <div class="flex items-baseline justify-between mb-3 gap-2">
+            <span class="text-xs text-textMuted font-mono break-all">{{ overview.kiteHome.path }}</span>
+            <span class="text-2xl font-bold text-textMain font-mono shrink-0">{{ formatBytes(breakdownTotal) }}</span>
           </div>
           <div class="space-y-2">
             <div v-for="row in breakdownRows" :key="row.label" class="space-y-1">
@@ -318,14 +318,14 @@ onMounted(() => {
 
     <!-- Per-project table -->
     <div class="bg-panel border border-border rounded-xl shadow-sm overflow-hidden">
-      <div class="px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02]">
+      <div class="px-4 sm:px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02]">
         <h2 class="text-lg font-semibold text-textMain">项目占用</h2>
         <p class="text-sm text-textMuted mt-1">归档 zip 由 keepN 策略自动清理，部署目录由你的部署模式决定（merge 累加 / clean 仅本次内容）。</p>
       </div>
 
-      <div v-if="!loading && projects.length === 0" class="p-6 text-textMuted text-sm text-center">暂无项目</div>
+      <div v-if="!loading && projects.length === 0" class="p-4 sm:p-6 text-textMuted text-sm text-center">暂无项目</div>
       <div v-else class="overflow-x-auto">
-        <table class="w-full text-sm">
+        <table class="w-full text-sm min-w-[720px]">
           <thead class="text-xs text-textMuted bg-base/40 border-b border-border">
             <tr>
               <th class="text-left px-6 py-3 font-medium">项目</th>
@@ -371,7 +371,7 @@ onMounted(() => {
       <div v-if="drawerOpen" class="fixed inset-0 z-40 flex" @click.self="closeDrawer">
         <div class="fixed inset-0 bg-black/50" />
         <div class="ml-auto relative w-full max-w-xl bg-panel border-l border-border h-full overflow-y-auto z-50">
-          <div class="sticky top-0 bg-panel border-b border-border px-6 py-4 flex items-center justify-between z-10">
+          <div class="sticky top-0 bg-panel border-b border-border px-4 sm:px-6 py-4 flex items-center justify-between z-10">
             <div>
               <div class="text-xs text-textMuted">归档详情</div>
               <h3 class="text-lg font-semibold text-textMain mt-0.5">{{ drawerProject?.projectName }}</h3>
@@ -381,7 +381,7 @@ onMounted(() => {
             </button>
           </div>
 
-          <div class="p-6">
+          <div class="p-4 sm:p-6">
             <div v-if="drawerLoading" class="text-textMuted text-sm text-center py-8">加载中...</div>
             <div v-else-if="drawerError" class="bg-danger/10 border border-danger/30 text-danger text-sm rounded-md px-3 py-2">
               {{ drawerError }}

@@ -555,12 +555,12 @@ async function deleteCategoryAction(c: Category) {
 
 <template>
   <div class="max-w-7xl mx-auto space-y-6">
-    <div class="flex justify-between items-center mb-8">
+    <div class="flex flex-col md:flex-row md:justify-between md:items-center gap-3 mb-8">
       <div>
         <h1 class="text-2xl font-bold text-textMain tracking-tight">项目管理</h1>
         <p class="text-textMuted text-sm mt-1">管理所有可部署的应用服务与脚本配置</p>
       </div>
-      <div class="flex items-center space-x-2">
+      <div class="flex items-center flex-wrap gap-2">
         <div class="flex items-center border border-border rounded-md overflow-hidden">
           <button
             @click="viewMode = 'card'"
@@ -636,7 +636,7 @@ async function deleteCategoryAction(c: Category) {
     </div>
 
     <!-- Card view -->
-    <div v-if="viewMode === 'card'" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+    <div v-if="viewMode === 'card'" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
       <div
         v-for="project in filteredProjects"
         :key="project.id"
@@ -702,7 +702,8 @@ async function deleteCategoryAction(c: Category) {
 
     <!-- List view -->
     <div v-else class="bg-panel border border-border rounded-xl overflow-hidden">
-      <table class="w-full text-sm">
+      <div class="overflow-x-auto">
+      <table class="w-full text-sm min-w-[720px]">
         <thead class="text-xs text-textMuted bg-base/40">
           <tr>
             <th class="text-left font-medium px-4 py-3">项目名</th>
@@ -761,6 +762,7 @@ async function deleteCategoryAction(c: Category) {
           </tr>
         </tbody>
       </table>
+      </div>
     </div>
 
     <!-- Card dropdown (teleported to body to avoid being clipped by card's overflow:hidden) -->
@@ -847,8 +849,8 @@ async function deleteCategoryAction(c: Category) {
     </Teleport>
 
     <!-- Create Modal -->
-    <div v-if="showCreateModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div class="bg-panel border border-border rounded-xl w-full max-w-md p-6 shadow-2xl transform transition-all">
+    <div v-if="showCreateModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+      <div class="bg-panel border border-border rounded-xl w-full max-w-md p-6 shadow-2xl transform transition-all max-h-[90vh] overflow-y-auto">
         <h2 class="text-xl font-bold text-textMain mb-6">新建部署项目</h2>
         
         <div class="space-y-4">
@@ -933,7 +935,7 @@ async function deleteCategoryAction(c: Category) {
     />
 
     <!-- Batch Create Modal -->
-    <div v-if="showBatchModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" @click.self="closeBatchModal">
+    <div v-if="showBatchModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" @click.self="closeBatchModal">
       <div class="bg-panel border border-border rounded-xl w-full max-w-6xl shadow-2xl flex flex-col" style="max-height: 85vh;">
         <div class="flex items-center justify-between px-6 py-4 border-b border-border">
           <div>
@@ -1085,10 +1087,10 @@ async function deleteCategoryAction(c: Category) {
     <!-- Rename Modal -->
     <div
       v-if="showRenameModal"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
       @click.self="showRenameModal = false"
     >
-      <div class="bg-panel border border-border rounded-xl w-full max-w-md p-6 shadow-2xl">
+      <div class="bg-panel border border-border rounded-xl w-full max-w-md p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
         <h2 class="text-lg font-semibold text-textMain mb-4">重命名项目</h2>
         <div>
           <label class="block text-sm font-medium text-textMuted mb-1.5">项目名称</label>
@@ -1122,10 +1124,10 @@ async function deleteCategoryAction(c: Category) {
     <!-- Delete Modal -->
     <div
       v-if="showDeleteModal"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
       @click.self="!isDeleting && (showDeleteModal = false)"
     >
-      <div class="bg-panel border border-danger/30 rounded-xl w-full max-w-lg p-6 shadow-2xl">
+      <div class="bg-panel border border-danger/30 rounded-xl w-full max-w-lg p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
         <div class="flex items-start space-x-3 mb-5">
           <div class="p-2 rounded-lg bg-danger/10 border border-danger/20 shrink-0">
             <AlertTriangle class="w-5 h-5 text-danger" />
@@ -1176,7 +1178,7 @@ async function deleteCategoryAction(c: Category) {
     <!-- Manage Categories Modal -->
     <div
       v-if="showCategoryModal"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
       @click.self="showCategoryModal = false"
     >
       <div class="bg-panel border border-border rounded-xl w-full max-w-2xl shadow-2xl flex flex-col" style="max-height: 85vh;">

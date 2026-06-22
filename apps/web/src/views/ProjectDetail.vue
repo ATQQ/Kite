@@ -382,18 +382,18 @@ async function confirmDelete() {
 <template>
   <div v-if="project" class="max-w-4xl mx-auto space-y-6 pb-12">
     <!-- Header -->
-    <div class="flex items-center space-x-4 mb-8">
+    <div class="flex items-start gap-3 sm:gap-4 mb-8">
       <button 
         @click="router.back()"
-        class="p-2 dark:hover:bg-white/10 hover:bg-black/10 rounded-full transition-colors text-textMuted hover:text-textMain"
+        class="p-2 dark:hover:bg-white/10 hover:bg-black/10 rounded-full transition-colors text-textMuted hover:text-textMain shrink-0"
       >
         <ArrowLeft class="w-5 h-5" />
       </button>
-      <div>
-        <div class="flex items-center space-x-3">
-          <h1 class="text-2xl font-bold text-textMain tracking-tight">{{ project.name }}</h1>
+      <div class="min-w-0 flex-1">
+        <div class="flex items-center flex-wrap gap-2 sm:gap-3">
+          <h1 class="text-xl sm:text-2xl font-bold text-textMain tracking-tight truncate max-w-full">{{ project.name }}</h1>
           <span
-            class="px-2.5 py-0.5 text-xs rounded-md border"
+            class="px-2.5 py-0.5 text-xs rounded-md border shrink-0"
             :class="project.status === 'success' ? 'bg-success/10 border-success/20 text-success' : 'bg-primary/10 border-primary/20 text-primary'"
           >
             {{ project.status }}
@@ -413,7 +413,7 @@ async function confirmDelete() {
             操作历史
           </router-link>
         </div>
-        <p class="text-sm text-textMuted mt-1 font-mono">{{ project.id }}</p>
+        <p class="text-xs sm:text-sm text-textMuted mt-1 font-mono break-all">{{ project.id }}</p>
       </div>
     </div>
 
@@ -479,7 +479,7 @@ async function confirmDelete() {
 
       <!-- Deployment History Card -->
       <div class="bg-panel border border-border rounded-xl shadow-sm overflow-hidden">
-        <div class="px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02] flex items-center justify-between">
+        <div class="px-4 sm:px-6 py-4 sm:py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
             <h2 class="text-lg font-semibold text-textMain flex items-center">
               <History class="w-5 h-5 mr-2 text-primary" />
@@ -523,7 +523,7 @@ async function confirmDelete() {
                 @click="goLogBoard(log)"
                 class="flex-1 min-w-0 text-left"
               >
-                <div class="flex items-center gap-2">
+                <div class="flex items-center gap-2 flex-wrap">
                   <span
                     class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium border"
                     :class="{

@@ -162,10 +162,10 @@ watch(() => route.query.targetId, (tid) => {
 <template>
   <div class="space-y-6">
     <!-- Header -->
-    <div class="flex items-center justify-between">
-      <div class="flex items-center gap-3">
-        <ScrollText class="w-6 h-6 text-primary" />
-        <div>
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <div class="flex items-center gap-3 min-w-0">
+        <ScrollText class="w-6 h-6 text-primary shrink-0" />
+        <div class="min-w-0">
           <h1 class="text-2xl font-bold text-textMain">操作日志</h1>
           <p class="text-sm text-textMuted mt-1">所有服务端运维操作的审计记录，含变更前后状态</p>
         </div>
@@ -173,7 +173,7 @@ watch(() => route.query.targetId, (tid) => {
       <button
         @click="load"
         :disabled="loading"
-        class="flex items-center gap-2 px-4 py-2 bg-panel border border-border rounded-md text-textMain hover:border-primary/50 transition-colors disabled:opacity-50"
+        class="flex items-center gap-2 px-4 py-2 bg-panel border border-border rounded-md text-textMain hover:border-primary/50 transition-colors disabled:opacity-50 self-start sm:self-auto shrink-0"
       >
         <RefreshCw class="w-4 h-4" :class="{ 'animate-spin': loading }" />
         <span class="text-sm">刷新</span>
@@ -237,7 +237,7 @@ watch(() => route.query.targetId, (tid) => {
         <p class="text-textMuted">暂无操作日志</p>
       </div>
       <div v-else class="overflow-x-auto">
-        <table class="w-full text-sm">
+        <table class="w-full text-sm min-w-[720px]">
           <thead class="bg-base/50 border-b border-border">
             <tr class="text-left text-xs text-textMuted">
               <th class="px-4 py-3 font-medium">时间</th>
@@ -354,7 +354,7 @@ watch(() => route.query.targetId, (tid) => {
             <div class="col-span-2">
               <div class="text-xs text-textMuted mb-1">目标</div>
               <div class="text-textMain">{{ selected.targetName || '-' }}</div>
-              <div v-if="selected.targetId" class="text-xs text-textMuted font-mono">{{ selected.targetType }}: {{ selected.targetId }}</div>
+              <div v-if="selected.targetId" class="text-xs text-textMuted font-mono break-all">{{ selected.targetType }}: {{ selected.targetId }}</div>
             </div>
             <div v-if="selected.summary" class="col-span-2">
               <div class="text-xs text-textMuted mb-1">摘要</div>

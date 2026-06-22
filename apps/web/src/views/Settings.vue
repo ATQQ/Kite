@@ -151,7 +151,7 @@ const toggleEvent = (event: string) => {
 </script>
 
 <template>
-  <div class="max-w-4xl mx-auto space-y-6 pb-12">
+  <div class="max-w-4xl mx-auto space-y-6 pb-12 p-4 sm:p-0">
     <!-- Header -->
     <div class="flex items-center space-x-3 mb-8">
       <Settings class="w-7 h-7 text-primary" />
@@ -160,13 +160,13 @@ const toggleEvent = (event: string) => {
 
     <!-- System Status Card -->
     <div class="bg-panel border border-border rounded-xl shadow-sm overflow-hidden">
-      <div class="px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02]">
+      <div class="px-4 sm:px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02]">
         <h2 class="text-lg font-semibold text-textMain flex items-center">
           <Server class="w-5 h-5 mr-2 text-primary" />
           系统信息
         </h2>
       </div>
-      <div class="p-6">
+      <div class="p-4 sm:p-6">
         <div v-if="status" class="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div class="bg-base border border-border rounded-lg p-4 text-center">
             <p class="text-2xl font-bold text-primary">{{ status.version }}</p>
@@ -206,7 +206,7 @@ const toggleEvent = (event: string) => {
 
     <!-- Health Card -->
     <div class="bg-panel border border-border rounded-xl shadow-sm overflow-hidden">
-      <div class="px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02] flex items-center justify-between">
+      <div class="px-4 sm:px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02] flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
         <div>
           <h2 class="text-lg font-semibold text-textMain flex items-center">
             <HeartPulse class="w-5 h-5 mr-2 text-primary" />
@@ -217,13 +217,13 @@ const toggleEvent = (event: string) => {
         <button
           @click="refreshHealth"
           :disabled="healthLoading"
-          class="flex items-center px-3 py-2 bg-base border border-border rounded-md text-textMuted hover:text-textMain hover:border-primary/50 transition-all disabled:opacity-50"
+          class="self-start sm:self-auto flex items-center px-3 py-2 bg-base border border-border rounded-md text-textMuted hover:text-textMain hover:border-primary/50 transition-all disabled:opacity-50"
           type="button"
         >
           <RefreshCw class="w-4 h-4" :class="healthLoading ? 'animate-spin' : ''" />
         </button>
       </div>
-      <div class="p-6">
+      <div class="p-4 sm:p-6">
         <div v-if="!health && !healthLoading" class="text-textMuted text-sm py-4 text-center">暂无数据</div>
         <div v-else-if="healthLoading && !health" class="text-textMuted text-sm py-4 text-center">加载中...</div>
         <div v-else class="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -281,14 +281,14 @@ const toggleEvent = (event: string) => {
 
     <!-- Theme Card -->
     <div class="bg-panel border border-border rounded-xl shadow-sm overflow-hidden">
-      <div class="px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02]">
+      <div class="px-4 sm:px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02]">
         <h2 class="text-lg font-semibold text-textMain flex items-center">
           <Sun class="w-5 h-5 mr-2 text-primary" />
           外观设置
         </h2>
         <p class="text-sm text-textMuted mt-1">选择界面的色彩方案，或跟随系统自动切换。</p>
       </div>
-      <div class="p-6">
+      <div class="p-4 sm:p-6">
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <button
             v-for="opt in themeOptions"
@@ -317,14 +317,14 @@ const toggleEvent = (event: string) => {
 
     <!-- Admin Token Card -->
     <div class="bg-panel border border-border rounded-xl shadow-sm overflow-hidden">
-      <div class="px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02]">
+      <div class="px-4 sm:px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02]">
         <h2 class="text-lg font-semibold text-textMain flex items-center">
           <Key class="w-5 h-5 mr-2 text-primary" />
           管理员 Token
         </h2>
         <p class="text-sm text-textMuted mt-1">修改管理后台的登录凭证。修改后需使用新 Token 重新登录。</p>
       </div>
-      <div class="p-6 space-y-4">
+      <div class="p-4 sm:p-6 space-y-4">
         <div>
           <label class="block text-sm font-medium text-textMain mb-2">当前 Token</label>
           <input
@@ -371,14 +371,14 @@ const toggleEvent = (event: string) => {
 
     <!-- Deploy Config Card -->
     <div class="bg-panel border border-border rounded-xl shadow-sm overflow-hidden">
-      <div class="px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02]">
+      <div class="px-4 sm:px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02]">
         <h2 class="text-lg font-semibold text-textMain flex items-center">
           <HardDrive class="w-5 h-5 mr-2 text-primary" />
           全局部署配置
         </h2>
         <p class="text-sm text-textMuted mt-1">设置全局默认的部署参数，可在项目级别覆盖。</p>
       </div>
-      <div class="p-6 space-y-4">
+      <div class="p-4 sm:p-6 space-y-4">
         <div>
           <label class="block text-sm font-medium text-textMain mb-2">全局部署 Token</label>
           <div class="flex gap-2">
@@ -461,14 +461,14 @@ const toggleEvent = (event: string) => {
 
     <!-- Webhook Card -->
     <div class="bg-panel border border-border rounded-xl shadow-sm overflow-hidden">
-      <div class="px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02]">
+      <div class="px-4 sm:px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02]">
         <h2 class="text-lg font-semibold text-textMain flex items-center">
           <Webhook class="w-5 h-5 mr-2 text-primary" />
           Webhook 通知
         </h2>
         <p class="text-sm text-textMuted mt-1">部署事件发生时，向指定 URL 发送 POST 通知。</p>
       </div>
-      <div class="p-6 space-y-4">
+      <div class="p-4 sm:p-6 space-y-4">
         <div>
           <label class="block text-sm font-medium text-textMain mb-2">Webhook URL</label>
           <input

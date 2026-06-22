@@ -83,26 +83,26 @@ function pctText(n: number): string {
 
 <template>
   <div class="space-y-6 max-w-7xl mx-auto">
-    <div class="flex justify-between items-center mb-8">
+    <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-8">
       <h1 class="text-2xl font-bold text-textMain tracking-tight">Kite 概览</h1>
-      <div class="text-sm text-textMuted bg-panel px-3 py-1 rounded-full border border-border">
+      <div class="text-sm text-textMuted bg-panel px-3 py-1 rounded-full border border-border self-start sm:self-auto">
         当前版本：v{{ APP_VERSION }}
       </div>
     </div>
 
     <!-- Stats Grid -->
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6">
       <div
         v-for="stat in stats"
         :key="stat.label"
-        class="bg-panel border border-border rounded-xl p-6 flex items-center shadow-sm hover:border-primary/50 transition-colors"
+        class="bg-panel border border-border rounded-xl p-4 sm:p-6 flex items-center shadow-sm hover:border-primary/50 transition-colors"
       >
-        <div :class="['w-12 h-12 rounded-lg bg-base flex items-center justify-center border border-border', stat.color]">
-          <component :is="stat.icon" class="w-6 h-6" />
+        <div :class="['w-10 h-10 sm:w-12 sm:h-12 rounded-lg bg-base flex items-center justify-center border border-border shrink-0', stat.color]">
+          <component :is="stat.icon" class="w-5 h-5 sm:w-6 sm:h-6" />
         </div>
-        <div class="ml-4">
-          <p class="text-sm font-medium text-textMuted">{{ stat.label }}</p>
-          <p class="text-3xl font-bold text-textMain mt-1 font-mono">{{ stat.value }}</p>
+        <div class="ml-3 sm:ml-4 min-w-0">
+          <p class="text-xs sm:text-sm font-medium text-textMuted truncate">{{ stat.label }}</p>
+          <p class="text-2xl sm:text-3xl font-bold text-textMain mt-1 font-mono">{{ stat.value }}</p>
         </div>
       </div>
     </div>
@@ -115,7 +115,7 @@ function pctText(n: number): string {
       <div class="lg:col-span-2">
         <SuccessRateChart :points="ratePoints" :loading="statsLoading" />
       </div>
-      <div class="bg-panel border border-border rounded-xl p-6 shadow-sm">
+      <div class="bg-panel border border-border rounded-xl p-4 sm:p-6 shadow-sm">
         <div class="flex items-center justify-between mb-4">
           <div>
             <h3 class="text-base font-semibold text-textMain flex items-center gap-2">
@@ -153,16 +153,16 @@ function pctText(n: number): string {
       <div class="bg-panel border border-border rounded-xl overflow-hidden shadow-sm">
         <ul class="divide-y divide-border">
           <li v-if="recentLogs.length === 0" class="px-6 py-8 text-center text-textMuted">暂无部署活动</li>
-          <li v-for="log in recentLogs" :key="log.id" @click="goToLog(log.id)" class="px-6 py-4 flex items-center justify-between dark:hover:bg-white/5 hover:bg-black/5 transition-colors cursor-pointer">
-            <div class="flex items-center space-x-4">
-              <div class="w-2 h-2 rounded-full shadow-[0_0_8px_currentColor]" :class="log.status === 'success' ? 'bg-success text-success' : log.status === 'failed' ? 'bg-danger text-danger' : 'bg-primary text-primary'"></div>
-              <div>
-                <p class="text-sm font-medium text-textMain">部署{{ log.status === 'success' ? '完成' : log.status === 'failed' ? '失败' : '中' }}: <span class="font-mono text-primary ml-1">{{ log.projectName }}</span></p>
-                <p class="text-xs text-textMuted mt-1">触发源: {{ log.triggerSource }}</p>
+          <li v-for="log in recentLogs" :key="log.id" @click="goToLog(log.id)" class="px-4 sm:px-6 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 dark:hover:bg-white/5 hover:bg-black/5 transition-colors cursor-pointer">
+            <div class="flex items-center space-x-4 min-w-0">
+              <div class="w-2 h-2 rounded-full shadow-[0_0_8px_currentColor] shrink-0" :class="log.status === 'success' ? 'bg-success text-success' : log.status === 'failed' ? 'bg-danger text-danger' : 'bg-primary text-primary'"></div>
+              <div class="min-w-0">
+                <p class="text-sm font-medium text-textMain truncate">部署{{ log.status === 'success' ? '完成' : log.status === 'failed' ? '失败' : '中' }}: <span class="font-mono text-primary ml-1">{{ log.projectName }}</span></p>
+                <p class="text-xs text-textMuted mt-1 truncate">触发源: {{ log.triggerSource }}</p>
               </div>
             </div>
-            <div class="text-right">
-              <p class="text-sm text-textMuted font-mono">{{ new Date(log.startTime).toLocaleString() }}</p>
+            <div class="text-left sm:text-right pl-6 sm:pl-0 shrink-0">
+              <p class="text-xs sm:text-sm text-textMuted font-mono">{{ new Date(log.startTime).toLocaleString() }}</p>
               <p class="text-xs mt-1" :class="log.status === 'success' ? 'text-success' : log.status === 'failed' ? 'text-danger' : 'text-primary'">{{ formatDuration(elapsedMs(log) ?? NaN) }}</p>
             </div>
           </li>

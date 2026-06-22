@@ -229,12 +229,12 @@ async function confirmRollback() {
 
 <template>
   <div class="h-full flex flex-col space-y-6 max-w-7xl mx-auto">
-    <div class="flex justify-between items-center shrink-0">
+    <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 shrink-0">
       <div>
         <h1 class="text-2xl font-bold text-textMain tracking-tight">部署日志</h1>
         <p class="text-textMuted text-sm mt-1">实时查看所有项目的自动化部署过程及终端输出</p>
       </div>
-      <button @click="refreshLogs" class="flex items-center px-4 py-2 bg-panel dark:hover:bg-white/5 hover:bg-black/5 border border-border text-textMain rounded-md transition-colors text-sm font-medium shadow-sm">
+      <button @click="refreshLogs" class="flex items-center px-4 py-2 bg-panel dark:hover:bg-white/5 hover:bg-black/5 border border-border text-textMain rounded-md transition-colors text-sm font-medium shadow-sm self-start sm:self-auto">
         <RefreshCw class="w-4 h-4 mr-2" />
         刷新
       </button>
@@ -283,9 +283,9 @@ async function confirmRollback() {
               <RefreshCw v-else class="w-5 h-5 text-primary animate-spin" />
             </div>
             <div class="flex-1 min-w-0">
-              <div class="flex justify-between items-center mb-1">
+              <div class="flex justify-between items-center mb-1 gap-2">
                 <span class="font-medium text-textMain text-sm truncate">{{ log.projectName }}</span>
-                <span class="text-xs text-textMuted font-mono shrink-0">{{ new Date(log.startTime).toLocaleString() }}</span>
+                <span class="text-xs text-textMuted font-mono shrink-0 truncate">{{ new Date(log.startTime).toLocaleString() }}</span>
               </div>
               <div class="flex items-center text-xs text-textMuted gap-1.5 flex-wrap">
                 <span
