@@ -19,6 +19,7 @@ const viewMode = ref<'card' | 'list'>(((): 'card' | 'list' => {
 watch(viewMode, (v) => localStorage.setItem(VIEW_KEY, v))
 
 const selectedCategoryFilter = ref<string>('all') // 'all' | 'default' | <categoryId>
+const selectedEnvFilter = ref<string>('all') // 'all' | 'default'(no env) | <envName>
 
 onMounted(() => {
   projectStore.fetchProjects()
@@ -33,9 +34,20 @@ const categoryMap = computed<Map<string, Category>>(() => {
 
 const filteredProjects = computed(() => {
   const list = projectStore.projects
-  if (selectedCategoryFilter.value === 'all') return list
-  if (selectedCategoryFilter.value === 'default') return list.filter((p) => !p.categoryId)
-  return list.filter((p) => p.categoryId === selectedCategoryFilter.value)
+  return list.filter((p) => {
+    if (selectedCategoryFilter.value === 'default') {
+      if (p.categoryId) return false
+    } else if (selectedCategoryFilter.value !== 'all') {
+      if (p.categoryId !== selectedCategoryFilter.value) return false
+    }
+    const env = (p.env || '').trim()
+    if (selectedEnvFilter.value === 'default') {
+      if (env) return false
+    } else if (selectedEnvFilter.value !== 'all') {
+      if (env !== selectedEnvFilter.value) return false
+    }
+    return true
+  })
 })
 
 const projectCountByCategory = computed(() => {
@@ -46,6 +58,36 @@ const projectCountByCategory = computed(() => {
     else m[p.categoryId]++
   }
   return m
+})
+
+const envOptions = computed<string[]>(() => {
+  const set = new Set<string>()
+  for (const p of projectStore.projects) {
+    const env = (p.env || '').trim()
+    if (env) set.add(env)
+  }
+  return Array.from(set).sort((a, b) => a.localeCompare(b))
+})
+
+const projectCountByEnv = computed(() => {
+  const m: Record<string, number> = { all: projectStore.projects.length, default: 0 }
+  for (const env of envOptions.value) m[env] = 0
+  for (const p of projectStore.projects) {
+    const env = (p.env || '').trim()
+    if (!env) m.default++
+    else m[env] = (m[env] || 0) + 1
+  }
+  return m
+})
+
+watch([envOptions, projectCountByEnv], () => {
+  const v = selectedEnvFilter.value
+  if (v === 'all') return
+  if (v === 'default') {
+    if (projectCountByEnv.value.default === 0) selectedEnvFilter.value = 'all'
+    return
+  }
+  if (!envOptions.value.includes(v)) selectedEnvFilter.value = 'all'
 })
 
 const categoryColorClass: Record<string, string> = {
@@ -606,6 +648,7 @@ async function deleteCategoryAction(c: Category) {
 
     <!-- Category filter chips -->
     <div class="flex items-center flex-wrap gap-2">
+      <span class="text-xs text-textMuted/80 mr-1 shrink-0">分类</span>
       <button
         @click="selectedCategoryFilter = 'all'"
         class="flex items-center px-3 py-1.5 rounded-full text-xs border transition-colors"
@@ -632,6 +675,39 @@ async function deleteCategoryAction(c: Category) {
         <Tag class="w-3 h-3 mr-1.5" />
         {{ c.name }}
         <span class="ml-1.5 text-[10px] opacity-75">{{ projectCountByCategory[c.id] || 0 }}</span>
+      </button>
+    </div>
+
+    <!-- Environment filter chips -->
+    <div v-if="envOptions.length > 0" class="flex items-center flex-wrap gap-2">
+      <span class="text-xs text-textMuted/80 mr-1 shrink-0">环境</span>
+      <button
+        @click="selectedEnvFilter = 'all'"
+        class="flex items-center px-3 py-1.5 rounded-full text-xs border transition-colors"
+        :class="selectedEnvFilter === 'all' ? 'bg-primary/15 text-primary border-primary/40' : 'bg-base text-textMuted border-border hover:text-textMain'"
+      >
+        全部
+        <span class="ml-1.5 text-[10px] opacity-75">{{ projectCountByEnv.all }}</span>
+      </button>
+      <button
+        v-if="projectCountByEnv.default > 0"
+        @click="selectedEnvFilter = 'default'"
+        class="flex items-center px-3 py-1.5 rounded-full text-xs border transition-colors"
+        :class="selectedEnvFilter === 'default' ? 'bg-primary/15 text-primary border-primary/40' : 'bg-base text-textMuted border-border hover:text-textMain'"
+        title="未指定环境的项目"
+      >
+        未指定
+        <span class="ml-1.5 text-[10px] opacity-75">{{ projectCountByEnv.default }}</span>
+      </button>
+      <button
+        v-for="env in envOptions"
+        :key="env"
+        @click="selectedEnvFilter = env"
+        class="flex items-center px-3 py-1.5 rounded-full text-xs border transition-colors font-mono"
+        :class="selectedEnvFilter === env ? 'bg-primary/15 text-primary border-primary/40' : `${envChipClass(env)} hover:opacity-90`"
+      >
+        {{ env }}
+        <span class="ml-1.5 text-[10px] opacity-75 font-sans">{{ projectCountByEnv[env] || 0 }}</span>
       </button>
     </div>
 
