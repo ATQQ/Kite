@@ -2,7 +2,7 @@
 import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useProjectStore, type CleanPreviewResult, type DeploymentLog, type Pm2AppStatus } from '../store/project'
-import { ArrowLeft, Save, Key, Copy, RefreshCw, Trash2, CheckCircle2, TerminalSquare, FolderOpen, AlertTriangle, XCircle, ScrollText, Eye, Shield, ShieldAlert, Plus, History, RotateCcw, Archive, ArchiveX, CheckCheck, FileText, Activity, Cpu, MemoryStick, ChevronDown, Pencil, Check } from 'lucide-vue-next'
+import { ArrowLeft, Save, Key, Copy, RefreshCw, Trash2, CheckCircle2, TerminalSquare, FolderOpen, AlertTriangle, XCircle, ScrollText, Eye, Shield, ShieldAlert, Plus, History, RotateCcw, Archive, ArchiveX, CheckCheck, FileText, Activity, Cpu, MemoryStick, ChevronDown, ChevronUp, Pencil, Check } from 'lucide-vue-next'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import CleanPreviewDialog from '../components/CleanPreviewDialog.vue'
 import ProjectTagsEditor from '../components/ProjectTagsEditor.vue'
@@ -48,6 +48,30 @@ const isCopied = ref(false)
 const copiedCommand = ref('')
 const serverUrl = ref('http://127.0.0.1:3000')
 const cliEnv = ref('')
+const cliHelpCollapsed = ref(false)
+const cliHelpUserToggled = ref(false)
+const cliHelpStorageKey = computed(() => `kite:cli-help-collapsed:${projectId}`)
+
+function initCliHelpCollapsed() {
+  try {
+    const stored = localStorage.getItem(cliHelpStorageKey.value)
+    if (stored === '1' || stored === '0') {
+      cliHelpCollapsed.value = stored === '1'
+      cliHelpUserToggled.value = true
+      return
+    }
+  } catch {}
+  cliHelpUserToggled.value = false
+  cliHelpCollapsed.value = deployments.value.length > 0
+}
+
+function toggleCliHelp() {
+  cliHelpCollapsed.value = !cliHelpCollapsed.value
+  cliHelpUserToggled.value = true
+  try {
+    localStorage.setItem(cliHelpStorageKey.value, cliHelpCollapsed.value ? '1' : '0')
+  } catch {}
+}
 
 onMounted(async () => {
   serverUrl.value = window.location.origin
@@ -101,6 +125,9 @@ async function loadDeployments() {
     deployments.value = []
   } finally {
     isLoadingDeployments.value = false
+    if (!cliHelpUserToggled.value) {
+      initCliHelpCollapsed()
+    }
   }
 }
 
@@ -833,15 +860,36 @@ async function confirmDelete() {
 
       <!-- CLI Help Card -->
       <div class="bg-panel border border-border rounded-xl shadow-sm overflow-hidden">
-        <div class="px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02]">
-          <h2 class="text-lg font-semibold text-textMain flex items-center">
-            <TerminalSquare class="w-5 h-5 mr-2 text-primary" />
-            CLI 快速部署指引
-          </h2>
-          <p class="text-sm text-textMuted mt-1">三步完成部署：安装 CLI、初始化配置、推送部署。</p>
+        <div
+          class="px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02] cursor-pointer select-none hover:bg-black/[0.04] dark:hover:bg-white/[0.04] transition-colors"
+          :class="{ 'border-b-0': cliHelpCollapsed }"
+          @click="toggleCliHelp"
+          role="button"
+          :aria-expanded="!cliHelpCollapsed"
+        >
+          <div class="flex items-center justify-between gap-3">
+            <div class="min-w-0">
+              <h2 class="text-lg font-semibold text-textMain flex items-center">
+                <TerminalSquare class="w-5 h-5 mr-2 text-primary" />
+                CLI 快速部署指引
+              </h2>
+              <p class="text-sm text-textMuted mt-1">
+                <template v-if="cliHelpCollapsed && deployments.length > 0">
+                  已有部署记录，指引已折叠 — 点击展开
+                </template>
+                <template v-else>
+                  三步完成部署：安装 CLI、初始化配置、推送部署。
+                </template>
+              </p>
+            </div>
+            <component
+              :is="cliHelpCollapsed ? ChevronDown : ChevronUp"
+              class="w-5 h-5 text-textMuted shrink-0"
+            />
+          </div>
         </div>
 
-        <div class="p-6 space-y-5">
+        <div v-show="!cliHelpCollapsed" class="p-6 space-y-5">
           <!-- Env selector -->
           <div class="rounded-lg border border-primary/20 bg-primary/5 p-4">
             <label class="block text-sm font-medium text-textMain mb-2">部署环境 (可选)</label>
