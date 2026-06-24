@@ -684,7 +684,48 @@ async function confirmDelete() {
 
     <!-- Main Content -->
     <div class="grid grid-cols-1 gap-8">
-      
+
+      <!-- Project Basics Card -->
+      <div class="bg-panel border border-border rounded-xl shadow-sm overflow-hidden">
+        <div class="px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02]">
+          <h2 class="text-lg font-semibold text-textMain flex items-center">
+            <FileText class="w-5 h-5 mr-2 text-primary" />
+            项目基本信息
+          </h2>
+          <p class="text-sm text-textMuted mt-1">项目的分类与标签，用于在项目列表中筛选与归档。</p>
+        </div>
+
+        <div class="p-6 space-y-6">
+          <div>
+            <label class="block text-sm font-medium text-textMain mb-2">所属分类</label>
+            <select
+              v-model="formData.categoryId"
+              class="w-full bg-base border border-border rounded-md px-4 py-3 text-textMain text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all"
+            >
+              <option value="">默认（未分类）</option>
+              <option v-for="c in projectStore.categories" :key="c.id" :value="c.id">{{ c.name }}</option>
+            </select>
+            <p class="text-xs text-textMuted mt-2">用于在项目列表中按分类筛选。在「项目管理 → 管理分类」中创建更多分类。</p>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-textMain mb-2">标签（可多选）</label>
+            <ProjectTagsEditor
+              :model-value="formData.tagIds"
+              size="md"
+              read-only-save
+              aria-label="编辑当前项目的标签"
+              @update:model-value="(v) => formData.tagIds = v"
+            />
+            <p class="text-xs text-textMuted mt-2">点击「+ 标签」选择或直接新建；颜色和排序请在「项目管理 → 管理标签」里调整。</p>
+          </div>
+
+          <p class="text-xs text-textMuted border-t border-border pt-3">
+            修改后请前往下方「部署脚本配置」点击「保存配置」生效。
+          </p>
+        </div>
+      </div>
+
       <!-- Token Management Card -->
       <div class="bg-panel border border-border rounded-xl shadow-sm overflow-hidden">
         <div class="px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02]">
@@ -1042,28 +1083,17 @@ async function confirmDelete() {
         </div>
       </div>
 
-      <!-- Execution Scripts Card -->
+      <!-- PM2 App Binding Card -->
       <div class="bg-panel border border-border rounded-xl shadow-sm overflow-hidden">
         <div class="px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02]">
           <h2 class="text-lg font-semibold text-textMain flex items-center">
-            <TerminalSquare class="w-5 h-5 mr-2 text-primary" />
-            部署脚本配置 (云端默认)
+            <Activity class="w-5 h-5 mr-2 text-primary" />
+            PM2 应用绑定
           </h2>
-          <p class="text-sm text-textMuted mt-1">配置此项目在服务端接收到文件后，默认执行的 Shell 指令。可被 CLI 参数覆盖。</p>
+          <p class="text-sm text-textMuted mt-1">将本项目关联到一个 PM2 应用，启用顶部实时资源监控与状态面板。</p>
         </div>
-        
-        <div class="p-6 space-y-6">
-          <div>
-            <label class="block text-sm font-medium text-textMain mb-2">部署目录 (Destination Path)</label>
-            <input
-              v-model="formData.destPath"
-              type="text"
-              class="w-full bg-base border border-border rounded-md px-4 py-3 text-textMain font-mono text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all"
-              placeholder="e.g. /var/www/my-project"
-            />
-            <p class="text-xs text-textMuted mt-2">在服务端解压和部署该项目文件的绝对路径。</p>
-          </div>
 
+        <div class="p-6 space-y-6">
           <div>
             <label class="block text-sm font-medium text-textMain mb-2 flex items-center">
               PM2 应用名（可选）
@@ -1185,28 +1215,32 @@ async function confirmDelete() {
             </p>
           </div>
 
-          <div>
-            <label class="block text-sm font-medium text-textMain mb-2">所属分类</label>
-            <select
-              v-model="formData.categoryId"
-              class="w-full bg-base border border-border rounded-md px-4 py-3 text-textMain text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all"
-            >
-              <option value="">默认（未分类）</option>
-              <option v-for="c in projectStore.categories" :key="c.id" :value="c.id">{{ c.name }}</option>
-            </select>
-            <p class="text-xs text-textMuted mt-2">用于在项目列表中按分类筛选。在「项目管理 → 管理分类」中创建更多分类。</p>
-          </div>
+          <p class="text-xs text-textMuted border-t border-border pt-3">
+            修改后请前往下方「部署脚本配置」点击「保存配置」生效。
+          </p>
+        </div>
+      </div>
 
+      <!-- Execution Scripts Card -->
+      <div class="bg-panel border border-border rounded-xl shadow-sm overflow-hidden">
+        <div class="px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02]">
+          <h2 class="text-lg font-semibold text-textMain flex items-center">
+            <TerminalSquare class="w-5 h-5 mr-2 text-primary" />
+            部署脚本配置 (云端默认)
+          </h2>
+          <p class="text-sm text-textMuted mt-1">配置此项目在服务端接收到文件后，默认执行的 Shell 指令。可被 CLI 参数覆盖。</p>
+        </div>
+        
+        <div class="p-6 space-y-6">
           <div>
-            <label class="block text-sm font-medium text-textMain mb-2">标签（可多选）</label>
-            <ProjectTagsEditor
-              :model-value="formData.tagIds"
-              size="md"
-              read-only-save
-              aria-label="编辑当前项目的标签"
-              @update:model-value="(v) => formData.tagIds = v"
+            <label class="block text-sm font-medium text-textMain mb-2">部署目录 (Destination Path)</label>
+            <input
+              v-model="formData.destPath"
+              type="text"
+              class="w-full bg-base border border-border rounded-md px-4 py-3 text-textMain font-mono text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all"
+              placeholder="e.g. /var/www/my-project"
             />
-            <p class="text-xs text-textMuted mt-2">点击「+ 标签」选择或直接新建；颜色和排序请在「项目管理 → 管理标签」里调整。修改后需点击下方「保存配置」生效。</p>
+            <p class="text-xs text-textMuted mt-2">在服务端解压和部署该项目文件的绝对路径。</p>
           </div>
 
           <div>
