@@ -49,6 +49,7 @@ const form = ref({
   max_upload_size: '50',
   global_deploy_token: '',
   artifact_keep_n: '10',
+  deployment_stuck_threshold_min: '10',
 })
 
 const showGlobalToken = ref(false)
@@ -92,6 +93,7 @@ onMounted(async () => {
     form.value.max_upload_size = settingsData.max_upload_size || '50'
     form.value.global_deploy_token = settingsData.global_deploy_token || ''
     form.value.artifact_keep_n = settingsData.artifact_keep_n || '10'
+    form.value.deployment_stuck_threshold_min = settingsData.deployment_stuck_threshold_min || '10'
   }
   refreshHealth()
 })
@@ -99,6 +101,13 @@ onMounted(async () => {
 const saveSettings = async () => {
   isSaving.value = true
   saveMessage.value = ''
+  const thresholdNum = Number(form.value.deployment_stuck_threshold_min)
+  if (!Number.isInteger(thresholdNum) || thresholdNum < 1 || thresholdNum > 1440) {
+    saveMessage.value = '卡死阈值需在 1~1440 分钟之间'
+    isSaving.value = false
+    setTimeout(() => saveMessage.value = '', 3000)
+    return
+  }
   const success = await projectStore.updateSettings({
     webhook_url: form.value.webhook_url,
     webhook_events: form.value.webhook_events.join(','),
@@ -106,6 +115,7 @@ const saveSettings = async () => {
     max_upload_size: form.value.max_upload_size,
     global_deploy_token: form.value.global_deploy_token,
     artifact_keep_n: form.value.artifact_keep_n,
+    deployment_stuck_threshold_min: String(thresholdNum),
   })
   saveMessage.value = success ? '保存成功' : '保存失败'
   isSaving.value = false
@@ -454,6 +464,20 @@ const toggleEvent = (event: string) => {
           <p class="text-xs text-textMuted mt-2">
             每个项目保留最近多少份部署归档 ZIP（位于 <code class="font-mono text-textMain">~/.kite/deployments/&lt;projectId&gt;/artifacts/</code>），超出部分按时间倒序清理。
             归档保留越多，可回滚的历史越长，占用磁盘也越大。被任何 <code class="font-mono text-textMain">rollback</code> 引用的归档不会被清理。
+          </p>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-textMain mb-2">卡死部署阈值 (分钟)</label>
+          <input
+            v-model="form.deployment_stuck_threshold_min"
+            type="number"
+            min="1"
+            max="1440"
+            class="w-full bg-base border border-border rounded-md px-4 py-3 text-textMain font-mono text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all"
+            placeholder="10"
+          />
+          <p class="text-xs text-textMuted mt-2">
+            部署日志页面中，运行时长超过该分钟数的"进行中"部署会显示<strong class="text-textMain">「标记为成功 / 失败」</strong>按钮，用于修正服务异常退出残留的状态。范围 1~1440，默认 10。
           </p>
         </div>
       </div>

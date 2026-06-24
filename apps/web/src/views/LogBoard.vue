@@ -45,7 +45,9 @@ const isRunning = computed(() => selectedLog.value?.status === 'running')
 
 const nowTick = ref(Date.now())
 let nowTimer: number | null = null
-const STUCK_THRESHOLD_MS = 10 * 60 * 1000
+const DEFAULT_STUCK_THRESHOLD_MIN = 10
+const stuckThresholdMin = ref<number>(DEFAULT_STUCK_THRESHOLD_MIN)
+const stuckThresholdMs = computed(() => stuckThresholdMin.value * 60 * 1000)
 
 const listItemRefs = ref<Record<string, HTMLElement | null>>({})
 const setItemRef = (id: string) => (el: any) => {
@@ -69,6 +71,13 @@ onMounted(async () => {
     projectStore.fetchProjects()
   }
   await projectStore.fetchLogs()
+  projectStore.fetchSettings().then((s: any) => {
+    const raw = s?.deployment_stuck_threshold_min
+    const n = raw == null ? NaN : Number(raw)
+    if (Number.isFinite(n) && Number.isInteger(n) && n >= 1 && n <= 1440) {
+      stuckThresholdMin.value = n
+    }
+  }).catch(() => { /* ignore, fallback to default */ })
   const pid = typeof route.query.projectId === 'string' ? route.query.projectId : ''
   if (pid) selectedProjectId.value = pid
   const id = typeof route.query.id === 'string' ? route.query.id : null
@@ -249,7 +258,7 @@ const stuckRunningMs = computed(() => {
   return Math.max(0, nowTick.value - startMs)
 })
 
-const canMarkStatus = computed(() => stuckRunningMs.value >= STUCK_THRESHOLD_MS)
+const canMarkStatus = computed(() => stuckRunningMs.value >= stuckThresholdMs.value)
 
 const stuckDurationLabel = computed(() => {
   const ms = stuckRunningMs.value
@@ -473,7 +482,7 @@ async function confirmMark() {
             <span
               v-else-if="isRunning"
               class="text-[10px] text-textMuted/70 italic"
-              :title="`部署进行中不足 ${Math.round(STUCK_THRESHOLD_MS / 60000)} 分钟，暂不允许手动修正状态`"
+              :title="`部署进行中不足 ${stuckThresholdMin} 分钟，暂不允许手动修正状态`"
             >进行中…</span>
             <button
               v-if="canRollback"
