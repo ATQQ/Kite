@@ -1187,7 +1187,7 @@ async function deleteTagAction(t: TagType) {
                 type="button"
                 @click="toggleTagOnForm(newProject, t.id)"
                 class="inline-flex items-center px-2 py-1 rounded text-[11px] border transition-colors"
-                :class="newProject.tagIds.includes(t.id) ? 'bg-primary/15 text-primary border-primary/40' : `${tagChipClass(t.color)} hover:opacity-90`"
+                :class="newProject.tagIds.includes(t.id) ? `${tagChipClass(t.color)} ring-1 ring-primary/40` : 'bg-base text-textMuted border-border hover:text-textMain hover:border-textMuted/40'"
               >
                 <Tag class="w-3 h-3 mr-1" />
                 {{ t.name }}
@@ -1322,7 +1322,7 @@ async function deleteTagAction(t: TagType) {
                       :disabled="row.status === 'success' || isBatchSubmitting"
                       @click="toggleTagOnForm(row, t.id)"
                       class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] border transition-colors disabled:opacity-60"
-                      :class="row.tagIds.includes(t.id) ? 'bg-primary/15 text-primary border-primary/40' : `${tagChipClass(t.color)} hover:opacity-90`"
+                      :class="row.tagIds.includes(t.id) ? `${tagChipClass(t.color)} ring-1 ring-primary/40` : 'bg-base text-textMuted border-border hover:text-textMain hover:border-textMuted/40'"
                     >
                       {{ t.name }}
                     </button>

@@ -160,6 +160,13 @@ export const deployRoutes = new Elysia()
         if (tag) tagIds.push(tag.id);
       }
     }
+    // Auto-attach built-in "PM2" tag when project is created with pm2AppName bound.
+    if (pm2AppName) {
+      const pm2Tag = await db.tags.findByName('PM2');
+      if (pm2Tag && !tagIds.includes(pm2Tag.id)) {
+        tagIds.push(pm2Tag.id);
+      }
+    }
     const { tagIds: _omitTagIds, ...rest } = body as Record<string, any>;
     const project = await db.projects.create({
       ...rest,
@@ -289,6 +296,19 @@ export const deployRoutes = new Elysia()
     const after = await db.projects.update(params.id, patch);
     if (!after) { set.status = 404; return { error: 'Project not found' }; }
     const beforeTagIds = await db.projectTags.listByProject(params.id);
+    // Auto-attach built-in "PM2" tag when pm2AppName transitions from empty/different to a new non-empty value.
+    const beforePm2 = ((before as any).pm2AppName || '').trim();
+    const afterPm2 = ((after as any).pm2AppName || '').trim();
+    if (afterPm2 && afterPm2 !== beforePm2) {
+      const pm2Tag = await db.tags.findByName('PM2');
+      if (pm2Tag) {
+        const base = nextTagIds !== undefined ? nextTagIds : [...beforeTagIds];
+        if (!base.includes(pm2Tag.id)) {
+          base.push(pm2Tag.id);
+          nextTagIds = base;
+        }
+      }
+    }
     if (nextTagIds !== undefined) {
       await db.projectTags.setForProject(params.id, nextTagIds);
     }
