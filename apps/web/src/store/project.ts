@@ -202,6 +202,7 @@ export const useProjectStore = defineStore('project', () => {
 
   async function addProject(project: Partial<Project>): Promise<{ ok: boolean; error?: string; conflictProject?: string }> {
     try {
+      const tagIds = Array.isArray((project as any).tagIds) ? (project as any).tagIds as string[] : undefined
       const data = await apiFetch('/projects', {
         method: 'POST',
         body: JSON.stringify({
@@ -210,10 +211,16 @@ export const useProjectStore = defineStore('project', () => {
           deployPath: project.destPath || '/tmp/default-deploy',
           env: project.env || undefined,
           categoryId: project.categoryId ?? undefined,
+          pm2AppName: (project as any).pm2AppName ?? undefined,
+          tagIds,
         })
       })
       if (data.success) {
-        await fetchProjects()
+        if (tagIds && tagIds.length > 0) {
+          await Promise.all([fetchProjects(), fetchTags()])
+        } else {
+          await fetchProjects()
+        }
         return { ok: true }
       }
     } catch (e: any) {
@@ -225,9 +232,15 @@ export const useProjectStore = defineStore('project', () => {
 
   async function removeProject(id: string) {
     try {
+      // 删项目前先看它是否有关联标签，决定是否需要刷新 tags（避免无谓请求）
+      const hadTags = (projects.value.find(p => p.id === id)?.tagIds?.length ?? 0) > 0
       const data = await apiFetch(`/projects/${id}`, { method: 'DELETE' })
       if (data.success) {
-        await fetchProjects()
+        if (hadTags) {
+          await Promise.all([fetchProjects(), fetchTags()])
+        } else {
+          await fetchProjects()
+        }
         return true
       }
     } catch (e) {
@@ -255,7 +268,12 @@ export const useProjectStore = defineStore('project', () => {
         body: JSON.stringify(apiPayload)
       })
       if (data.success) {
-        await fetchProjects()
+        // tagIds 变更会影响 tags[].projectCount，需要并行刷新避免筛选条数字滞后
+        if (payload.tagIds !== undefined) {
+          await Promise.all([fetchProjects(), fetchTags()])
+        } else {
+          await fetchProjects()
+        }
       }
     } catch (e) {
       console.error('Failed to update project', e)
