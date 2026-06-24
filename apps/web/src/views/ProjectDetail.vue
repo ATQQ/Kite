@@ -19,6 +19,7 @@ const formData = ref({
   destPath: '',
   preDeploy: '',
   postDeploy: '',
+  postDeployAsync: false,
   categoryId: '' as string
 })
 
@@ -52,6 +53,7 @@ onMounted(async () => {
     formData.value.destPath = project.value.destPath || ''
     formData.value.preDeploy = project.value.preDeploy || ''
     formData.value.postDeploy = project.value.postDeploy || ''
+    formData.value.postDeployAsync = Boolean((project.value as any).postDeployAsync)
     formData.value.categoryId = project.value.categoryId || ''
     cliEnv.value = project.value.env || ''
     const rawMode = (project.value as any).cleanMode
@@ -189,6 +191,7 @@ const saveConfig = async () => {
       destPath: formData.value.destPath,
       preDeploy: formData.value.preDeploy,
       postDeploy: formData.value.postDeploy,
+      postDeployAsync: formData.value.postDeployAsync,
       categoryId: formData.value.categoryId || null,
       env: cliEnv.value.trim(),
     })
@@ -867,6 +870,18 @@ async function confirmDelete() {
               ></textarea>
             </div>
             <p class="text-xs text-textMuted mt-2">服务端解压文件后，在目标目录执行的重启或服务加载命令。</p>
+            <label class="mt-3 flex items-start space-x-2 cursor-pointer select-none">
+              <input
+                v-model="formData.postDeployAsync"
+                type="checkbox"
+                class="mt-0.5 w-4 h-4 rounded border-border bg-base text-primary focus:ring-1 focus:ring-primary/50"
+              />
+              <span class="text-xs text-textMuted leading-relaxed">
+                <span class="text-textMain font-medium">异步执行（不等待）</span>
+                — 开启后，postDeploy 触发即认为部署成功；脚本输出仍可在部署日志中查看。适合启动常驻进程 / pm2 restart / 延迟任务。
+                <span class="text-danger">注意：Kite 进程退出时子进程会被回收，需常驻请配合 <code class="font-mono">nohup</code> / <code class="font-mono">pm2</code> / <code class="font-mono">setsid</code> 自行守护。</span>
+              </span>
+            </label>
           </div>
 
           <div class="pt-4 border-t border-border flex justify-end">

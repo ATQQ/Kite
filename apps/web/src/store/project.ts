@@ -11,6 +11,7 @@ export interface Project {
   postDeploy?: string
   preDeployScript?: string
   postDeployScript?: string
+  postDeployAsync?: boolean
   token?: string
   env?: string
   cleanMode?: 'merge' | 'clean' | 'clean-all' | null
@@ -176,6 +177,7 @@ export const useProjectStore = defineStore('project', () => {
       if (payload.name !== undefined) apiPayload.name = payload.name
       if (payload.preDeploy !== undefined) apiPayload.preDeployScript = payload.preDeploy
       if (payload.postDeploy !== undefined) apiPayload.postDeployScript = payload.postDeploy
+      if (payload.postDeployAsync !== undefined) apiPayload.postDeployAsync = Boolean(payload.postDeployAsync)
       if (payload.destPath !== undefined) apiPayload.deployPath = payload.destPath
       if (payload.cleanMode !== undefined) apiPayload.cleanMode = payload.cleanMode
       if (payload.protectPaths !== undefined) apiPayload.protectPaths = payload.protectPaths
@@ -206,6 +208,13 @@ export const useProjectStore = defineStore('project', () => {
     return await apiFetch(`/deployments/${deploymentId}/rollback`, {
       method: 'POST',
       body: JSON.stringify({}),
+    })
+  }
+
+  async function markDeploymentStatus(deploymentId: string, status: 'success' | 'failed') {
+    return await apiFetch(`/deployments/${deploymentId}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
     })
   }
 
@@ -555,6 +564,7 @@ export const useProjectStore = defineStore('project', () => {
     removeProject,
     cleanPreview,
     rollbackDeployment,
+    markDeploymentStatus,
     fetchDiskOverview,
     fetchDiskProjects,
     fetchProjectArtifacts,

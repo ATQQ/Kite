@@ -21,6 +21,7 @@ const initDb = async () => {
       token TEXT NOT NULL UNIQUE,
       pre_deploy_script TEXT,
       post_deploy_script TEXT,
+      post_deploy_async INTEGER DEFAULT 0,
       env TEXT,
       status TEXT DEFAULT 'idle',
       created_at TEXT NOT NULL,
@@ -40,6 +41,9 @@ const initDb = async () => {
   // Migration: add category_id for project categorization
   try { await client.execute(`ALTER TABLE projects ADD COLUMN category_id TEXT`); } catch { /* exists */ }
   await client.execute(`CREATE INDEX IF NOT EXISTS idx_projects_category_id ON projects(category_id);`);
+
+  // Migration: add post_deploy_async (default 0 = sync, keep current behavior)
+  try { await client.execute(`ALTER TABLE projects ADD COLUMN post_deploy_async INTEGER DEFAULT 0`); } catch { /* exists */ }
 
   await client.execute(`
     CREATE TABLE IF NOT EXISTS categories (

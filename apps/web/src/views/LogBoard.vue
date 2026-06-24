@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch, nextTick } from 'vue'
+import { ref, onMounted, onBeforeUnmount, computed, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useProjectStore } from '../store/project'
 import { ansiToHtml } from '../utils/ansi'
 import { useDeployStream } from '../composables/useDeployStream'
-import { Terminal, CheckCircle2, XCircle, Clock, RefreshCw, AlertCircle, RotateCcw, Archive, ArchiveX, Copy, CheckCheck } from 'lucide-vue-next'
+import { Terminal, CheckCircle2, XCircle, Clock, RefreshCw, AlertCircle, RotateCcw, Archive, ArchiveX, Copy, CheckCheck, Wrench } from 'lucide-vue-next'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import { useToast } from '../composables/useToast'
 
@@ -43,6 +43,10 @@ const logs = computed(() => {
 const selectedLog = ref<any>(null)
 const isRunning = computed(() => selectedLog.value?.status === 'running')
 
+const nowTick = ref(Date.now())
+let nowTimer: number | null = null
+const STUCK_THRESHOLD_MS = 10 * 60 * 1000
+
 const listItemRefs = ref<Record<string, HTMLElement | null>>({})
 const setItemRef = (id: string) => (el: any) => {
   listItemRefs.value[id] = el as HTMLElement | null
@@ -69,6 +73,17 @@ onMounted(async () => {
   if (pid) selectedProjectId.value = pid
   const id = typeof route.query.id === 'string' ? route.query.id : null
   await selectById(id)
+  nowTick.value = Date.now()
+  nowTimer = window.setInterval(() => {
+    nowTick.value = Date.now()
+  }, 30_000)
+})
+
+onBeforeUnmount(() => {
+  if (nowTimer !== null) {
+    clearInterval(nowTimer)
+    nowTimer = null
+  }
 })
 
 watch(() => route.query.id, async (id) => {
@@ -225,6 +240,79 @@ async function confirmRollback() {
     isRollingBack.value = false
   }
 }
+
+const stuckRunningMs = computed(() => {
+  const log: any = selectedLog.value
+  if (!log || log.status !== 'running') return 0
+  const startMs = new Date(log.startTime).getTime()
+  if (!Number.isFinite(startMs)) return 0
+  return Math.max(0, nowTick.value - startMs)
+})
+
+const canMarkStatus = computed(() => stuckRunningMs.value >= STUCK_THRESHOLD_MS)
+
+const stuckDurationLabel = computed(() => {
+  const ms = stuckRunningMs.value
+  if (ms <= 0) return ''
+  const totalMin = Math.floor(ms / 60_000)
+  if (totalMin < 60) return `${totalMin} 分钟`
+  const h = Math.floor(totalMin / 60)
+  const m = totalMin % 60
+  return m === 0 ? `${h} 小时` : `${h} 小时 ${m} 分钟`
+})
+
+const showMarkConfirm = ref(false)
+const pendingMarkStatus = ref<'success' | 'failed'>('failed')
+const isMarking = ref(false)
+
+const markDialogTone = computed(() => pendingMarkStatus.value === 'failed' ? 'danger' : 'warning')
+const markDialogTitle = computed(() =>
+  pendingMarkStatus.value === 'failed' ? '确认将此部署标记为失败？' : '确认将此部署标记为成功？'
+)
+const markDialogMessage = computed(() => {
+  const log: any = selectedLog.value
+  const idShort = log ? shortId(log.id) : ''
+  const projectName = log?.projectName || ''
+  const lasted = stuckDurationLabel.value ? `（已持续 ${stuckDurationLabel.value}）` : ''
+  if (pendingMarkStatus.value === 'failed') {
+    return `部署 ${idShort}（${projectName}）当前显示为进行中${lasted}。此操作只会修正数据库记录与项目状态，不会回滚或清理已落盘的文件，仅适用于服务进程已退出 / 卡死的场景。`
+  }
+  return `部署 ${idShort}（${projectName}）当前显示为进行中${lasted}。标记为成功仅会修正数据库状态，**不代表部署真的执行成功**，请确认你已通过其他方式验证产物可用。`
+})
+
+function openMark(status: 'success' | 'failed') {
+  if (!canMarkStatus.value) return
+  pendingMarkStatus.value = status
+  showMarkConfirm.value = true
+}
+
+async function confirmMark() {
+  const log: any = selectedLog.value
+  if (!log) return
+  isMarking.value = true
+  try {
+    const res = await projectStore.markDeploymentStatus(log.id, pendingMarkStatus.value)
+    toast.success(
+      pendingMarkStatus.value === 'failed' ? '已标记为失败' : '已标记为成功',
+      `部署 ${shortId(log.id)}`
+    )
+    showMarkConfirm.value = false
+    await projectStore.fetchLogs()
+    const updated = projectStore.logs.find(l => l.id === log.id)
+    if (updated) {
+      selectedLog.value = updated
+    } else if (res?.deployment) {
+      selectedLog.value = res.deployment
+    }
+  } catch (e: any) {
+    const msg = e?.data?.code === 'NOT_RUNNING'
+      ? '该部署已不是进行中状态，无需修正'
+      : (e?.message || '未知错误')
+    toast.error('标记失败', msg)
+  } finally {
+    isMarking.value = false
+  }
+}
 </script>
 
 <template>
@@ -362,6 +450,31 @@ async function confirmRollback() {
             >rollback</span>
             <Archive v-if="(selectedLog as any).artifactPath" class="w-3.5 h-3.5 text-success/70" title="已归档，可回滚" />
             <ArchiveX v-else class="w-3.5 h-3.5 text-textMuted/50" title="无归档" />
+            <template v-if="isRunning && canMarkStatus">
+              <button
+                @click="openMark('failed')"
+                class="flex items-center px-2.5 py-1 text-[11px] font-medium bg-danger/10 border border-danger/30 text-danger hover:bg-danger hover:text-white rounded transition-colors"
+                type="button"
+                :title="`部署已持续 ${stuckDurationLabel}，将状态修正为 failed`"
+              >
+                <Wrench class="w-3 h-3 mr-1" />
+                标记为失败
+              </button>
+              <button
+                @click="openMark('success')"
+                class="flex items-center px-2.5 py-1 text-[11px] font-medium bg-success/10 border border-success/30 text-success hover:bg-success hover:text-white rounded transition-colors"
+                type="button"
+                :title="`部署已持续 ${stuckDurationLabel}，将状态修正为 success（仅状态修正，不验证产物）`"
+              >
+                <Wrench class="w-3 h-3 mr-1" />
+                标记为成功
+              </button>
+            </template>
+            <span
+              v-else-if="isRunning"
+              class="text-[10px] text-textMuted/70 italic"
+              :title="`部署进行中不足 ${Math.round(STUCK_THRESHOLD_MS / 60000)} 分钟，暂不允许手动修正状态`"
+            >进行中…</span>
             <button
               v-if="canRollback"
               @click="openRollback"
@@ -411,6 +524,17 @@ async function confirmRollback() {
       cancel-text="取消"
       :loading="isRollingBack"
       @confirm="confirmRollback"
+    />
+
+    <ConfirmDialog
+      v-model:open="showMarkConfirm"
+      :tone="markDialogTone"
+      :title="markDialogTitle"
+      :message="markDialogMessage"
+      :confirm-text="pendingMarkStatus === 'failed' ? '确认标记失败' : '确认标记成功'"
+      cancel-text="取消"
+      :loading="isMarking"
+      @confirm="confirmMark"
     />
   </div>
 </template>

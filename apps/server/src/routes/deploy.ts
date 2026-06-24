@@ -244,6 +244,7 @@ export const deployRoutes = new Elysia()
       name: t.Optional(t.String()),
       preDeployScript: t.Optional(t.String()),
       postDeployScript: t.Optional(t.String()),
+      postDeployAsync: t.Optional(t.Boolean()),
       deployPath: t.Optional(t.String()),
       description: t.Optional(t.String()),
       env: t.Optional(t.String()),
@@ -366,6 +367,17 @@ export const deployRoutes = new Elysia()
 
       const preDeployCmd = body.preDeploy || project.preDeployScript;
       const postDeployCmd = body.postDeploy || project.postDeployScript;
+      // postDeployAsync: 单次 > 项目级；FormData 传字符串 'true'/'false'，需归一化
+      const parseBool = (v: unknown): boolean | undefined => {
+        if (typeof v === 'boolean') return v;
+        if (typeof v === 'string') {
+          if (v === 'true' || v === '1') return true;
+          if (v === 'false' || v === '0' || v === '') return false;
+        }
+        return undefined;
+      };
+      const overrideAsync = parseBool(body.postDeployAsync);
+      const postDeployAsync = overrideAsync !== undefined ? overrideAsync : Boolean(project.postDeployAsync);
       // env 通过 FormData 传输为 JSON 字符串，需手动解析
       let deployEnv: Record<string, string> | undefined;
       if (body.env) {
@@ -495,19 +507,58 @@ export const deployRoutes = new Elysia()
 
             // Post-deploy
             if (postDeployCmd) {
-              sendEvent(controller, 'log', { data: `[Kite Deploy] Running Post-deploy: ${postDeployCmd}` });
-              await appendLog(`[Kite Deploy] Running Post-deploy: ${postDeployCmd}`);
-              let failed = false;
-              for await (const line of runShellCommand(postDeployCmd, destPath, deployEnv)) {
-                if (line.startsWith('\x00EXIT:')) {
-                  const exitCode = parseInt(line.slice(6));
-                  if (exitCode !== 0) { failed = true; }
-                } else {
-                  sendEvent(controller, 'log', { data: line });
-                  await appendLog(line);
+              if (postDeployAsync) {
+                const dispatchMsg = `[Kite Deploy] Dispatching Post-deploy asynchronously (not waiting): ${postDeployCmd}`;
+                sendEvent(controller, 'log', { data: dispatchMsg });
+                await appendLog(dispatchMsg);
+                // Fire-and-forget: 后台仍把输出 appendLog 到 deployments.output 并广播给订阅者；
+                // 主流程立即继续。注意：Kite 进程退出时子进程会随父进程组被回收，
+                // 需要常驻请在 postDeploy 里用 nohup/pm2/setsid 自行守护。
+                (async () => {
+                  try {
+                    for await (const line of runShellCommand(postDeployCmd, destPath, deployEnv)) {
+                      if (line.startsWith('\x00EXIT:')) {
+                        const exitCode = parseInt(line.slice(6));
+                        const exitMsg = exitCode === 0
+                          ? `[Kite Deploy] (async) Post-deploy exited with code 0`
+                          : `[Kite Deploy] (async) Post-deploy exited with code ${exitCode}`;
+                        await appendLog(exitMsg);
+                        if (exitCode !== 0) {
+                          try {
+                            await writeAudit({ headers }, {
+                              action: 'deploy.post_deploy_failed',
+                              targetType: 'project',
+                              targetId: project.id,
+                              targetName: project.name,
+                              summary: `异步 postDeploy 退出码 ${exitCode}（部署 ${deploymentRow.id}）`,
+                              status: 'failed',
+                              errorMessage: `Post-deploy exited with code ${exitCode}`,
+                            });
+                          } catch { /* audit best-effort */ }
+                        }
+                      } else {
+                        await appendLog(line);
+                      }
+                    }
+                  } catch (asyncErr: any) {
+                    await appendLog(`[Kite Deploy] (async) Post-deploy error: ${asyncErr?.message || asyncErr}`);
+                  }
+                })();
+              } else {
+                sendEvent(controller, 'log', { data: `[Kite Deploy] Running Post-deploy: ${postDeployCmd}` });
+                await appendLog(`[Kite Deploy] Running Post-deploy: ${postDeployCmd}`);
+                let failed = false;
+                for await (const line of runShellCommand(postDeployCmd, destPath, deployEnv)) {
+                  if (line.startsWith('\x00EXIT:')) {
+                    const exitCode = parseInt(line.slice(6));
+                    if (exitCode !== 0) { failed = true; }
+                  } else {
+                    sendEvent(controller, 'log', { data: line });
+                    await appendLog(line);
+                  }
                 }
+                if (failed) throw new Error('Post-deploy failed');
               }
-              if (failed) throw new Error('Post-deploy failed');
             }
 
             await fs.unlink(tempZipPath);
@@ -573,6 +624,7 @@ export const deployRoutes = new Elysia()
       projectId: t.String(),
       preDeploy: t.Optional(t.String()),
       postDeploy: t.Optional(t.String()),
+      postDeployAsync: t.Optional(t.Union([t.Boolean(), t.String()])),
       env: t.Optional(t.Any()),
       startedAt: t.Optional(t.String())
     })
@@ -745,6 +797,72 @@ export const deployRoutes = new Elysia()
     body: t.Object({
       cleanMode: t.Optional(t.Union([t.Literal('merge'), t.Literal('clean'), t.Literal('clean-all'), t.Null()])),
       protectPaths: t.Optional(t.Array(t.String())),
+    })
+  })
+  .patch('/api/deployments/:id/status', async ({ headers, params, body, set }) => {
+    if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
+
+    const nextStatus = body.status;
+    if (nextStatus !== 'success' && nextStatus !== 'failed') {
+      set.status = 400;
+      return { error: 'status must be "success" or "failed"' };
+    }
+
+    const deployment = await db.deployments.findById(params.id);
+    if (!deployment) { set.status = 404; return { error: 'Deployment not found' }; }
+    if (deployment.status !== 'running') {
+      set.status = 409;
+      return { error: `Deployment is already ${deployment.status}, cannot mark`, code: 'NOT_RUNNING' };
+    }
+
+    const endTimeIso = new Date().toISOString();
+    const startMs = new Date(deployment.startTime).getTime();
+    const endMs = new Date(endTimeIso).getTime();
+    const durationStr = Number.isFinite(startMs) && Number.isFinite(endMs) && endMs >= startMs
+      ? ((endMs - startMs) / 1000).toFixed(1) + 's'
+      : (deployment.duration || '0s');
+
+    const markLine = `[Kite] Manually marked as ${nextStatus} by admin at ${endTimeIso}`;
+    const nextOutput = deployment.output ? `${deployment.output}\n${markLine}` : markLine;
+
+    await db.deployments.update(deployment.id, {
+      status: nextStatus,
+      endTime: endTimeIso,
+      duration: durationStr,
+      output: nextOutput,
+    });
+
+    const project = await db.projects.findById(deployment.projectId);
+    if (project && project.status === 'running') {
+      await db.projects.update(project.id, { status: nextStatus });
+    }
+
+    broadcastToSubscribers(deployment.id, 'log', markLine);
+    broadcastToSubscribers(deployment.id, 'status', JSON.stringify({ status: nextStatus, duration: durationStr }));
+
+    await writeAudit({ headers }, {
+      action: 'deployment.mark_status',
+      targetType: 'deployment',
+      targetId: deployment.id,
+      targetName: deployment.projectName,
+      before: { status: 'running', endTime: deployment.endTime ?? null, duration: deployment.duration ?? null },
+      after: { status: nextStatus, endTime: endTimeIso, duration: durationStr },
+      summary: `手动将部署 ${deployment.id.slice(0, 8)} 标记为 ${nextStatus}`,
+    });
+
+    return {
+      success: true,
+      deployment: {
+        ...deployment,
+        status: nextStatus,
+        endTime: endTimeIso,
+        duration: durationStr,
+        output: nextOutput,
+      },
+    };
+  }, {
+    body: t.Object({
+      status: t.Union([t.Literal('success'), t.Literal('failed')]),
     })
   })
   .post('/api/deployments/:id/rollback', async ({ headers, params, set }) => {

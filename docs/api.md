@@ -93,7 +93,8 @@ Authorization: Bearer <YOUR_ADMIN_TOKEN>
   {
     "preDeployScript": "string",   // 可选
     "postDeployScript": "string",  // 可选
-    "deployPath": "string"         // 可选
+    "deployPath": "string",        // 可选
+    "postDeployAsync": false       // 可选；true 时 postDeploy 异步执行（fire-and-forget），默认 false 保留旧行为
   }
   ```
 * **Response**:
@@ -228,6 +229,7 @@ Authorization: Bearer <YOUR_ADMIN_TOKEN>
   * `projectId`: 项目 ID (String)
   * `preDeploy`: CLI 覆盖的前置脚本 (String, 可选)
   * `postDeploy`: CLI 覆盖的后置脚本 (String, 可选)
+  * `postDeployAsync`: 单次部署覆盖项目级 `postDeployAsync` 设置 (String, 可选；接受 `"true"|"false"|"1"|"0"`)。`true` 时 server 在 spawn `postDeploy` 之后立刻返回 success，不阻塞等待子进程结束。
   * `env`: 部署时注入到 pre/post 脚本的环境变量，**JSON 字符串** 形式 (String, 可选)
 * **Response**: NDJSON 流（`Content-Type: application/x-ndjson`），每行一个 JSON 对象：
 

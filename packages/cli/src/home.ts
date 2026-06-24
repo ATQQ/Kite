@@ -18,6 +18,7 @@ export interface KiteLocalEnv {
   KITE_PRE_DEPLOY?: string;
   KITE_POST_DEPLOY?: string;
   KITE_DEPLOY_COMMAND?: string;
+  KITE_POST_DEPLOY_ASYNC?: string;
 }
 
 export function getKiteHome() {

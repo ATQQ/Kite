@@ -9,6 +9,7 @@ export const projects = sqliteTable('projects', {
   token: text('token').notNull().unique(),
   preDeployScript: text('pre_deploy_script'),
   postDeployScript: text('post_deploy_script'),
+  postDeployAsync: integer('post_deploy_async', { mode: 'boolean' }).default(false),
   env: text('env'),                          // optional environment label, e.g. 'test', 'prod'
   status: text('status').default('idle'), // 'idle' | 'success' | 'failed' | 'running'
   cleanMode: text('clean_mode'),             // 'merge' (default/null) | 'clean' | 'clean-all'

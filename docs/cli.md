@@ -316,6 +316,10 @@ kite init --project proj_1a2b3c4d5e --token <DEPLOY_TOKEN> --token-store local
 *   `env` (可选): 键值对对象，部署时注入到 `preDeploy` / `postDeploy` 脚本的环境变量。CLI `--set-env` 可覆盖。
 *   `preDeploy` (可选): 在**服务端**解压前执行的前置脚本（注意：不是本地构建）。适合做清理、备份等准备工作。
 *   `postDeploy` (可选): 在**服务端**解压完成后，在目标部署目录执行的后置脚本（例如重启服务、构建、nginx reload 等）。
+*   `postDeployAsync` (可选): 布尔，默认 `false`（沿用旧行为：等待 `postDeploy` 跑完）。设为 `true` 时，`postDeploy` 改为"fire-and-forget"：服务端 spawn 子进程后立刻返回 success，子进程输出仍会落到该次部署日志，CLI/Web 端不再阻塞等待。  
+    适用场景：`postDeploy` 中包含会重启自身或长时间运行的命令（如 `kite serve --runtime bun --pm2 restart`、PM2 重启自己、热重载守护进程），同步等待会让上传请求挂死。  
+    优先级：CLI `--post-deploy-async` > 环境变量 `KITE_POST_DEPLOY_ASYNC=true|false|1|0` > 项目配置 `postDeployAsync` > Web 端项目设置 > 默认 `false`。  
+    **注意**：异步模式下若子进程崩溃，本次 deployment 仍标记成功，失败会落到 `audit_logs` 的 `deploy.post_deploy_failed`，可在 Web "审计日志"中查看。
 
 > **关于忽略规则**
 >
@@ -387,9 +391,9 @@ kite push --token "YOUR_TEMP_TOKEN" --server "http://test-env:5431" --out "./bui
 
 部署配置优先级为：
 
-1. CLI 参数：`--token`、`--server`、`--project`、`--out`、`--pre`、`--post`、`--command`、`--ignore`、`--no-ignore-builtin`
-2. 本地环境变量：`.env.local`（`KITE_SERVER_URL`、`KITE_TOKEN` 等）
-3. 项目配置：`kite.config.json`（`serverUrl`、`projectId`、`outputDir`、`ignore`、`ignoreBuiltin` 等）
+1. CLI 参数：`--token`、`--server`、`--project`、`--out`、`--pre`、`--post`、`--command`、`--post-deploy-async`、`--ignore`、`--no-ignore-builtin`
+2. 本地环境变量：`.env.local`（`KITE_SERVER_URL`、`KITE_TOKEN`、`KITE_POST_DEPLOY_ASYNC` 等）
+3. 项目配置：`kite.config.json`（`serverUrl`、`projectId`、`outputDir`、`postDeployAsync`、`ignore`、`ignoreBuiltin` 等）
 4. 全局配置：`~/.kite/config.json`（`serverUrl`、`token`、`projectToken`）
 
 ## 十二、部署流程示例
