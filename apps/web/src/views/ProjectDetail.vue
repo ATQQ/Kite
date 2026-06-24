@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useProjectStore, type CleanPreviewResult, type DeploymentLog, type Pm2AppStatus } from '../store/project'
-import { ArrowLeft, Save, Key, Copy, RefreshCw, Trash2, CheckCircle2, TerminalSquare, FolderOpen, AlertTriangle, XCircle, ScrollText, Eye, Shield, ShieldAlert, Plus, History, RotateCcw, Archive, ArchiveX, CheckCheck, FileText, Activity, Cpu, MemoryStick } from 'lucide-vue-next'
+import { ArrowLeft, Save, Key, Copy, RefreshCw, Trash2, CheckCircle2, TerminalSquare, FolderOpen, AlertTriangle, XCircle, ScrollText, Eye, Shield, ShieldAlert, Plus, History, RotateCcw, Archive, ArchiveX, CheckCheck, FileText, Activity, Cpu, MemoryStick, ChevronDown, Pencil, Check } from 'lucide-vue-next'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import CleanPreviewDialog from '../components/CleanPreviewDialog.vue'
 import ProjectTagsEditor from '../components/ProjectTagsEditor.vue'
@@ -235,7 +235,7 @@ async function saveEnv() {
 
 // ---------- PM2 status ----------
 const pm2Available = ref(false)
-const pm2Apps = ref<string[]>([])
+const pm2Apps = ref<Array<{ name: string; pmId: number; status: string }>>([])
 const pm2Status = ref<Pm2AppStatus | null>(null)
 const pm2Loading = ref(false)
 
@@ -245,7 +245,7 @@ async function loadPm2Available() {
     if (pm2Available.value) {
       try {
         const apps = await projectStore.fetchPm2Apps()
-        pm2Apps.value = Array.isArray(apps) ? apps.map((a) => a.name).filter(Boolean) : []
+        pm2Apps.value = Array.isArray(apps) ? apps.filter((a) => a.name) : []
       } catch {
         pm2Apps.value = []
       }
@@ -273,6 +273,51 @@ useIntervalRaf(async () => {
     await refreshPm2Status()
   }
 }, 5000)
+
+// ---------- PM2 app picker (dropdown + manual fallback) ----------
+const pm2PickerOpen = ref(false)
+const pm2ManualMode = ref(false)
+
+function togglePm2Picker() {
+  pm2PickerOpen.value = !pm2PickerOpen.value
+}
+function closePm2Picker() {
+  pm2PickerOpen.value = false
+}
+function pickPm2App(name: string) {
+  formData.value.pm2AppName = name
+  pm2ManualMode.value = false
+  closePm2Picker()
+}
+function enterPm2ManualMode() {
+  pm2ManualMode.value = true
+  closePm2Picker()
+}
+
+const pm2DropdownAvailable = computed(
+  () => pm2Available.value && pm2Apps.value.length > 0 && !pm2ManualMode.value,
+)
+
+const pm2ConflictProjects = computed(() => {
+  const name = formData.value.pm2AppName.trim()
+  if (!name) return []
+  return projectStore.projects.filter(
+    (p) => p.id !== projectId && (p.pm2AppName || '').trim() === name,
+  )
+})
+
+function onDocClickClosePm2(e: MouseEvent) {
+  if (!pm2PickerOpen.value) return
+  const target = e.target as HTMLElement | null
+  if (target && target.closest('[data-pm2-picker-root]')) return
+  closePm2Picker()
+}
+onMounted(() => {
+  document.addEventListener('click', onDocClickClosePm2)
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('click', onDocClickClosePm2)
+})
 
 function fmtBytes(n?: number | null): string {
   if (n == null || isNaN(n)) return '—'
@@ -538,6 +583,75 @@ async function confirmDelete() {
           </router-link>
         </div>
         <p class="text-xs sm:text-sm text-textMuted mt-1 font-mono break-all">{{ project.id }}</p>
+      </div>
+    </div>
+
+    <!-- PM2 Status Panel (top, only when project has pm2AppName bound) -->
+    <div
+      v-if="(project.pm2AppName || '').trim()"
+      class="bg-panel border border-border rounded-xl shadow-sm overflow-hidden"
+    >
+      <div class="px-4 py-3 border-b border-border bg-base/40 flex items-center justify-between">
+        <h3 class="text-sm font-semibold text-textMain flex items-center">
+          <Activity class="w-4 h-4 mr-2 text-primary" />
+          PM2 应用状态
+          <code class="font-mono text-textMain bg-base border border-border px-1.5 py-0.5 rounded ml-2 text-[11px]">{{ project.pm2AppName }}</code>
+          <span class="ml-2 text-[10px] text-textMuted">每 5 秒自动刷新</span>
+        </h3>
+        <button
+          @click="refreshPm2Status"
+          :disabled="pm2Loading"
+          class="text-textMuted hover:text-textMain text-xs flex items-center disabled:opacity-50"
+        >
+          <RefreshCw class="w-3 h-3 mr-1" :class="pm2Loading ? 'animate-spin' : ''" />
+          刷新
+        </button>
+      </div>
+      <div class="p-4">
+        <div v-if="!pm2Status" class="text-xs text-textMuted">
+          {{ pm2Loading ? '正在拉取…' : '尚未获取到状态' }}
+        </div>
+        <div v-else-if="!pm2Available" class="text-xs text-yellow-500 flex items-start gap-1.5">
+          <AlertTriangle class="w-3.5 h-3.5 mt-0.5 shrink-0" />
+          {{ pm2Status.message || '服务器未检测到 PM2，无法读取应用状态。' }}
+        </div>
+        <div v-else-if="pm2Status.found === false" class="text-xs text-yellow-500 flex items-start gap-1.5">
+          <AlertTriangle class="w-3.5 h-3.5 mt-0.5 shrink-0" />
+          未在 PM2 中找到名为 <code class="font-mono text-textMain mx-1">{{ project.pm2AppName }}</code> 的应用。请确认 <code class="font-mono text-textMain mx-1">pm2 list</code> 中存在该应用名。
+        </div>
+        <div v-else class="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
+          <div class="flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full" :class="pm2Status.status === 'online' ? 'bg-success' : 'bg-danger'"></span>
+            <span class="text-textMuted">状态</span>
+            <span class="text-textMain font-mono">{{ pm2Status.status || '—' }}</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <Cpu class="w-3.5 h-3.5 text-textMuted" />
+            <span class="text-textMuted">CPU</span>
+            <span class="text-textMain font-mono">{{ pm2Status.cpuPercent != null ? pm2Status.cpuPercent.toFixed(1) + '%' : '—' }}</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <MemoryStick class="w-3.5 h-3.5 text-textMuted" />
+            <span class="text-textMuted">内存</span>
+            <span class="text-textMain font-mono">{{ fmtBytes(pm2Status.memoryBytes) }}</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-textMuted">PID</span>
+            <span class="text-textMain font-mono">{{ pm2Status.pid ?? '—' }}</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-textMuted">实例</span>
+            <span class="text-textMain font-mono">{{ pm2Status.instances ?? 1 }} ({{ pm2Status.execMode || '—' }})</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-textMuted">运行时长</span>
+            <span class="text-textMain font-mono">{{ fmtUptimeMs(pm2Status.uptimeMs) }}</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-textMuted">重启次数</span>
+            <span class="text-textMain font-mono">{{ pm2Status.restarts ?? 0 }}<span v-if="pm2Status.unstableRestarts" class="text-danger ml-1">（不稳定 {{ pm2Status.unstableRestarts }}）</span></span>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -908,85 +1022,119 @@ async function confirmDelete() {
               <span v-if="pm2Available" class="ml-2 text-[10px] text-success border border-success/40 bg-success/10 px-1.5 py-0.5 rounded">PM2 已检测</span>
               <span v-else class="ml-2 text-[10px] text-textMuted border border-border bg-base px-1.5 py-0.5 rounded">PM2 未检测</span>
             </label>
-            <input
-              v-model="formData.pm2AppName"
-              type="text"
-              list="pm2-apps-suggest"
-              spellcheck="false"
-              class="w-full bg-base border border-border rounded-md px-4 py-3 text-textMain font-mono text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all"
-              placeholder="e.g. my-api / web-server"
-            />
-            <datalist id="pm2-apps-suggest">
-              <option v-for="name in pm2Apps" :key="name" :value="name" />
-            </datalist>
-            <p class="text-xs text-textMuted mt-2">
-              绑定后，可在下方实时查看该 PM2 应用的资源占用与运行状态。需要服务器上安装 PM2，且当前 Kite 进程可执行 <code class="font-mono">pm2 jlist</code>。
-            </p>
-          </div>
 
-          <!-- PM2 Status Panel -->
-          <div v-if="formData.pm2AppName.trim()" class="border border-border rounded-lg overflow-hidden">
-            <div class="px-4 py-3 border-b border-border bg-base/40 flex items-center justify-between">
-              <h3 class="text-sm font-semibold text-textMain flex items-center">
-                <Activity class="w-4 h-4 mr-2 text-primary" />
-                PM2 应用状态
-                <span class="ml-2 text-[10px] text-textMuted">每 5 秒自动刷新</span>
-              </h3>
+            <!-- Mode A: dropdown picker (PM2 available + apps non-empty + not manual) -->
+            <div
+              v-if="pm2DropdownAvailable"
+              class="relative"
+              data-pm2-picker-root
+            >
               <button
-                @click="refreshPm2Status"
-                :disabled="pm2Loading"
-                class="text-textMuted hover:text-textMain text-xs flex items-center disabled:opacity-50"
+                type="button"
+                @click.stop="togglePm2Picker"
+                class="w-full flex items-center justify-between bg-base border border-border rounded-md px-4 py-3 text-textMain font-mono text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all"
               >
-                <RefreshCw class="w-3 h-3 mr-1" :class="pm2Loading ? 'animate-spin' : ''" />
-                刷新
+                <span :class="formData.pm2AppName.trim() ? 'text-textMain' : 'text-textMuted font-sans'">
+                  {{ formData.pm2AppName.trim() || '从 pm2 list 选择应用…' }}
+                </span>
+                <ChevronDown class="w-4 h-4 text-textMuted shrink-0" :class="pm2PickerOpen ? 'rotate-180' : ''" />
+              </button>
+              <div
+                v-if="pm2PickerOpen"
+                class="absolute z-30 mt-1 w-full max-h-72 overflow-y-auto bg-panel border border-border rounded-md shadow-lg"
+              >
+                <button
+                  v-if="formData.pm2AppName.trim()"
+                  type="button"
+                  @click.stop="pickPm2App('')"
+                  class="flex items-center w-full px-3 py-2 text-sm text-textMuted hover:bg-white/5 transition-colors border-b border-border"
+                >
+                  <XCircle class="w-3.5 h-3.5 mr-2" />
+                  解除绑定
+                </button>
+                <button
+                  v-for="app in pm2Apps"
+                  :key="app.pmId + ':' + app.name"
+                  type="button"
+                  @click.stop="pickPm2App(app.name)"
+                  class="flex items-center justify-between w-full px-3 py-2 text-sm text-textMain hover:bg-white/5 transition-colors"
+                >
+                  <span class="flex items-center min-w-0">
+                    <Check
+                      v-if="formData.pm2AppName.trim() === app.name"
+                      class="w-3.5 h-3.5 mr-2 text-primary shrink-0"
+                    />
+                    <span v-else class="w-3.5 h-3.5 mr-2 shrink-0"></span>
+                    <span class="font-mono truncate">{{ app.name }}</span>
+                  </span>
+                  <span class="flex items-center gap-2 shrink-0 ml-3">
+                    <span class="text-[10px] text-textMuted font-mono">#{{ app.pmId }}</span>
+                    <span
+                      class="text-[10px] px-1.5 py-0.5 rounded border"
+                      :class="app.status === 'online'
+                        ? 'text-success border-success/40 bg-success/10'
+                        : 'text-textMuted border-border bg-base'"
+                    >
+                      {{ app.status }}
+                    </span>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  @click.stop="enterPm2ManualMode"
+                  class="flex items-center w-full px-3 py-2 text-sm text-textMuted hover:bg-white/5 transition-colors border-t border-border"
+                >
+                  <Pencil class="w-3.5 h-3.5 mr-2" />
+                  手动输入…
+                </button>
+              </div>
+            </div>
+
+            <!-- Mode B: manual input (PM2 unavailable / apps empty / user opted in) -->
+            <div v-else>
+              <input
+                v-model="formData.pm2AppName"
+                type="text"
+                list="pm2-apps-suggest"
+                spellcheck="false"
+                class="w-full bg-base border border-border rounded-md px-4 py-3 text-textMain font-mono text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all"
+                placeholder="e.g. my-api / web-server"
+              />
+              <datalist id="pm2-apps-suggest">
+                <option v-for="app in pm2Apps" :key="app.pmId + ':' + app.name" :value="app.name" />
+              </datalist>
+              <button
+                v-if="pm2Available && pm2Apps.length > 0"
+                type="button"
+                @click="pm2ManualMode = false"
+                class="mt-2 text-xs text-primary hover:text-textMain inline-flex items-center"
+              >
+                <ChevronDown class="w-3.5 h-3.5 mr-1" />
+                改用下拉选择
               </button>
             </div>
-            <div class="p-4">
-              <div v-if="!pm2Status" class="text-xs text-textMuted">
-                {{ pm2Loading ? '正在拉取…' : '尚未获取到状态' }}
-              </div>
-              <div v-else-if="!pm2Available" class="text-xs text-yellow-500 flex items-start gap-1.5">
-                <AlertTriangle class="w-3.5 h-3.5 mt-0.5 shrink-0" />
-                {{ pm2Status.message || '服务器未检测到 PM2，无法读取应用状态。' }}
-              </div>
-              <div v-else-if="pm2Status.found === false" class="text-xs text-yellow-500 flex items-start gap-1.5">
-                <AlertTriangle class="w-3.5 h-3.5 mt-0.5 shrink-0" />
-                未在 PM2 中找到名为 <code class="font-mono text-textMain mx-1">{{ formData.pm2AppName.trim() }}</code> 的应用。请确认 <code class="font-mono text-textMain mx-1">pm2 list</code> 中存在该应用名。
-              </div>
-              <div v-else class="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
-                <div class="flex items-center gap-2">
-                  <span class="w-2 h-2 rounded-full" :class="pm2Status.status === 'online' ? 'bg-success' : 'bg-danger'"></span>
-                  <span class="text-textMuted">状态</span>
-                  <span class="text-textMain font-mono">{{ pm2Status.status || '—' }}</span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <Cpu class="w-3.5 h-3.5 text-textMuted" />
-                  <span class="text-textMuted">CPU</span>
-                  <span class="text-textMain font-mono">{{ pm2Status.cpuPercent != null ? pm2Status.cpuPercent.toFixed(1) + '%' : '—' }}</span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <MemoryStick class="w-3.5 h-3.5 text-textMuted" />
-                  <span class="text-textMuted">内存</span>
-                  <span class="text-textMain font-mono">{{ fmtBytes(pm2Status.memoryBytes) }}</span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <span class="text-textMuted">PID</span>
-                  <span class="text-textMain font-mono">{{ pm2Status.pid ?? '—' }}</span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <span class="text-textMuted">实例</span>
-                  <span class="text-textMain font-mono">{{ pm2Status.instances ?? 1 }} ({{ pm2Status.execMode || '—' }})</span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <span class="text-textMuted">运行时长</span>
-                  <span class="text-textMain font-mono">{{ fmtUptimeMs(pm2Status.uptimeMs) }}</span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <span class="text-textMuted">重启次数</span>
-                  <span class="text-textMain font-mono">{{ pm2Status.restarts ?? 0 }}<span v-if="pm2Status.unstableRestarts" class="text-danger ml-1">（不稳定 {{ pm2Status.unstableRestarts }}）</span></span>
-                </div>
+
+            <!-- Conflict (non-blocking warning) -->
+            <div
+              v-if="pm2ConflictProjects.length > 0"
+              class="mt-2 flex items-start gap-2 text-xs text-yellow-500 border border-yellow-500/30 bg-yellow-500/5 rounded-md px-3 py-2"
+            >
+              <AlertTriangle class="w-3.5 h-3.5 mt-0.5 shrink-0" />
+              <div class="leading-relaxed">
+                该 PM2 应用名已被
+                <template v-for="(p, idx) in pm2ConflictProjects" :key="p.id">
+                  <router-link
+                    :to="`/projects/${p.id}`"
+                    class="font-medium text-yellow-500 hover:text-yellow-400 underline underline-offset-2 mx-0.5"
+                  >「{{ p.name }}」</router-link><span v-if="idx < pm2ConflictProjects.length - 1">、</span>
+                </template>
+                绑定。继续保存不会被阻止，但状态与日志会同时归属于多个项目，请确认无误后再绑定。
               </div>
             </div>
+
+            <p class="text-xs text-textMuted mt-2">
+              绑定后，可在页面顶部实时查看该 PM2 应用的资源占用与运行状态。需要服务器上安装 PM2，且当前 Kite 进程可执行 <code class="font-mono">pm2 jlist</code>。
+            </p>
           </div>
 
           <div>

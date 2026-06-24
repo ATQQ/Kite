@@ -3,7 +3,7 @@ import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useProjectStore } from '../store/project'
 import type { Category, Tag as TagType } from '../store/project'
-import { Plus, MoreVertical, Server, Clock, ScrollText, FolderPlus, Trash2, RefreshCw, XCircle, AlertTriangle, Pencil, FolderOpen, LayoutGrid, List as ListIcon, Tag, FolderTree, ChevronRight, Tags as TagsIcon, X as XIcon } from 'lucide-vue-next'
+import { Plus, MoreVertical, Server, Clock, ScrollText, FolderPlus, Trash2, RefreshCw, XCircle, AlertTriangle, Pencil, FolderOpen, LayoutGrid, List as ListIcon, Tag, FolderTree, ChevronRight, Tags as TagsIcon, X as XIcon, Activity } from 'lucide-vue-next'
 import { useToast } from '../composables/useToast'
 import FolderPickerDialog from '../components/FolderPickerDialog.vue'
 import ProjectTagsEditor from '../components/ProjectTagsEditor.vue'
@@ -179,6 +179,10 @@ const goToDetail = (id: string) => {
 
 const goToLogs = (id: string) => {
   router.push({ path: '/logs', query: { projectId: id } })
+}
+
+const goToRunLogs = (id: string) => {
+  router.push(`/projects/${id}/logs`)
 }
 
 const goToFiles = (id: string) => {
@@ -936,7 +940,15 @@ async function deleteTagAction(t: TagType) {
               title="查看部署日志"
             >
               <ScrollText class="w-3.5 h-3.5 mr-1" />
-              <span>日志</span>
+              <span>部署日志</span>
+            </button>
+            <button
+              @click.stop="goToRunLogs(project.id)"
+              class="flex items-center text-textMuted hover:text-primary transition-colors"
+              title="查看运行日志"
+            >
+              <Activity class="w-3.5 h-3.5 mr-1" />
+              <span>运行日志</span>
             </button>
             <span class="flex items-center" :class="project.status === 'success' ? 'text-success' : project.status === 'failed' ? 'text-danger' : 'text-primary'">
               <span class="w-2 h-2 rounded-full mr-1.5" :class="project.status === 'success' ? 'bg-success shadow-[0_0_8px_#10b981]' : project.status === 'failed' ? 'bg-danger' : 'bg-primary'"></span>
@@ -1052,6 +1064,13 @@ async function deleteTagAction(t: TagType) {
           >
             <ScrollText class="w-3.5 h-3.5 mr-2 text-textMuted" />
             部署日志
+          </button>
+          <button
+            class="flex items-center w-full px-3 py-2 text-sm text-textMain hover:bg-white/5 transition-colors"
+            @click="(() => { const id = openDropdownId; closeDropdown(); if (id) goToRunLogs(id) })()"
+          >
+            <Activity class="w-3.5 h-3.5 mr-2 text-textMuted" />
+            运行日志
           </button>
           <div class="border-t border-border my-1"></div>
           <div class="relative">
