@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, Plus, RefreshCw, Trash2, FileText, Play, Pause, ChevronDown, ChevronUp, Search, X, AlertTriangle, Loader2, Activity, History as HistoryIcon, Pencil } from 'lucide-vue-next'
-import { useProjectStore } from '../store/project'
+import { ArrowLeft, Plus, RefreshCw, Trash2, FileText, Play, Pause, ChevronDown, ChevronUp, Search, X, AlertTriangle, Loader2, Activity, History as HistoryIcon, Pencil, Zap } from 'lucide-vue-next'
+import { useProjectStore, type Pm2AppStatus } from '../store/project'
 import { useToast } from '../composables/useToast'
 import FolderPickerDialog from '../components/FolderPickerDialog.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
@@ -34,6 +34,28 @@ const sources = ref<LogSource[]>([])
 const loadingSources = ref(false)
 const activeSourceId = ref<string>('')
 const activeSource = computed(() => sources.value.find((s) => s.id === activeSourceId.value) || null)
+
+const pm2Status = ref<Pm2AppStatus | null>(null)
+const pm2Loading = ref(false)
+const pm2Importing = ref(false)
+const pm2AppName = computed(() => (project.value as any)?.pm2AppName?.trim() || '')
+
+const pm2LogPaths = computed<Array<{ path: string; kind: 'stdout' | 'stderr' }>>(() => {
+  const s = pm2Status.value
+  if (!s || s.found === false) return []
+  const list: Array<{ path: string; kind: 'stdout' | 'stderr' }> = []
+  if (s.outLogPath) list.push({ path: s.outLogPath, kind: 'stdout' })
+  if (s.errorLogPath) list.push({ path: s.errorLogPath, kind: 'stderr' })
+  return list
+})
+
+const pm2MissingPaths = computed(() => {
+  if (pm2LogPaths.value.length === 0) return []
+  const have = new Set(sources.value.map((s) => s.filePath))
+  return pm2LogPaths.value.filter((p) => !have.has(p.path))
+})
+
+const canImportFromPm2 = computed(() => pm2AppName.value && pm2Status.value?.found === true && pm2LogPaths.value.length > 0)
 
 const pickerOpen = ref(false)
 const confirmDeleteOpen = ref(false)
@@ -85,6 +107,50 @@ async function loadSources() {
     toast.error(e?.message || '加载日志源失败')
   } finally {
     loadingSources.value = false
+  }
+}
+
+async function loadPm2Status() {
+  if (!pm2AppName.value) {
+    pm2Status.value = null
+    return
+  }
+  pm2Loading.value = true
+  try {
+    pm2Status.value = await store.fetchProjectPm2(projectId.value)
+  } catch {
+    pm2Status.value = null
+  } finally {
+    pm2Loading.value = false
+  }
+}
+
+async function importPm2Sources() {
+  if (pm2Importing.value) return
+  const missing = pm2MissingPaths.value
+  if (missing.length === 0) {
+    toast.success('PM2 日志文件已全部导入')
+    return
+  }
+  const name = pm2AppName.value || 'pm2'
+  const items = missing.map((m) => ({
+    filePath: m.path,
+    label: `${name} · ${m.kind}`,
+    kind: 'pm2',
+  }))
+  pm2Importing.value = true
+  try {
+    const data = await store.createLogSources(projectId.value, items)
+    const created = Array.isArray(data?.created) ? data.created : []
+    const errs = Array.isArray(data?.errors) ? data.errors : []
+    if (created.length > 0) toast.success(`已从 PM2 导入 ${created.length} 个日志源`)
+    if (errs.length > 0) toast.error(`${errs.length} 个未能导入`, errs.map((e: any) => e?.error).filter(Boolean).join('; ') || '请检查 PM2 日志路径是否可读')
+    await loadSources()
+    if (created.length > 0) pickSource(created[0].id)
+  } catch (e: any) {
+    toast.error(e?.message || '导入 PM2 日志失败')
+  } finally {
+    pm2Importing.value = false
   }
 }
 
@@ -347,6 +413,12 @@ onMounted(async () => {
     try { await store.fetchProjects() } catch { /* ignore */ }
   }
   await loadSources()
+  await loadPm2Status()
+})
+
+// 项目数据/PM2 绑定可能在挂载后异步到达：变化时重新拉取
+watch(pm2AppName, () => {
+  loadPm2Status()
 })
 
 onUnmounted(() => {
@@ -375,6 +447,23 @@ onUnmounted(() => {
           <RefreshCw class="w-3.5 h-3.5 mr-1.5" :class="{ 'animate-spin': loadingSources }" />
           刷新
         </button>
+        <button
+          v-if="canImportFromPm2"
+          @click="importPm2Sources"
+          :disabled="pm2Importing || pm2MissingPaths.length === 0"
+          class="inline-flex items-center px-3 py-1.5 text-xs font-medium bg-base border border-yellow-400/40 text-yellow-400 hover:bg-yellow-400/10 disabled:opacity-50 disabled:hover:bg-base rounded-md transition-all"
+          :title="pm2MissingPaths.length === 0 ? `PM2 应用 ${pm2AppName} 的日志文件已全部导入` : `从 pm2 jlist 自动识别 ${pm2AppName} 的 stdout / stderr 文件路径并添加为日志源`"
+        >
+          <Zap class="w-3.5 h-3.5 mr-1.5" :class="{ 'animate-pulse': pm2Importing }" />
+          {{ pm2MissingPaths.length === 0
+              ? `PM2 日志已导入`
+              : `从 PM2 导入 (${pm2MissingPaths.length})` }}
+        </button>
+        <span
+          v-else-if="pm2AppName && pm2Status && pm2Status.found === false"
+          class="text-[11px] text-textMuted/70 italic"
+          :title="pm2Status.message || '未在 PM2 中找到此应用'"
+        >PM2 应用未找到</span>
         <button
           @click="pickerOpen = true"
           class="inline-flex items-center px-3 py-1.5 text-xs font-medium bg-primary text-white hover:bg-primary/90 rounded-md transition-all"

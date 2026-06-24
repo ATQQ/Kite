@@ -903,30 +903,6 @@ async function confirmDelete() {
           </div>
 
           <div>
-            <label class="block text-sm font-medium text-textMain mb-2">所属分类</label>
-            <select
-              v-model="formData.categoryId"
-              class="w-full bg-base border border-border rounded-md px-4 py-3 text-textMain text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all"
-            >
-              <option value="">默认（未分类）</option>
-              <option v-for="c in projectStore.categories" :key="c.id" :value="c.id">{{ c.name }}</option>
-            </select>
-            <p class="text-xs text-textMuted mt-2">用于在项目列表中按分类筛选。在「项目管理 → 管理分类」中创建更多分类。</p>
-          </div>
-
-          <div>
-            <label class="block text-sm font-medium text-textMain mb-2">标签（可多选）</label>
-            <ProjectTagsEditor
-              :model-value="formData.tagIds"
-              size="md"
-              read-only-save
-              aria-label="编辑当前项目的标签"
-              @update:model-value="(v) => formData.tagIds = v"
-            />
-            <p class="text-xs text-textMuted mt-2">点击「+ 标签」选择或直接新建；颜色和排序请在「项目管理 → 管理标签」里调整。修改后需点击下方「保存配置」生效。</p>
-          </div>
-
-          <div>
             <label class="block text-sm font-medium text-textMain mb-2 flex items-center">
               PM2 应用名（可选）
               <span v-if="pm2Available" class="ml-2 text-[10px] text-success border border-success/40 bg-success/10 px-1.5 py-0.5 rounded">PM2 已检测</span>
@@ -1011,6 +987,30 @@ async function confirmDelete() {
                 </div>
               </div>
             </div>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-textMain mb-2">所属分类</label>
+            <select
+              v-model="formData.categoryId"
+              class="w-full bg-base border border-border rounded-md px-4 py-3 text-textMain text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all"
+            >
+              <option value="">默认（未分类）</option>
+              <option v-for="c in projectStore.categories" :key="c.id" :value="c.id">{{ c.name }}</option>
+            </select>
+            <p class="text-xs text-textMuted mt-2">用于在项目列表中按分类筛选。在「项目管理 → 管理分类」中创建更多分类。</p>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-textMain mb-2">标签（可多选）</label>
+            <ProjectTagsEditor
+              :model-value="formData.tagIds"
+              size="md"
+              read-only-save
+              aria-label="编辑当前项目的标签"
+              @update:model-value="(v) => formData.tagIds = v"
+            />
+            <p class="text-xs text-textMuted mt-2">点击「+ 标签」选择或直接新建；颜色和排序请在「项目管理 → 管理标签」里调整。修改后需点击下方「保存配置」生效。</p>
           </div>
 
           <div>
