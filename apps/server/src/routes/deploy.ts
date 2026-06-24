@@ -113,9 +113,24 @@ export const deployRoutes = new Elysia()
   }, {
     body: t.Object({ token: t.String() })
   })
-  .get('/api/projects', async ({ headers, set }) => {
+  .get('/api/projects', async ({ headers, query, set }) => {
     if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
-    return await db.projects.findAllWithMeta();
+    const items = await db.projects.findAllWithMeta();
+    // Attach tagIds[] per project (single bulk fetch)
+    const pairs = await db.projectTags.listAllPairs();
+    const tagMap = new Map<string, string[]>();
+    for (const p of pairs) {
+      if (!tagMap.has(p.projectId)) tagMap.set(p.projectId, []);
+      tagMap.get(p.projectId)!.push(p.tagId);
+    }
+    const withTags = items.map(p => ({ ...p, tagIds: tagMap.get(p.id) ?? [] }));
+    // ?tagIds=a,b,c → AND filter (project must have all)
+    const tagIdsParam = typeof query.tagIds === 'string' ? query.tagIds.trim() : '';
+    if (!tagIdsParam) return withTags;
+    const wantedIds = tagIdsParam.split(',').map(s => s.trim()).filter(Boolean);
+    if (wantedIds.length === 0) return withTags;
+    const matchIds = new Set(await db.projectTags.projectIdsHavingAll(wantedIds));
+    return withTags.filter(p => matchIds.has(p.id));
   })
   .post('/api/projects', async ({ headers, body, set }) => {
     if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
@@ -133,22 +148,39 @@ export const deployRoutes = new Elysia()
       if (!cat) { set.status = 400; return { error: '分类不存在' }; }
       categoryId = cat.id;
     }
+    const pm2AppName = typeof body.pm2AppName === 'string' && body.pm2AppName.trim() !== ''
+      ? body.pm2AppName.trim()
+      : null;
+    // Validate tagIds if provided
+    const tagIds: string[] = [];
+    if (Array.isArray(body.tagIds)) {
+      for (const tid of body.tagIds) {
+        if (typeof tid !== 'string' || !tid) continue;
+        const tag = await db.tags.findById(tid);
+        if (tag) tagIds.push(tag.id);
+      }
+    }
+    const { tagIds: _omitTagIds, ...rest } = body as Record<string, any>;
     const project = await db.projects.create({
-      ...body,
+      ...rest,
       categoryId,
+      pm2AppName,
       id: 'proj_' + randomUUID().replace(/-/g, '').substring(0, 12),
       token: 'kt_' + randomUUID().replace(/-/g, ''),
     });
+    if (tagIds.length > 0) {
+      await db.projectTags.setForProject(project.id, tagIds);
+    }
     await writeAudit({ headers }, {
       action: 'project.create',
       targetType: 'project',
       targetId: project.id,
       targetName: project.name,
       before: null,
-      after: sanitize(project),
+      after: { ...(sanitize(project) as any), tagIds },
       summary: `创建项目 ${project.name}`,
     });
-    return { success: true, project };
+    return { success: true, project: { ...project, tagIds } };
   }, {
     body: t.Object({
       name: t.String(),
@@ -156,13 +188,16 @@ export const deployRoutes = new Elysia()
       deployPath: t.String(),
       env: t.Optional(t.String()),
       categoryId: t.Optional(t.Union([t.String(), t.Null()])),
+      pm2AppName: t.Optional(t.Union([t.String(), t.Null()])),
+      tagIds: t.Optional(t.Array(t.String())),
     })
   })
   .get('/api/projects/:id', async ({ headers, params, set }) => {
     if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
     const project = await db.projects.findById(params.id);
     if (!project) { set.status = 404; return { error: 'Project not found' }; }
-    return project;
+    const tagIds = await db.projectTags.listByProject(params.id);
+    return { ...project, tagIds };
   })
   .put('/api/projects/:id', async ({ headers, params, body, set }) => {
     if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
@@ -224,9 +259,49 @@ export const deployRoutes = new Elysia()
         return { error: 'categoryId must be string or null' };
       }
     }
+    if (typeof patch.pm2AppName !== 'undefined') {
+      if (patch.pm2AppName === null) {
+        // ok
+      } else if (typeof patch.pm2AppName === 'string') {
+        const v = patch.pm2AppName.trim();
+        patch.pm2AppName = v === '' ? null : v;
+      } else {
+        set.status = 400;
+        return { error: 'pm2AppName must be string or null' };
+      }
+    }
+    // tagIds handled outside main patch (separate table)
+    let nextTagIds: string[] | undefined;
+    if (typeof patch.tagIds !== 'undefined') {
+      if (!Array.isArray(patch.tagIds)) {
+        set.status = 400;
+        return { error: 'tagIds must be string[]' };
+      }
+      const validated: string[] = [];
+      for (const tid of patch.tagIds) {
+        if (typeof tid !== 'string' || !tid) continue;
+        const tag = await db.tags.findById(tid);
+        if (tag) validated.push(tag.id);
+      }
+      nextTagIds = validated;
+      delete patch.tagIds;
+    }
     const after = await db.projects.update(params.id, patch);
     if (!after) { set.status = 404; return { error: 'Project not found' }; }
+    const beforeTagIds = await db.projectTags.listByProject(params.id);
+    if (nextTagIds !== undefined) {
+      await db.projectTags.setForProject(params.id, nextTagIds);
+    }
     const diff = diffFields(before as any, after as any, Object.keys(patch));
+    // tagIds diff (only when explicit set in body)
+    if (nextTagIds !== undefined) {
+      const sortedBefore = [...beforeTagIds].sort();
+      const sortedAfter = [...nextTagIds].sort();
+      if (sortedBefore.join(',') !== sortedAfter.join(',')) {
+        diff.before.tagIds = sortedBefore;
+        diff.after.tagIds = sortedAfter;
+      }
+    }
     if (Object.keys(diff.after).length > 0) {
       await writeAudit({ headers }, {
         action: 'project.update',
@@ -238,7 +313,8 @@ export const deployRoutes = new Elysia()
         summary: `更新项目配置：${Object.keys(diff.after).join(', ')}`,
       });
     }
-    return { success: true, project: after };
+    const respTagIds = nextTagIds !== undefined ? nextTagIds : beforeTagIds;
+    return { success: true, project: { ...after, tagIds: respTagIds } };
   }, {
     body: t.Object({
       name: t.Optional(t.String()),
@@ -251,6 +327,8 @@ export const deployRoutes = new Elysia()
       cleanMode: t.Optional(t.Union([t.Literal('merge'), t.Literal('clean'), t.Literal('clean-all'), t.Null()])),
       protectPaths: t.Optional(t.Union([t.Array(t.String()), t.Null()])),
       categoryId: t.Optional(t.Union([t.String(), t.Null()])),
+      pm2AppName: t.Optional(t.Union([t.String(), t.Null()])),
+      tagIds: t.Optional(t.Array(t.String())),
     })
   })
   .delete('/api/projects/:id', async ({ headers, params, set }) => {

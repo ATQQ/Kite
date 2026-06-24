@@ -17,6 +17,8 @@ export interface Project {
   cleanMode?: 'merge' | 'clean' | 'clean-all' | null
   protectPaths?: string | null
   categoryId?: string | null
+  pm2AppName?: string | null
+  tagIds?: string[]
   lastDeployAt?: string | null
   status: 'running' | 'success' | 'failed' | 'idle'
   updatedAt: string
@@ -29,6 +31,61 @@ export interface Category {
   sortOrder?: number
   createdAt: string
   updatedAt: string
+}
+
+export interface Tag {
+  id: string
+  name: string
+  color?: string | null
+  sortOrder?: number
+  projectCount?: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface SystemResources {
+  collectedAt: string
+  host: {
+    hostname: string
+    platform: string
+    arch: string
+    cpuModel: string | null
+    cpuCount: number
+    loadAvg: number[]
+    uptimeSec: number
+  }
+  cpu: { percent: number | null }
+  memory: { totalBytes: number; freeBytes: number; availableBytes: number; usedBytes: number; percentUsed: number }
+  disk: { freeBytes: number | null; totalBytes: number | null; percentUsed: number | null }
+  process: {
+    pid: number
+    runtime: 'bun' | 'node'
+    runtimeVersion: string
+    uptimeSec: number
+    cpuPercent: number | null
+    memoryRssBytes: number
+    memoryHeapUsedBytes: number
+  }
+}
+
+export interface Pm2AppStatus {
+  bound: boolean
+  found?: boolean
+  name?: string
+  pmId?: number
+  pid?: number
+  status?: string
+  uptimeMs?: number
+  restarts?: number
+  unstableRestarts?: number
+  cpuPercent?: number
+  memoryBytes?: number
+  execMode?: string
+  instances?: number
+  errorLogPath?: string
+  outLogPath?: string
+  createdAt?: number
+  message?: string
 }
 
 export interface DeploymentLog {
@@ -74,6 +131,8 @@ export const useProjectStore = defineStore('project', () => {
   const projects = ref<Project[]>([])
   const logs = ref<DeploymentLog[]>([])
   const categories = ref<Category[]>([])
+  const tags = ref<Tag[]>([])
+  const systemResources = ref<SystemResources | null>(null)
 
   // Helper fetch function
   async function apiFetch(endpoint: string, options: RequestInit & { silent401?: boolean } = {}) {
@@ -105,9 +164,12 @@ export const useProjectStore = defineStore('project', () => {
     return data
   }
 
-  async function fetchProjects() {
+  async function fetchProjects(filter?: { tagIds?: string[] }) {
     try {
-      const data = await apiFetch('/projects')
+      const qs = filter?.tagIds && filter.tagIds.length > 0
+        ? `?tagIds=${encodeURIComponent(filter.tagIds.join(','))}`
+        : ''
+      const data = await apiFetch('/projects' + qs)
       projects.value = data.map((p: any) => ({
         ...p,
         destPath: p.deployPath,
@@ -117,6 +179,8 @@ export const useProjectStore = defineStore('project', () => {
         cleanMode: p.cleanMode ?? null,
         protectPaths: p.protectPaths ?? null,
         categoryId: p.categoryId ?? null,
+        pm2AppName: p.pm2AppName ?? null,
+        tagIds: Array.isArray(p.tagIds) ? p.tagIds : [],
         lastDeployAt: p.lastDeployAt ?? null,
       }))
     } catch (e) {
@@ -183,6 +247,8 @@ export const useProjectStore = defineStore('project', () => {
       if (payload.protectPaths !== undefined) apiPayload.protectPaths = payload.protectPaths
       if (payload.categoryId !== undefined) apiPayload.categoryId = payload.categoryId
       if (payload.env !== undefined) apiPayload.env = payload.env
+      if (payload.pm2AppName !== undefined) apiPayload.pm2AppName = payload.pm2AppName
+      if (payload.tagIds !== undefined) apiPayload.tagIds = payload.tagIds
 
       const data = await apiFetch(`/projects/${id}`, {
         method: 'PUT',
@@ -494,6 +560,8 @@ export const useProjectStore = defineStore('project', () => {
     projects.value = []
     logs.value = []
     categories.value = []
+    tags.value = []
+    systemResources.value = null
   }
 
   async function fetchCategories() {
@@ -551,11 +619,106 @@ export const useProjectStore = defineStore('project', () => {
     }
   }
 
+  async function fetchTags() {
+    try {
+      const data = await apiFetch('/tags')
+      tags.value = Array.isArray(data) ? data : []
+    } catch (e) {
+      console.error('Failed to fetch tags', e)
+    }
+  }
+
+  async function createTag(payload: { name: string; color?: string | null; sortOrder?: number }): Promise<{ ok: boolean; error?: string; conflictTag?: string; tag?: Tag }> {
+    try {
+      const data = await apiFetch('/tags', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      })
+      if (data.success) {
+        await fetchTags()
+        return { ok: true, tag: data.tag }
+      }
+      return { ok: false, error: data.error }
+    } catch (e: any) {
+      return { ok: false, error: e?.message, conflictTag: e?.data?.conflictTag }
+    }
+  }
+
+  async function updateTag(id: string, payload: { name?: string; color?: string | null; sortOrder?: number }): Promise<{ ok: boolean; error?: string; conflictTag?: string; tag?: Tag }> {
+    try {
+      const data = await apiFetch(`/tags/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      })
+      if (data.success) {
+        await fetchTags()
+        return { ok: true, tag: data.tag }
+      }
+      return { ok: false, error: data.error }
+    } catch (e: any) {
+      return { ok: false, error: e?.message, conflictTag: e?.data?.conflictTag }
+    }
+  }
+
+  async function deleteTag(id: string): Promise<{ ok: boolean; detachedProjects?: number; error?: string }> {
+    try {
+      const data = await apiFetch(`/tags/${id}`, { method: 'DELETE' })
+      if (data.success) {
+        await fetchTags()
+        await fetchProjects()
+        return { ok: true, detachedProjects: data.detachedProjects }
+      }
+      return { ok: false, error: data.error }
+    } catch (e: any) {
+      return { ok: false, error: e?.message }
+    }
+  }
+
+  async function fetchSystemResources(): Promise<SystemResources | null> {
+    try {
+      const data = await apiFetch('/system/resources')
+      systemResources.value = data
+      return data
+    } catch (e) {
+      console.error('Failed to fetch system resources', e)
+      return null
+    }
+  }
+
+  async function fetchProjectPm2(projectId: string): Promise<Pm2AppStatus | null> {
+    try {
+      return await apiFetch(`/projects/${projectId}/pm2`)
+    } catch (e) {
+      console.error('Failed to fetch project pm2', e)
+      return null
+    }
+  }
+
+  async function fetchPm2Available(): Promise<boolean> {
+    try {
+      const data = await apiFetch('/pm2/available')
+      return !!data?.available
+    } catch {
+      return false
+    }
+  }
+
+  async function fetchPm2Apps(): Promise<Array<{ name: string; pmId: number; status: string }>> {
+    try {
+      const data = await apiFetch('/pm2/apps')
+      return Array.isArray(data?.apps) ? data.apps : []
+    } catch {
+      return []
+    }
+  }
+
   return {
     adminToken,
     projects,
     logs,
     categories,
+    tags,
+    systemResources,
     fetchProjects,
     fetchLogs,
     getProjectById,
@@ -588,6 +751,14 @@ export const useProjectStore = defineStore('project', () => {
     createCategory,
     updateCategory,
     deleteCategory,
+    fetchTags,
+    createTag,
+    updateTag,
+    deleteTag,
+    fetchSystemResources,
+    fetchProjectPm2,
+    fetchPm2Available,
+    fetchPm2Apps,
     fetchLogSources,
     createLogSources,
     updateLogSource,

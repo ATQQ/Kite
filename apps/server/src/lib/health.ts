@@ -66,7 +66,7 @@ async function checkKiteHomeWritable(): Promise<{ path: string; writable: boolea
   return { path: homeRelative(home), writable, tmpWritable };
 }
 
-function runCmd(cmd: string, args: string[], timeoutMs = 3000): Promise<{ stdout: string; code: number }> {
+export function runCmd(cmd: string, args: string[], timeoutMs = 3000): Promise<{ stdout: string; code: number }> {
   return new Promise((resolve) => {
     const proc = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';

@@ -9,6 +9,9 @@ import { statsRoutes } from "./routes/stats.js";
 import { fsRoutes } from "./routes/fs.js";
 import { categoryRoutes } from "./routes/categories.js";
 import { logSourceRoutes } from "./routes/log-sources.js";
+import { systemRoutes } from "./routes/system.js";
+import { pm2Routes } from "./routes/pm2.js";
+import { tagRoutes } from "./routes/tags.js";
 import { staticPlugin } from "./static.js";
 import { ensureDbReady } from "./db/index.js";
 import { moduleLogger, pickTraceId, rootLogger } from "./lib/logger.js";
@@ -64,6 +67,9 @@ const app = new Elysia({ adapter })
   .use(fsRoutes)
   .use(categoryRoutes)
   .use(logSourceRoutes)
+  .use(systemRoutes)
+  .use(pm2Routes)
+  .use(tagRoutes)
   .use(staticPlugin);
 
 if (isBun) {
