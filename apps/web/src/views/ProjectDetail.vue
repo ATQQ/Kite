@@ -73,12 +73,16 @@ function toggleCliHelp() {
   } catch {}
 }
 
+const isInitialLoading = ref(true)
+
 onMounted(async () => {
   serverUrl.value = window.location.origin
-  await projectStore.fetchProjects()
-  await projectStore.fetchCategories()
-  await projectStore.fetchTags()
-  await loadPm2Available()
+  await Promise.all([
+    projectStore.fetchProjects(),
+    projectStore.fetchCategories(),
+    projectStore.fetchTags(),
+    loadPm2Available(),
+  ])
   if (project.value) {
     formData.value.destPath = project.value.destPath || ''
     formData.value.preDeploy = project.value.preDeploy || ''
@@ -101,11 +105,12 @@ onMounted(async () => {
     } else {
       cleanForm.value.protectPaths = []
     }
+    isInitialLoading.value = false
+    Promise.all([loadDeployments(), refreshPm2Status()]).catch(() => {})
   } else {
+    isInitialLoading.value = false
     router.replace('/projects')
   }
-  await loadDeployments()
-  await refreshPm2Status()
 })
 
 const deployments = ref<DeploymentLog[]>([])
@@ -223,7 +228,7 @@ function formatStart(s: string) {
 
 const saveConfig = async () => {
   try {
-    await projectStore.updateProject(projectId, {
+    const payload = {
       destPath: formData.value.destPath,
       preDeploy: formData.value.preDeploy,
       postDeploy: formData.value.postDeploy,
@@ -232,7 +237,9 @@ const saveConfig = async () => {
       env: cliEnv.value.trim(),
       pm2AppName: formData.value.pm2AppName.trim() || null,
       tagIds: [...formData.value.tagIds],
-    })
+    }
+    applyOptimisticPatch(payload)
+    await projectStore.updateProject(projectId, payload)
     toast.success('配置已保存')
     await refreshPm2Status()
   } catch (e: any) {
@@ -245,13 +252,44 @@ const saveConfig = async () => {
   }
 }
 
+function applyOptimisticPatch(payload: Record<string, any>) {
+  const p: any = project.value
+  if (!p) return
+  if (payload.destPath !== undefined) {
+    p.destPath = payload.destPath
+    p.deployPath = payload.destPath
+  }
+  if (payload.preDeploy !== undefined) {
+    p.preDeploy = payload.preDeploy
+    p.preDeployScript = payload.preDeploy
+  }
+  if (payload.postDeploy !== undefined) {
+    p.postDeploy = payload.postDeploy
+    p.postDeployScript = payload.postDeploy
+  }
+  if (payload.postDeployAsync !== undefined) p.postDeployAsync = Boolean(payload.postDeployAsync)
+  if (payload.categoryId !== undefined) p.categoryId = payload.categoryId
+  if (payload.env !== undefined) p.env = payload.env
+  if (payload.pm2AppName !== undefined) p.pm2AppName = payload.pm2AppName
+  if (payload.tagIds !== undefined) p.tagIds = Array.isArray(payload.tagIds) ? [...payload.tagIds] : []
+  if (payload.cleanMode !== undefined) p.cleanMode = payload.cleanMode
+  if (payload.protectPaths !== undefined) {
+    p.protectPaths = Array.isArray(payload.protectPaths) && payload.protectPaths.length
+      ? JSON.stringify(payload.protectPaths)
+      : null
+  }
+  if (payload.name !== undefined) p.name = payload.name
+}
+
 const isSavingEnv = ref(false)
 const envDirty = computed(() => cliEnv.value.trim() !== (project.value?.env || ''))
 async function saveEnv() {
   if (!envDirty.value || isSavingEnv.value) return
   isSavingEnv.value = true
   try {
-    await projectStore.updateProject(projectId, { env: cliEnv.value.trim() })
+    const envPayload = { env: cliEnv.value.trim() }
+    applyOptimisticPatch(envPayload)
+    await projectStore.updateProject(projectId, envPayload)
     toast.success('部署环境已保存')
   } catch (e: any) {
     toast.error('保存失败', e?.message || '请稍后重试')
@@ -384,10 +422,12 @@ function removeProtectPath(g: string) {
 async function commitCleanForm() {
   isSavingClean.value = true
   try {
-    await projectStore.updateProject(projectId, {
+    const cleanPayload = {
       cleanMode: cleanForm.value.cleanMode,
       protectPaths: cleanForm.value.protectPaths.length ? cleanForm.value.protectPaths : null,
-    })
+    }
+    applyOptimisticPatch(cleanPayload)
+    await projectStore.updateProject(projectId, cleanPayload)
     toast.success('清理策略已保存', cleanForm.value.cleanMode === 'merge' ? '将沿用合并模式（零破坏）' : `下次部署会按 ${cleanForm.value.cleanMode} 执行`)
   } catch (e: any) {
     toast.error('保存失败', e?.message)
@@ -592,7 +632,34 @@ function switchTab(t: DetailTab) {
 </script>
 
 <template>
-  <div v-if="project" class="max-w-7xl mx-auto space-y-6 pb-12">
+  <!-- Skeleton Placeholder (only shown before initial data arrives) -->
+  <div v-if="isInitialLoading" class="max-w-7xl mx-auto space-y-6 pb-12" aria-busy="true">
+    <div class="flex items-start gap-3 sm:gap-4 mb-8 animate-pulse">
+      <div class="w-9 h-9 rounded-full bg-border/40 shrink-0"></div>
+      <div class="min-w-0 flex-1 space-y-3">
+        <div class="flex items-center flex-wrap gap-2 sm:gap-3">
+          <div class="h-7 w-48 rounded-md bg-border/40"></div>
+          <div class="h-5 w-16 rounded-md bg-border/30"></div>
+          <div class="h-7 w-24 rounded-md bg-border/30"></div>
+          <div class="h-7 w-24 rounded-md bg-border/30"></div>
+          <div class="h-7 w-24 rounded-md bg-border/30"></div>
+        </div>
+        <div class="h-3 w-72 rounded bg-border/30"></div>
+      </div>
+    </div>
+    <div class="flex flex-wrap items-center gap-1 border-b border-border -mt-2 animate-pulse">
+      <div class="h-9 w-24 rounded-t-md bg-border/30 mr-2"></div>
+      <div class="h-9 w-24 rounded-t-md bg-border/20 mr-2"></div>
+      <div class="h-9 w-20 rounded-t-md bg-border/20"></div>
+    </div>
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-pulse">
+      <div class="lg:col-span-7 h-72 rounded-xl bg-panel border border-border"></div>
+      <div class="lg:col-span-5 h-72 rounded-xl bg-panel border border-border"></div>
+      <div class="lg:col-span-12 h-48 rounded-xl bg-panel border border-border"></div>
+    </div>
+  </div>
+
+  <div v-else-if="project" class="max-w-7xl mx-auto space-y-6 pb-12">
     <!-- Header -->
     <div class="flex items-start gap-3 sm:gap-4 mb-8">
       <button 
