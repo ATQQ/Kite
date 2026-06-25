@@ -226,22 +226,12 @@ function formatStart(s: string) {
   }
 }
 
-const saveConfig = async () => {
+async function savePartial(payload: Record<string, any>, successMessage = '配置已保存') {
   try {
-    const payload = {
-      destPath: formData.value.destPath,
-      preDeploy: formData.value.preDeploy,
-      postDeploy: formData.value.postDeploy,
-      postDeployAsync: formData.value.postDeployAsync,
-      categoryId: formData.value.categoryId || null,
-      env: cliEnv.value.trim(),
-      pm2AppName: formData.value.pm2AppName.trim() || null,
-      tagIds: [...formData.value.tagIds],
-    }
     applyOptimisticPatch(payload)
     await projectStore.updateProject(projectId, payload)
-    toast.success('配置已保存')
-    await refreshPm2Status()
+    toast.success(successMessage)
+    return true
   } catch (e: any) {
     const conflict = e?.data?.conflictProject
     if (e?.status === 409 && conflict) {
@@ -249,6 +239,84 @@ const saveConfig = async () => {
     } else {
       toast.error('保存失败', e?.message || '请稍后重试')
     }
+    return false
+  }
+}
+
+const isSavingBasics = ref(false)
+async function saveBasics() {
+  if (isSavingBasics.value) return
+  isSavingBasics.value = true
+  try {
+    await savePartial({
+      categoryId: formData.value.categoryId || null,
+      tagIds: [...formData.value.tagIds],
+    }, '项目基本信息已保存')
+  } finally {
+    isSavingBasics.value = false
+  }
+}
+
+const isSavingPm2 = ref(false)
+async function savePm2Binding() {
+  if (isSavingPm2.value) return
+  isSavingPm2.value = true
+  try {
+    const nextName = formData.value.pm2AppName.trim() || null
+    const prevName = ((project.value as any)?.pm2AppName || '').trim() || null
+    const ok = await savePartial({ pm2AppName: nextName }, 'PM2 应用绑定已保存')
+    if (ok) {
+      await refreshPm2Status()
+      if (nextName && nextName !== prevName) {
+        await autoImportPm2LogSources()
+      }
+    }
+  } finally {
+    isSavingPm2.value = false
+  }
+}
+
+const isSavingScripts = ref(false)
+async function saveScripts() {
+  if (isSavingScripts.value) return
+  isSavingScripts.value = true
+  try {
+    await savePartial({
+      destPath: formData.value.destPath,
+      preDeploy: formData.value.preDeploy,
+      postDeploy: formData.value.postDeploy,
+      postDeployAsync: formData.value.postDeployAsync,
+    }, '部署脚本已保存')
+  } finally {
+    isSavingScripts.value = false
+  }
+}
+
+async function autoImportPm2LogSources() {
+  try {
+    const status = await projectStore.fetchProjectPm2(projectId)
+    if (!status || status.found !== true) return
+    const paths: Array<{ path: string; kind: 'stdout' | 'stderr' }> = []
+    if ((status as any).outLogPath) paths.push({ path: (status as any).outLogPath, kind: 'stdout' })
+    if ((status as any).errorLogPath) paths.push({ path: (status as any).errorLogPath, kind: 'stderr' })
+    if (paths.length === 0) return
+    const existing = await projectStore.fetchLogSources(projectId)
+    const have = new Set((existing?.items || []).map((s: any) => s.filePath))
+    const missing = paths.filter((p) => !have.has(p.path))
+    if (missing.length === 0) return
+    const name = formData.value.pm2AppName.trim() || 'pm2'
+    const items = missing.map((m) => ({
+      filePath: m.path,
+      label: `${name} · ${m.kind}`,
+      kind: 'pm2',
+    }))
+    const data: any = await projectStore.createLogSources(projectId, items)
+    const created = Array.isArray(data?.created) ? data.created : []
+    if (created.length > 0) {
+      toast.success(`已自动导入 ${created.length} 个 PM2 日志源`, '可在「运行日志」页面查看')
+    }
+  } catch {
+    // 静默失败：用户仍可在 LogTail 页面手动导入
   }
 }
 
@@ -1188,20 +1256,28 @@ function switchTab(t: DetailTab) {
             <p class="text-xs text-textMuted mt-2">点击「+ 标签」选择或直接新建；颜色和排序请在「项目管理 → 管理标签」里调整。</p>
           </div>
 
-          <p class="text-xs text-textMuted border-t border-border pt-3">
-            修改后请前往下方「部署脚本配置」点击「保存配置」生效。
-          </p>
+          <div class="pt-4 border-t border-border flex justify-end">
+            <button
+              @click="saveBasics"
+              :disabled="isSavingBasics"
+              class="flex items-center px-5 py-2 text-sm bg-primary hover:bg-primary/90 text-white rounded-md transition-all font-medium disabled:opacity-50"
+            >
+              <RefreshCw v-if="isSavingBasics" class="w-4 h-4 mr-2 animate-spin" />
+              <Save v-else class="w-4 h-4 mr-2" />
+              {{ isSavingBasics ? '保存中...' : '保存基本信息' }}
+            </button>
+          </div>
         </div>
       </div>
 
       <!-- PM2 App Binding Card -->
-      <div class="lg:col-span-7 bg-panel border border-border rounded-xl shadow-sm overflow-hidden">
+      <div class="lg:col-span-7 bg-panel border border-border rounded-xl shadow-sm overflow-visible">
         <div class="px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02]">
           <h2 class="text-lg font-semibold text-textMain flex items-center">
             <Activity class="w-5 h-5 mr-2 text-primary" />
             PM2 应用绑定
           </h2>
-          <p class="text-sm text-textMuted mt-1">将本项目关联到一个 PM2 应用，启用顶部实时资源监控与状态面板。</p>
+          <p class="text-sm text-textMuted mt-1">将本项目关联到一个 PM2 应用，启用顶部实时资源监控与状态面板；保存后会自动尝试导入该应用的 stdout / stderr 日志源。</p>
         </div>
 
         <div class="p-6 space-y-6">
@@ -1230,7 +1306,7 @@ function switchTab(t: DetailTab) {
               </button>
               <div
                 v-if="pm2PickerOpen"
-                class="absolute z-30 mt-1 w-full max-h-72 overflow-y-auto bg-panel border border-border rounded-md shadow-lg"
+                class="absolute z-50 mt-1 w-full max-h-72 overflow-y-auto bg-panel border border-border rounded-md shadow-lg"
               >
                 <button
                   v-if="formData.pm2AppName.trim()"
@@ -1326,9 +1402,17 @@ function switchTab(t: DetailTab) {
             </p>
           </div>
 
-          <p class="text-xs text-textMuted border-t border-border pt-3">
-            修改后请前往下方「部署脚本配置」点击「保存配置」生效。
-          </p>
+          <div class="pt-4 border-t border-border flex justify-end">
+            <button
+              @click="savePm2Binding"
+              :disabled="isSavingPm2"
+              class="flex items-center px-5 py-2 text-sm bg-primary hover:bg-primary/90 text-white rounded-md transition-all font-medium disabled:opacity-50"
+            >
+              <RefreshCw v-if="isSavingPm2" class="w-4 h-4 mr-2 animate-spin" />
+              <Save v-else class="w-4 h-4 mr-2" />
+              {{ isSavingPm2 ? '保存中...' : '保存 PM2 绑定' }}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1400,11 +1484,13 @@ function switchTab(t: DetailTab) {
 
           <div class="pt-4 border-t border-border flex justify-end">
             <button 
-              @click="saveConfig"
-              class="flex items-center px-6 py-2.5 bg-primary hover:bg-primary/90 text-white rounded-md transition-all font-medium shadow-[0_0_15px_rgba(59,130,246,0.3)]"
+              @click="saveScripts"
+              :disabled="isSavingScripts"
+              class="flex items-center px-6 py-2.5 bg-primary hover:bg-primary/90 text-white rounded-md transition-all font-medium shadow-[0_0_15px_rgba(59,130,246,0.3)] disabled:opacity-50"
             >
-              <Save class="w-4 h-4 mr-2" />
-              保存配置
+              <RefreshCw v-if="isSavingScripts" class="w-4 h-4 mr-2 animate-spin" />
+              <Save v-else class="w-4 h-4 mr-2" />
+              {{ isSavingScripts ? '保存中...' : '保存部署脚本' }}
             </button>
           </div>
         </div>
