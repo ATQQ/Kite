@@ -85,7 +85,7 @@ export const deployRoutes = new Elysia()
     if (guard.locked) {
       const retrySec = Math.ceil(guard.retryAfterMs / 1000);
       set.status = 429;
-      set.headers = { ...(set.headers || {}), 'Retry-After': String(retrySec) };
+      set.headers['Retry-After'] = String(retrySec);
       await writeAudit({ headers }, {
         action: 'auth.login_failed',
         targetType: 'auth',
@@ -745,25 +745,25 @@ export const deployRoutes = new Elysia()
     try {
       const entries = await fs.readdir(targetPath, { withFileTypes: true });
       const items = await Promise.all(
-        entries
-          .filter(e => !e.name.startsWith('.'))
-          .map(async (entry) => {
-            const fullPath = path.join(targetPath, entry.name);
-            const relativePath = subPath ? `${subPath}/${entry.name}` : entry.name;
-            const stat = await fs.stat(fullPath);
-            return {
-              name: entry.name,
-              path: relativePath,
-              isDir: entry.isDirectory(),
-              size: stat.size,
-              mtime: stat.mtime.toISOString()
-            };
-          })
+        entries.map(async (entry) => {
+          const fullPath = path.join(targetPath, entry.name);
+          const relativePath = subPath ? `${subPath}/${entry.name}` : entry.name;
+          const stat = await fs.stat(fullPath);
+          return {
+            name: entry.name,
+            path: relativePath,
+            isDir: entry.isDirectory(),
+            isHidden: entry.name.startsWith('.'),
+            size: stat.size,
+            mtime: stat.mtime.toISOString()
+          };
+        })
       );
 
-      // 目录排前，文件排后，按名称排序
+      // 目录排前，文件排后；隐藏项排到同类末尾；按名称排序
       items.sort((a, b) => {
         if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+        if (a.isHidden !== b.isHidden) return a.isHidden ? 1 : -1;
         return a.name.localeCompare(b.name);
       });
 
@@ -1117,7 +1117,7 @@ export const deployRoutes = new Elysia()
 
 interface CleanPreviewCacheEntry {
   expiresAt: number;
-  payload: unknown;
+  payload: Record<string, unknown>;
 }
 const cleanPreviewCache = new Map<string, CleanPreviewCacheEntry>();
 const CLEAN_PREVIEW_CACHE_MAX = 64;
