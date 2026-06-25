@@ -2,7 +2,7 @@
 import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useProjectStore, type CleanPreviewResult, type DeploymentLog, type Pm2AppStatus } from '../store/project'
-import { ArrowLeft, Save, Key, Copy, RefreshCw, Trash2, CheckCircle2, TerminalSquare, FolderOpen, AlertTriangle, XCircle, ScrollText, Eye, Shield, ShieldAlert, Plus, History, RotateCcw, Archive, ArchiveX, CheckCheck, FileText, Activity, Cpu, MemoryStick, ChevronDown, ChevronUp, Pencil, Check } from 'lucide-vue-next'
+import { ArrowLeft, Save, Key, Copy, RefreshCw, Trash2, CheckCircle2, TerminalSquare, FolderOpen, AlertTriangle, XCircle, ScrollText, Eye, Shield, ShieldAlert, Plus, History, RotateCcw, Archive, ArchiveX, CheckCheck, FileText, Activity, Cpu, MemoryStick, ChevronDown, ChevronUp, Pencil, Check, SlidersHorizontal, LayoutDashboard } from 'lucide-vue-next'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import CleanPreviewDialog from '../components/CleanPreviewDialog.vue'
 import ProjectTagsEditor from '../components/ProjectTagsEditor.vue'
@@ -566,10 +566,33 @@ async function confirmDelete() {
     isDeleting.value = false
   }
 }
+
+type DetailTab = 'overview' | 'config' | 'integration'
+const tabStorageKey = computed(() => `kite:project-detail-tab:${projectId}`)
+const activeTab = ref<DetailTab>('overview')
+const tabs: Array<{ key: DetailTab; label: string; icon: any }> = [
+  { key: 'overview', label: '概览', icon: LayoutDashboard },
+  { key: 'config', label: '配置', icon: SlidersHorizontal },
+  { key: 'integration', label: '危险区', icon: ShieldAlert },
+]
+onMounted(() => {
+  try {
+    const saved = localStorage.getItem(tabStorageKey.value)
+    if (saved === 'overview' || saved === 'config' || saved === 'integration') {
+      activeTab.value = saved
+    }
+  } catch {}
+})
+function switchTab(t: DetailTab) {
+  activeTab.value = t
+  try {
+    localStorage.setItem(tabStorageKey.value, t)
+  } catch {}
+}
 </script>
 
 <template>
-  <div v-if="project" class="max-w-4xl mx-auto space-y-6 pb-12">
+  <div v-if="project" class="max-w-7xl mx-auto space-y-6 pb-12">
     <!-- Header -->
     <div class="flex items-start gap-3 sm:gap-4 mb-8">
       <button 
@@ -613,10 +636,30 @@ async function confirmDelete() {
       </div>
     </div>
 
+    <!-- Tab Navigation -->
+    <nav class="flex flex-wrap items-center gap-1 border-b border-border -mt-2">
+      <button
+        v-for="t in tabs"
+        :key="t.key"
+        type="button"
+        @click="switchTab(t.key)"
+        class="inline-flex items-center px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors"
+        :class="activeTab === t.key
+          ? 'border-primary text-primary'
+          : 'border-transparent text-textMuted hover:text-textMain hover:border-border'"
+      >
+        <component :is="t.icon" class="w-4 h-4 mr-1.5" />
+        {{ t.label }}
+      </button>
+    </nav>
+
+    <!-- ============== Overview Tab ============== -->
+    <section v-show="activeTab === 'overview'" class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
     <!-- PM2 Status Panel (top, only when project has pm2AppName bound) -->
     <div
       v-if="(project.pm2AppName || '').trim()"
-      class="bg-panel border border-border rounded-xl shadow-sm overflow-hidden"
+      class="lg:col-span-12 bg-panel border border-border rounded-xl shadow-sm overflow-hidden"
     >
       <div class="px-4 py-3 border-b border-border bg-base/40 flex items-center justify-between">
         <h3 class="text-sm font-semibold text-textMain flex items-center">
@@ -682,109 +725,8 @@ async function confirmDelete() {
       </div>
     </div>
 
-    <!-- Main Content -->
-    <div class="grid grid-cols-1 gap-8">
-
-      <!-- Project Basics Card -->
-      <div class="bg-panel border border-border rounded-xl shadow-sm overflow-hidden">
-        <div class="px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02]">
-          <h2 class="text-lg font-semibold text-textMain flex items-center">
-            <FileText class="w-5 h-5 mr-2 text-primary" />
-            项目基本信息
-          </h2>
-          <p class="text-sm text-textMuted mt-1">项目的分类与标签，用于在项目列表中筛选与归档。</p>
-        </div>
-
-        <div class="p-6 space-y-6">
-          <div>
-            <label class="block text-sm font-medium text-textMain mb-2">所属分类</label>
-            <select
-              v-model="formData.categoryId"
-              class="w-full bg-base border border-border rounded-md px-4 py-3 text-textMain text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all"
-            >
-              <option value="">默认（未分类）</option>
-              <option v-for="c in projectStore.categories" :key="c.id" :value="c.id">{{ c.name }}</option>
-            </select>
-            <p class="text-xs text-textMuted mt-2">用于在项目列表中按分类筛选。在「项目管理 → 管理分类」中创建更多分类。</p>
-          </div>
-
-          <div>
-            <label class="block text-sm font-medium text-textMain mb-2">标签（可多选）</label>
-            <ProjectTagsEditor
-              :model-value="formData.tagIds"
-              size="md"
-              read-only-save
-              aria-label="编辑当前项目的标签"
-              @update:model-value="(v) => formData.tagIds = v"
-            />
-            <p class="text-xs text-textMuted mt-2">点击「+ 标签」选择或直接新建；颜色和排序请在「项目管理 → 管理标签」里调整。</p>
-          </div>
-
-          <p class="text-xs text-textMuted border-t border-border pt-3">
-            修改后请前往下方「部署脚本配置」点击「保存配置」生效。
-          </p>
-        </div>
-      </div>
-
-      <!-- Token Management Card -->
-      <div class="bg-panel border border-border rounded-xl shadow-sm overflow-hidden">
-        <div class="px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02]">
-          <h2 class="text-lg font-semibold text-textMain flex items-center">
-            <Key class="w-5 h-5 mr-2 text-primary" />
-            鉴权 Token 管理
-          </h2>
-          <p class="text-sm text-textMuted mt-1">用于 CLI 或 Webhook 触发自动化部署的专属凭证。</p>
-        </div>
-        
-        <div class="p-6">
-          <div class="flex flex-col sm:flex-row items-stretch sm:items-center space-y-4 sm:space-y-0 sm:space-x-4">
-            <div class="relative flex-1">
-              <input 
-                :type="isTokenVisible ? 'text' : 'password'"
-                readonly
-                :value="project.token || '暂无 Token，请生成'"
-                class="w-full bg-base border border-border rounded-md pl-4 pr-12 py-3 text-textMain font-mono text-sm focus:outline-none focus:border-primary/50 transition-colors"
-                :class="{'opacity-50 blur-[2px] select-none': !isTokenVisible && project.token}"
-              />
-              <button 
-                v-if="project.token"
-                @click="isTokenVisible = !isTokenVisible"
-                class="absolute right-3 top-1/2 -translate-y-1/2 text-textMuted hover:text-textMain text-xs font-medium px-2 py-1 rounded transition-colors"
-              >
-                {{ isTokenVisible ? '隐藏' : '显示' }}
-              </button>
-            </div>
-            
-            <div class="flex items-center space-x-2">
-              <button 
-                @click="copyToken"
-                :disabled="!project.token"
-                class="flex items-center justify-center px-4 py-3 bg-base border border-border hover:border-primary/50 hover:text-primary text-textMain rounded-md transition-all disabled:opacity-50 disabled:cursor-not-allowed w-full sm:w-auto"
-              >
-                <CheckCircle2 v-if="isCopied" class="w-4 h-4 mr-2 text-success" />
-                <Copy v-else class="w-4 h-4 mr-2" />
-                {{ isCopied ? '已复制' : '复制' }}
-              </button>
-              <button 
-                @click="refreshToken"
-                class="flex items-center justify-center px-4 py-3 bg-primary/10 text-primary border border-primary/20 hover:bg-primary hover:text-white rounded-md transition-all w-full sm:w-auto font-medium shadow-[0_0_10px_rgba(59,130,246,0.1)] hover:shadow-[0_0_15px_rgba(59,130,246,0.4)]"
-              >
-                <RefreshCw class="w-4 h-4 mr-2" />
-                重新生成
-              </button>
-            </div>
-          </div>
-          
-          <div class="mt-4 p-4 rounded-md bg-primary/5 border border-primary/10 text-sm">
-            <p class="text-textMuted leading-relaxed">
-              <strong class="text-primary font-medium">CLI 用法:</strong> 将此 Token 保存到全局配置后，<code class="bg-base px-1 py-0.5 rounded font-mono text-xs text-textMain border border-border">kite push</code> 时无需再传。
-            </p>
-          </div>
-        </div>
-      </div>
-
       <!-- Deployment History Card -->
-      <div class="bg-panel border border-border rounded-xl shadow-sm overflow-hidden">
+      <div class="lg:col-span-7 bg-panel border border-border rounded-xl shadow-sm overflow-hidden">
         <div class="px-4 sm:px-6 py-4 sm:py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
             <h2 class="text-lg font-semibold text-textMain flex items-center">
@@ -899,8 +841,65 @@ async function confirmDelete() {
         </div>
       </div>
 
+      <!-- Token Management Card -->
+      <div class="lg:col-span-5 bg-panel border border-border rounded-xl shadow-sm overflow-hidden">
+        <div class="px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02]">
+          <h2 class="text-lg font-semibold text-textMain flex items-center">
+            <Key class="w-5 h-5 mr-2 text-primary" />
+            鉴权 Token 管理
+          </h2>
+          <p class="text-sm text-textMuted mt-1">用于 CLI 或 Webhook 触发自动化部署的专属凭证。</p>
+        </div>
+
+        <div class="p-6">
+          <div class="flex flex-col sm:flex-row items-stretch sm:items-center space-y-4 sm:space-y-0 sm:space-x-4">
+            <div class="relative flex-1">
+              <input
+                :type="isTokenVisible ? 'text' : 'password'"
+                readonly
+                :value="project.token || '暂无 Token，请生成'"
+                class="w-full bg-base border border-border rounded-md pl-4 pr-12 py-3 text-textMain font-mono text-sm focus:outline-none focus:border-primary/50 transition-colors"
+                :class="{'opacity-50 blur-[2px] select-none': !isTokenVisible && project.token}"
+              />
+              <button
+                v-if="project.token"
+                @click="isTokenVisible = !isTokenVisible"
+                class="absolute right-3 top-1/2 -translate-y-1/2 text-textMuted hover:text-textMain text-xs font-medium px-2 py-1 rounded transition-colors"
+              >
+                {{ isTokenVisible ? '隐藏' : '显示' }}
+              </button>
+            </div>
+
+            <div class="flex items-center space-x-2">
+              <button
+                @click="copyToken"
+                :disabled="!project.token"
+                class="flex items-center justify-center px-4 py-3 bg-base border border-border hover:border-primary/50 hover:text-primary text-textMain rounded-md transition-all disabled:opacity-50 disabled:cursor-not-allowed w-full sm:w-auto"
+              >
+                <CheckCircle2 v-if="isCopied" class="w-4 h-4 mr-2 text-success" />
+                <Copy v-else class="w-4 h-4 mr-2" />
+                {{ isCopied ? '已复制' : '复制' }}
+              </button>
+              <button
+                @click="refreshToken"
+                class="flex items-center justify-center px-4 py-3 bg-primary/10 text-primary border border-primary/20 hover:bg-primary hover:text-white rounded-md transition-all w-full sm:w-auto font-medium shadow-[0_0_10px_rgba(59,130,246,0.1)] hover:shadow-[0_0_15px_rgba(59,130,246,0.4)]"
+              >
+                <RefreshCw class="w-4 h-4 mr-2" />
+                重新生成
+              </button>
+            </div>
+          </div>
+
+          <div class="mt-4 p-4 rounded-md bg-primary/5 border border-primary/10 text-sm">
+            <p class="text-textMuted leading-relaxed">
+              <strong class="text-primary font-medium">CLI 用法:</strong> 将此 Token 保存到全局配置后，<code class="bg-base px-1 py-0.5 rounded font-mono text-xs text-textMain border border-border">kite push</code> 时无需再传。
+            </p>
+          </div>
+        </div>
+      </div>
+
       <!-- CLI Help Card -->
-      <div class="bg-panel border border-border rounded-xl shadow-sm overflow-hidden">
+      <div class="lg:col-span-12 bg-panel border border-border rounded-xl shadow-sm overflow-hidden">
         <div
           class="px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02] cursor-pointer select-none hover:bg-black/[0.04] dark:hover:bg-white/[0.04] transition-colors"
           :class="{ 'border-b-0': cliHelpCollapsed }"
@@ -1082,9 +1081,54 @@ async function confirmDelete() {
           </div>
         </div>
       </div>
+    </section>
+
+    <!-- ============== Configuration Tab ============== -->
+    <section v-show="activeTab === 'config'" class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+      <!-- Project Basics Card -->
+      <div class="lg:col-span-5 bg-panel border border-border rounded-xl shadow-sm overflow-hidden">
+        <div class="px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02]">
+          <h2 class="text-lg font-semibold text-textMain flex items-center">
+            <FileText class="w-5 h-5 mr-2 text-primary" />
+            项目基本信息
+          </h2>
+          <p class="text-sm text-textMuted mt-1">项目的分类与标签，用于在项目列表中筛选与归档。</p>
+        </div>
+
+        <div class="p-6 space-y-6">
+          <div>
+            <label class="block text-sm font-medium text-textMain mb-2">所属分类</label>
+            <select
+              v-model="formData.categoryId"
+              class="w-full bg-base border border-border rounded-md px-4 py-3 text-textMain text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all"
+            >
+              <option value="">默认（未分类）</option>
+              <option v-for="c in projectStore.categories" :key="c.id" :value="c.id">{{ c.name }}</option>
+            </select>
+            <p class="text-xs text-textMuted mt-2">用于在项目列表中按分类筛选。在「项目管理 → 管理分类」中创建更多分类。</p>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-textMain mb-2">标签（可多选）</label>
+            <ProjectTagsEditor
+              :model-value="formData.tagIds"
+              size="md"
+              read-only-save
+              aria-label="编辑当前项目的标签"
+              @update:model-value="(v) => formData.tagIds = v"
+            />
+            <p class="text-xs text-textMuted mt-2">点击「+ 标签」选择或直接新建；颜色和排序请在「项目管理 → 管理标签」里调整。</p>
+          </div>
+
+          <p class="text-xs text-textMuted border-t border-border pt-3">
+            修改后请前往下方「部署脚本配置」点击「保存配置」生效。
+          </p>
+        </div>
+      </div>
 
       <!-- PM2 App Binding Card -->
-      <div class="bg-panel border border-border rounded-xl shadow-sm overflow-hidden">
+      <div class="lg:col-span-7 bg-panel border border-border rounded-xl shadow-sm overflow-hidden">
         <div class="px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02]">
           <h2 class="text-lg font-semibold text-textMain flex items-center">
             <Activity class="w-5 h-5 mr-2 text-primary" />
@@ -1222,7 +1266,7 @@ async function confirmDelete() {
       </div>
 
       <!-- Execution Scripts Card -->
-      <div class="bg-panel border border-border rounded-xl shadow-sm overflow-hidden">
+      <div class="lg:col-span-7 bg-panel border border-border rounded-xl shadow-sm overflow-hidden">
         <div class="px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02]">
           <h2 class="text-lg font-semibold text-textMain flex items-center">
             <TerminalSquare class="w-5 h-5 mr-2 text-primary" />
@@ -1300,7 +1344,7 @@ async function confirmDelete() {
       </div>
 
       <!-- Clean Strategy Card -->
-      <div class="bg-panel border border-border rounded-xl shadow-sm overflow-hidden">
+      <div class="lg:col-span-5 bg-panel border border-border rounded-xl shadow-sm overflow-hidden">
         <div class="px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02]">
           <h2 class="text-lg font-semibold text-textMain flex items-center">
             <Shield class="w-5 h-5 mr-2 text-primary" />
@@ -1407,6 +1451,10 @@ async function confirmDelete() {
           </div>
         </div>
       </div>
+    </section>
+
+    <!-- ============== Danger Tab ============== -->
+    <section v-show="activeTab === 'integration'" class="space-y-6">
 
       <!-- Danger Zone -->
       <div class="bg-panel border border-danger/20 rounded-xl shadow-sm overflow-hidden">
@@ -1426,8 +1474,7 @@ async function confirmDelete() {
           </div>
         </div>
       </div>
-
-    </div>
+    </section>
 
     <!-- Delete Confirmation Modal -->
     <div
