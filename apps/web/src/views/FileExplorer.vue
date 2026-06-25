@@ -16,6 +16,7 @@ interface TreeNode {
   name: string
   path: string
   isDir: boolean
+  isHidden?: boolean
   size?: number
   mtime?: string
   expanded?: boolean
