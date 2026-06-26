@@ -61,6 +61,11 @@ const routes = [
         path: 'migration',
         name: 'Migration',
         component: () => import('../views/Migration.vue')
+      },
+      {
+        path: 'terminal',
+        name: 'Terminal',
+        component: () => import('../views/Terminal.vue')
       }
     ]
   }

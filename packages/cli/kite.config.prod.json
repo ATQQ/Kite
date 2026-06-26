@@ -3,6 +3,7 @@
   "outputDir": "./",
   "files": [
     "dist/**/*",
+    "scripts/**/*",
     "package.json"
   ],
   "serverUrl": "https://kite.sugarat.top",

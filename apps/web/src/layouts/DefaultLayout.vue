@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch, onBeforeUnmount } from 'vue'
-import { LayoutDashboard, FolderArchive, TerminalSquare, ScrollText, Database, HardDrive, Settings, LogOut, Sun, Moon, Monitor, Menu, X } from 'lucide-vue-next'
+import { LayoutDashboard, FolderArchive, TerminalSquare, ScrollText, Database, HardDrive, Settings, LogOut, Sun, Moon, Monitor, Menu, X, Terminal as TerminalIcon } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { useProjectStore } from '../store/project'
 import { useThemeStore, type ThemeMode } from '../store/theme'
@@ -16,6 +16,7 @@ const menus = [
   { name: '概览', path: '/', icon: LayoutDashboard },
   { name: '项目管理', path: '/projects', icon: FolderArchive },
   { name: '部署日志', path: '/logs', icon: TerminalSquare },
+  { name: '终端', path: '/terminal', icon: TerminalIcon },
   { name: '操作日志', path: '/audit', icon: ScrollText },
   { name: '存储', path: '/storage', icon: HardDrive },
   { name: '数据迁移', path: '/migration', icon: Database },

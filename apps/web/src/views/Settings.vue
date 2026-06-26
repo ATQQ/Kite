@@ -3,7 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useProjectStore } from '../store/project'
 import { useThemeStore } from '../store/theme'
 import type { ThemeMode } from '../store/theme'
-import { Settings, Server, Key, HardDrive, Webhook, Save, CheckCircle2, AlertTriangle, Activity, Sun, Moon, Monitor, RefreshCw, Eye, EyeOff, Copy, HeartPulse } from 'lucide-vue-next'
+import { Settings, Server, Key, HardDrive, Webhook, Save, CheckCircle2, AlertTriangle, Activity, Sun, Moon, Monitor, RefreshCw, Eye, EyeOff, Copy, HeartPulse, Terminal as TerminalIcon, Plus, X } from 'lucide-vue-next'
 
 const projectStore = useProjectStore()
 const themeStore = useThemeStore()
@@ -96,6 +96,7 @@ onMounted(async () => {
     form.value.deployment_stuck_threshold_min = settingsData.deployment_stuck_threshold_min || '10'
   }
   refreshHealth()
+  refreshTerminalAllowlist()
 })
 
 const saveSettings = async () => {
@@ -157,6 +158,71 @@ const toggleEvent = (event: string) => {
   } else {
     form.value.webhook_events.push(event)
   }
+}
+
+// Terminal IP allowlist
+const terminalAllowlist = ref<string[]>([])
+const terminalAllowlistInput = ref('')
+const terminalAllowlistMessage = ref('')
+const terminalAllowlistMessageType = ref<'success' | 'error'>('success')
+const terminalAllowlistSaving = ref(false)
+const terminalAllowlistLoading = ref(false)
+const terminalWhoami = ref<{ socketIp: string | null; forwardedIp: string | null; trustedIp: string | null } | null>(null)
+const terminalAvailable = ref<boolean | null>(null)
+
+async function refreshTerminalAllowlist() {
+  terminalAllowlistLoading.value = true
+  const [list, who, info] = await Promise.all([
+    projectStore.fetchTerminalAllowlist(),
+    projectStore.fetchTerminalWhoami(),
+    projectStore.fetchTerminalInfo(),
+  ])
+  if (list) terminalAllowlist.value = list.entries
+  terminalWhoami.value = who
+  terminalAvailable.value = info?.available ?? null
+  terminalAllowlistLoading.value = false
+}
+
+function showTerminalMsg(msg: string, type: 'success' | 'error') {
+  terminalAllowlistMessage.value = msg
+  terminalAllowlistMessageType.value = type
+  setTimeout(() => { terminalAllowlistMessage.value = '' }, 3000)
+}
+
+function addTerminalAllowlistEntry(value?: string) {
+  const candidate = (value ?? terminalAllowlistInput.value).trim()
+  if (!candidate) return
+  if (terminalAllowlist.value.includes(candidate)) {
+    showTerminalMsg('该 IP / CIDR 已在白名单中', 'error')
+    return
+  }
+  terminalAllowlist.value = [...terminalAllowlist.value, candidate]
+  terminalAllowlistInput.value = ''
+}
+
+function removeTerminalAllowlistEntry(entry: string) {
+  terminalAllowlist.value = terminalAllowlist.value.filter(e => e !== entry)
+}
+
+async function saveTerminalAllowlist() {
+  terminalAllowlistSaving.value = true
+  const result = await projectStore.updateTerminalAllowlist(terminalAllowlist.value)
+  terminalAllowlistSaving.value = false
+  if (result.success) {
+    if (result.entries) terminalAllowlist.value = result.entries
+    showTerminalMsg('已保存终端 IP 白名单', 'success')
+  } else {
+    showTerminalMsg(result.error || '保存失败', 'error')
+  }
+}
+
+function addCurrentIpToAllowlist() {
+  const ip = terminalWhoami.value?.trustedIp || terminalWhoami.value?.socketIp
+  if (!ip) {
+    showTerminalMsg('当前访问 IP 未知', 'error')
+    return
+  }
+  addTerminalAllowlistEntry(ip)
 }
 </script>
 
@@ -519,6 +585,115 @@ const toggleEvent = (event: string) => {
               {{ opt.label }}
             </button>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Terminal IP Allowlist Card -->
+    <div class="bg-panel border border-border rounded-xl shadow-sm overflow-hidden">
+      <div class="px-4 sm:px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02] flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
+        <div>
+          <h2 class="text-lg font-semibold text-textMain flex items-center">
+            <TerminalIcon class="w-5 h-5 mr-2 text-primary" />
+            终端 IP 白名单
+          </h2>
+          <p class="text-sm text-textMuted mt-1">
+            限制可使用 Web 终端的来源 IP。留空表示<strong class="text-textMain">不启用</strong>白名单（任何已登录用户均可使用）。支持 IPv4、IPv6、CIDR 表示。
+          </p>
+        </div>
+        <button
+          @click="refreshTerminalAllowlist"
+          class="flex items-center px-3 py-1.5 text-sm bg-base border border-border hover:border-primary/50 hover:text-primary text-textMuted rounded-md transition-all self-start sm:self-auto"
+          :disabled="terminalAllowlistLoading"
+        >
+          <RefreshCw class="w-4 h-4 mr-1.5" :class="terminalAllowlistLoading ? 'animate-spin' : ''" />
+          刷新
+        </button>
+      </div>
+      <div class="p-4 sm:p-6 space-y-4">
+        <div v-if="terminalAvailable === false" class="flex items-start gap-2 text-sm text-yellow-500 bg-yellow-500/10 border border-yellow-500/30 rounded-md p-3">
+          <AlertTriangle class="w-4 h-4 mt-0.5 shrink-0" />
+          <span>当前实例的终端能力不可用（仅 macOS / Linux + node-pty 可用）。即便配置白名单也无法使用 Web 终端。</span>
+        </div>
+
+        <div class="bg-base border border-border rounded-md p-4">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div class="text-sm">
+              <div class="text-textMuted">当前访问 IP</div>
+              <div class="font-mono text-textMain mt-1">{{ terminalWhoami?.trustedIp || terminalWhoami?.socketIp || '未知' }}</div>
+              <div v-if="terminalWhoami?.forwardedIp && terminalWhoami.forwardedIp !== terminalWhoami.trustedIp" class="text-xs text-textMuted mt-1">
+                XFF 头声明：{{ terminalWhoami.forwardedIp }}（不被信任，仅供参考）
+              </div>
+            </div>
+            <button
+              @click="addCurrentIpToAllowlist"
+              :disabled="!terminalWhoami?.trustedIp && !terminalWhoami?.socketIp"
+              class="flex items-center px-3 py-2 text-sm bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 rounded-md transition-all disabled:opacity-50"
+            >
+              <Plus class="w-4 h-4 mr-1.5" />
+              加入白名单
+            </button>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium text-textMain mb-2">添加 IP / CIDR</label>
+          <div class="flex gap-2">
+            <input
+              v-model="terminalAllowlistInput"
+              type="text"
+              class="flex-1 bg-base border border-border rounded-md px-4 py-2.5 text-textMain font-mono text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all"
+              placeholder="例如 192.168.1.0/24 或 ::1"
+              @keydown.enter.prevent="addTerminalAllowlistEntry()"
+            />
+            <button
+              @click="addTerminalAllowlistEntry()"
+              class="flex items-center px-4 py-2.5 bg-base border border-border hover:border-primary/50 hover:text-primary text-textMuted rounded-md transition-all"
+            >
+              <Plus class="w-4 h-4 mr-1.5" />
+              添加
+            </button>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium text-textMain mb-2">
+            当前白名单（{{ terminalAllowlist.length }} 条）
+            <span v-if="terminalAllowlist.length === 0" class="ml-2 text-xs text-yellow-500 font-normal">空 = 不启用白名单</span>
+          </label>
+          <div v-if="terminalAllowlist.length === 0" class="text-sm text-textMuted py-3">
+            暂无条目。
+          </div>
+          <ul v-else class="space-y-1.5">
+            <li
+              v-for="entry in terminalAllowlist"
+              :key="entry"
+              class="flex items-center justify-between gap-2 bg-base border border-border rounded-md px-3 py-2"
+            >
+              <span class="font-mono text-sm text-textMain truncate">{{ entry }}</span>
+              <button
+                @click="removeTerminalAllowlistEntry(entry)"
+                class="p-1 text-textMuted hover:text-danger rounded transition-colors"
+                title="移除"
+              >
+                <X class="w-4 h-4" />
+              </button>
+            </li>
+          </ul>
+        </div>
+
+        <div class="flex items-center justify-end gap-3 pt-2">
+          <span v-if="terminalAllowlistMessage" class="text-sm" :class="terminalAllowlistMessageType === 'success' ? 'text-success' : 'text-danger'">
+            {{ terminalAllowlistMessage }}
+          </span>
+          <button
+            @click="saveTerminalAllowlist"
+            :disabled="terminalAllowlistSaving"
+            class="flex items-center px-5 py-2 bg-primary hover:bg-primary/90 text-white rounded-md transition-all font-medium disabled:opacity-50"
+          >
+            <Save class="w-4 h-4 mr-2" />
+            {{ terminalAllowlistSaving ? '保存中...' : '保存白名单' }}
+          </button>
         </div>
       </div>
     </div>

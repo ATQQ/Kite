@@ -766,6 +766,13 @@ function switchTab(t: DetailTab) {
             <ScrollText class="w-3.5 h-3.5 mr-1.5" />
             操作历史
           </router-link>
+          <router-link
+            :to="`/terminal?projectId=${projectId}`"
+            class="inline-flex items-center px-3 py-1.5 text-xs font-medium bg-base border border-border hover:border-primary/50 hover:text-primary text-textMuted rounded-md transition-all"
+          >
+            <TerminalSquare class="w-3.5 h-3.5 mr-1.5" />
+            打开终端
+          </router-link>
         </div>
         <p class="text-xs sm:text-sm text-textMuted mt-1 font-mono break-all">{{ project.id }}</p>
       </div>

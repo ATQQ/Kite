@@ -730,6 +730,45 @@ export const useProjectStore = defineStore('project', () => {
     }
   }
 
+  async function fetchTerminalInfo(): Promise<any | null> {
+    try {
+      return await apiFetch('/terminal/info')
+    } catch (e) {
+      console.error('Failed to fetch terminal info', e)
+      return null
+    }
+  }
+
+  async function fetchTerminalWhoami(): Promise<{ socketIp: string | null; forwardedIp: string | null; trustedIp: string | null } | null> {
+    try {
+      return await apiFetch('/terminal/whoami')
+    } catch (e) {
+      console.error('Failed to fetch terminal whoami', e)
+      return null
+    }
+  }
+
+  async function fetchTerminalAllowlist(): Promise<{ entries: string[]; invalid: string[] } | null> {
+    try {
+      return await apiFetch('/terminal/allowlist')
+    } catch (e) {
+      console.error('Failed to fetch terminal allowlist', e)
+      return null
+    }
+  }
+
+  async function updateTerminalAllowlist(entries: string[]): Promise<{ success: boolean; entries?: string[]; error?: string }> {
+    try {
+      const data = await apiFetch('/terminal/allowlist', {
+        method: 'PUT',
+        body: JSON.stringify({ entries }),
+      })
+      return data
+    } catch (e: any) {
+      return { success: false, error: e?.message || 'failed' }
+    }
+  }
+
   return {
     adminToken,
     projects,
@@ -777,6 +816,10 @@ export const useProjectStore = defineStore('project', () => {
     fetchProjectPm2,
     fetchPm2Available,
     fetchPm2Apps,
+    fetchTerminalInfo,
+    fetchTerminalWhoami,
+    fetchTerminalAllowlist,
+    updateTerminalAllowlist,
     fetchLogSources,
     createLogSources,
     updateLogSource,
