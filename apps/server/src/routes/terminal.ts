@@ -145,9 +145,10 @@ export async function decideTerminalUpgrade(ctx: TerminalUpgradeContext): Promis
   if (!ctx.url.pathname.startsWith('/api/terminal/ws')) {
     return { ok: false, status: 404, reason: 'not-terminal-route' };
   }
-  // 2. Origin check (same site only). When called via Vite dev proxy the Origin
-  //    points to localhost:5429 which is fine — only reject when present and mismatched.
-  if (ctx.origin && ctx.expectedOrigin) {
+  // 2. Origin check — only enforced when an IP allowlist is configured (defense-in-depth).
+  //    Skipped otherwise to avoid false rejections behind reverse proxies.
+  const allowlist = await loadTerminalAllowlist();
+  if (allowlist.length > 0 && ctx.origin && ctx.expectedOrigin) {
     try {
       const a = new URL(ctx.origin);
       const b = new URL(ctx.expectedOrigin);
@@ -189,8 +190,7 @@ export async function decideTerminalUpgrade(ctx: TerminalUpgradeContext): Promis
   }
   loginSuccess(ip);
 
-  // 7. IP allowlist check
-  const allowlist = await loadTerminalAllowlist();
+  // 7. IP allowlist check (allowlist already loaded at step 2)
   if (allowlist.length > 0 && !ipAllowed(ip, allowlist)) {
     await writeAudit({ headers: ctx.headers as any }, {
       action: 'terminal.denied',

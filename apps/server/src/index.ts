@@ -196,7 +196,8 @@ if (terminalWss) {
       socket.destroy();
       return;
     }
-    const expectedOrigin = `http://${host}:${port}`;
+    const reqHost = req.headers.host || `${host}:${port}`;
+    const expectedOrigin = `http://${reqHost}`;
     void handleTerminalUpgrade(req, socket, head, expectedOrigin);
   });
 } else {
