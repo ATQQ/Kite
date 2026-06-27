@@ -2,10 +2,12 @@
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useProjectStore } from '../store/project'
-import type { Category } from '../store/project'
-import { Plus, MoreVertical, Server, Clock, ScrollText, FolderPlus, Trash2, RefreshCw, XCircle, AlertTriangle, Pencil, FolderOpen, LayoutGrid, List as ListIcon, Tag, FolderTree, ChevronRight } from 'lucide-vue-next'
+import type { Category, Tag as TagType } from '../store/project'
+import { Plus, MoreVertical, Server, Clock, ScrollText, FolderPlus, Trash2, RefreshCw, XCircle, AlertTriangle, Pencil, FolderOpen, LayoutGrid, List as ListIcon, Tag, FolderTree, ChevronRight, Tags as TagsIcon, X as XIcon, Activity } from 'lucide-vue-next'
 import { useToast } from '../composables/useToast'
 import FolderPickerDialog from '../components/FolderPickerDialog.vue'
+import ProjectTagsEditor from '../components/ProjectTagsEditor.vue'
+import { CHIP_COLOR_PALETTE, chipClass as tagChipClass, pickFreeColor as pickFreeChipColor } from '../utils/color-chip'
 
 const projectStore = useProjectStore()
 const router = useRouter()
@@ -19,10 +21,13 @@ const viewMode = ref<'card' | 'list'>(((): 'card' | 'list' => {
 watch(viewMode, (v) => localStorage.setItem(VIEW_KEY, v))
 
 const selectedCategoryFilter = ref<string>('all') // 'all' | 'default' | <categoryId>
+const selectedEnvFilter = ref<string>('all') // 'all' | 'default'(no env) | <envName>
+const selectedTagIds = ref<string[]>([])
 
 onMounted(() => {
   projectStore.fetchProjects()
   projectStore.fetchCategories()
+  projectStore.fetchTags()
 })
 
 const categoryMap = computed<Map<string, Category>>(() => {
@@ -33,9 +38,27 @@ const categoryMap = computed<Map<string, Category>>(() => {
 
 const filteredProjects = computed(() => {
   const list = projectStore.projects
-  if (selectedCategoryFilter.value === 'all') return list
-  if (selectedCategoryFilter.value === 'default') return list.filter((p) => !p.categoryId)
-  return list.filter((p) => p.categoryId === selectedCategoryFilter.value)
+  const tagIds = selectedTagIds.value
+  return list.filter((p) => {
+    if (selectedCategoryFilter.value === 'default') {
+      if (p.categoryId) return false
+    } else if (selectedCategoryFilter.value !== 'all') {
+      if (p.categoryId !== selectedCategoryFilter.value) return false
+    }
+    const env = (p.env || '').trim()
+    if (selectedEnvFilter.value === 'default') {
+      if (env) return false
+    } else if (selectedEnvFilter.value !== 'all') {
+      if (env !== selectedEnvFilter.value) return false
+    }
+    if (tagIds.length > 0) {
+      const projectTagIds = p.tagIds || []
+      for (const id of tagIds) {
+        if (!projectTagIds.includes(id)) return false
+      }
+    }
+    return true
+  })
 })
 
 const projectCountByCategory = computed(() => {
@@ -46,6 +69,36 @@ const projectCountByCategory = computed(() => {
     else m[p.categoryId]++
   }
   return m
+})
+
+const envOptions = computed<string[]>(() => {
+  const set = new Set<string>()
+  for (const p of projectStore.projects) {
+    const env = (p.env || '').trim()
+    if (env) set.add(env)
+  }
+  return Array.from(set).sort((a, b) => a.localeCompare(b))
+})
+
+const projectCountByEnv = computed(() => {
+  const m: Record<string, number> = { all: projectStore.projects.length, default: 0 }
+  for (const env of envOptions.value) m[env] = 0
+  for (const p of projectStore.projects) {
+    const env = (p.env || '').trim()
+    if (!env) m.default++
+    else m[env] = (m[env] || 0) + 1
+  }
+  return m
+})
+
+watch([envOptions, projectCountByEnv], () => {
+  const v = selectedEnvFilter.value
+  if (v === 'all') return
+  if (v === 'default') {
+    if (projectCountByEnv.value.default === 0) selectedEnvFilter.value = 'all'
+    return
+  }
+  if (!envOptions.value.includes(v)) selectedEnvFilter.value = 'all'
 })
 
 const categoryColorClass: Record<string, string> = {
@@ -60,6 +113,18 @@ const categoryColorClass: Record<string, string> = {
 function categoryChipClass(color?: string | null) {
   if (color && categoryColorClass[color]) return categoryColorClass[color]
   return 'bg-base text-textMuted border-border'
+}
+
+const ENV_COLOR_PALETTE = ['blue', 'green', 'yellow', 'purple', 'pink', 'cyan', 'gray'] as const
+function envChipClass(env?: string | null): string {
+  const key = (env || '').trim().toLowerCase()
+  if (!key) return 'bg-base text-textMuted border-border'
+  let hash = 0
+  for (let i = 0; i < key.length; i++) {
+    hash = (hash * 31 + key.charCodeAt(i)) >>> 0
+  }
+  const color = ENV_COLOR_PALETTE[hash % ENV_COLOR_PALETTE.length]
+  return categoryColorClass[color]
 }
 
 function categoryNameOf(categoryId?: string | null): string {
@@ -84,7 +149,7 @@ function formatRelativeTime(iso?: string | null): string {
 }
 
 const showCreateModal = ref(false)
-const newProject = ref({ name: '', description: '', destPath: '', env: '', categoryId: '' as string })
+const newProject = ref({ name: '', description: '', destPath: '', env: '', categoryId: '' as string, tagIds: [] as string[] })
 
 const createProject = async () => {
   if (!newProject.value.name || !newProject.value.destPath) return
@@ -94,10 +159,11 @@ const createProject = async () => {
     destPath: newProject.value.destPath,
     env: newProject.value.env,
     categoryId: newProject.value.categoryId || null,
+    tagIds: newProject.value.tagIds.length > 0 ? [...newProject.value.tagIds] : undefined,
   })
   if (result.ok) {
     showCreateModal.value = false
-    newProject.value = { name: '', description: '', destPath: '', env: '', categoryId: '' }
+    newProject.value = { name: '', description: '', destPath: '', env: '', categoryId: '', tagIds: [] }
     toast.success('项目创建成功')
   } else {
     const detail = result.conflictProject
@@ -113,6 +179,10 @@ const goToDetail = (id: string) => {
 
 const goToLogs = (id: string) => {
   router.push({ path: '/logs', query: { projectId: id } })
+}
+
+const goToRunLogs = (id: string) => {
+  router.push(`/projects/${id}/logs`)
 }
 
 const goToFiles = (id: string) => {
@@ -255,6 +325,7 @@ interface BatchRow {
   env: string
   description: string
   categoryId: string
+  tagIds: string[]
   status: BatchStatus
   errorMsg?: string
 }
@@ -282,10 +353,12 @@ function onFolderPicked(paths: string[]) {
     categoryId: selectedCategoryFilter.value && selectedCategoryFilter.value !== 'all' && selectedCategoryFilter.value !== 'default'
       ? selectedCategoryFilter.value
       : '',
+    tagIds: selectedTagIds.value.length > 0 ? [...selectedTagIds.value] : [],
     status: 'pending' as BatchStatus,
   }))
   showBatchModal.value = true
   projectStore.fetchCategories()
+  projectStore.fetchTags()
 }
 
 function addRowsFromPicker(paths: string[]) {
@@ -299,6 +372,7 @@ function addRowsFromPicker(paths: string[]) {
       env: '',
       description: '',
       categoryId: '',
+      tagIds: [],
       status: 'pending',
     })
   }
@@ -388,6 +462,7 @@ async function submitBatch() {
         destPath: row.destPath,
         env: row.env?.trim() || undefined,
         categoryId: row.categoryId || null,
+        tagIds: row.tagIds.length > 0 ? [...row.tagIds] : undefined,
       })
       if (result.ok) {
         row.status = 'success'
@@ -539,16 +614,134 @@ async function deleteCategoryAction(c: Category) {
     deletingCategoryId.value = null
   }
 }
+
+// ---------- Tag helpers ----------
+function toggleTagFilter(id: string) {
+  const idx = selectedTagIds.value.indexOf(id)
+  if (idx === -1) selectedTagIds.value = [...selectedTagIds.value, id]
+  else selectedTagIds.value = selectedTagIds.value.filter((x) => x !== id)
+}
+
+function clearTagFilters() {
+  selectedTagIds.value = []
+}
+
+// 卡片 / 行内直接编辑标签：本地乐观更新 + 调用 store 持久化
+async function persistProjectTags(projectId: string, next: string[]) {
+  const target = projectStore.projects.find((p) => p.id === projectId)
+  if (target) target.tagIds = [...next]
+  try {
+    await projectStore.updateProject(projectId, { tagIds: [...next] })
+  } catch (e: any) {
+    toast.error('保存标签失败', e?.message || '请稍后重试')
+  }
+}
+
+function toggleTagOnForm(target: { tagIds: string[] }, id: string) {
+  const idx = target.tagIds.indexOf(id)
+  if (idx === -1) target.tagIds = [...target.tagIds, id]
+  else target.tagIds = target.tagIds.filter((x) => x !== id)
+}
+
+// ---------- Manage tags modal ----------
+const showTagModal = ref(false)
+const newTagName = ref('')
+const isCreatingTag = ref(false)
+const editingTagId = ref<string | null>(null)
+const editTagName = ref('')
+const isSavingTag = ref(false)
+const deletingTagId = ref<string | null>(null)
+
+function openTagModal() {
+  showTagModal.value = true
+  newTagName.value = ''
+  editingTagId.value = null
+  projectStore.fetchTags()
+}
+
+async function submitCreateTag() {
+  const name = newTagName.value.trim()
+  if (!name) return
+  isCreatingTag.value = true
+  try {
+    const color = pickFreeChipColor(projectStore.tags)
+    const res = await projectStore.createTag({ name, color })
+    if (res.ok) {
+      toast.success('标签创建成功')
+      newTagName.value = ''
+    } else {
+      toast.error('创建失败', res.conflictTag ? `标签名「${res.conflictTag}」已存在` : res.error || '请稍后重试')
+    }
+  } finally {
+    isCreatingTag.value = false
+  }
+}
+
+function startEditTag(t: TagType) {
+  editingTagId.value = t.id
+  editTagName.value = t.name
+}
+
+function cancelEditTag() {
+  editingTagId.value = null
+  editTagName.value = ''
+}
+
+async function submitEditTag() {
+  if (!editingTagId.value) return
+  const name = editTagName.value.trim()
+  if (!name) return
+  isSavingTag.value = true
+  try {
+    const res = await projectStore.updateTag(editingTagId.value, { name })
+    if (res.ok) {
+      toast.success('标签已更新')
+      cancelEditTag()
+    } else {
+      toast.error('更新失败', res.conflictTag ? `标签名「${res.conflictTag}」已存在` : res.error || '请稍后重试')
+    }
+  } finally {
+    isSavingTag.value = false
+  }
+}
+
+async function changeTagColor(t: TagType, color: string) {
+  const res = await projectStore.updateTag(t.id, { color })
+  if (!res.ok) toast.error('更新失败', res.error || '请稍后重试')
+}
+
+async function deleteTagAction(t: TagType) {
+  if (deletingTagId.value) return
+  const count = t.projectCount || 0
+  const ok = window.confirm(
+    count > 0
+      ? `标签「${t.name}」当前关联了 ${count} 个项目，删除后这些关联会被解除。是否继续？`
+      : `确认删除标签「${t.name}」？`
+  )
+  if (!ok) return
+  deletingTagId.value = t.id
+  try {
+    const res = await projectStore.deleteTag(t.id)
+    if (res.ok) {
+      toast.success('标签已删除', res.detachedProjects ? `${res.detachedProjects} 个项目已解除关联` : undefined)
+      selectedTagIds.value = selectedTagIds.value.filter((x) => x !== t.id)
+    } else {
+      toast.error('删除失败', res.error || '请稍后重试')
+    }
+  } finally {
+    deletingTagId.value = null
+  }
+}
 </script>
 
 <template>
   <div class="max-w-7xl mx-auto space-y-6">
-    <div class="flex justify-between items-center mb-8">
+    <div class="flex flex-col md:flex-row md:justify-between md:items-center gap-3 mb-8">
       <div>
         <h1 class="text-2xl font-bold text-textMain tracking-tight">项目管理</h1>
         <p class="text-textMuted text-sm mt-1">管理所有可部署的应用服务与脚本配置</p>
       </div>
-      <div class="flex items-center space-x-2">
+      <div class="flex items-center flex-wrap gap-2">
         <div class="flex items-center border border-border rounded-md overflow-hidden">
           <button
             @click="viewMode = 'card'"
@@ -576,6 +769,14 @@ async function deleteCategoryAction(c: Category) {
           管理分类
         </button>
         <button
+          @click="openTagModal"
+          class="flex items-center px-3 py-2 border border-border hover:border-primary/50 text-textMain rounded-md transition-all font-medium text-sm"
+          title="管理标签"
+        >
+          <TagsIcon class="w-4 h-4 mr-2" />
+          管理标签
+        </button>
+        <button
           @click="openFolderPicker"
           class="flex items-center px-4 py-2 bg-primary hover:bg-primary/90 text-white rounded-md shadow-[0_0_15px_rgba(59,130,246,0.3)] transition-all font-medium text-sm"
         >
@@ -594,6 +795,7 @@ async function deleteCategoryAction(c: Category) {
 
     <!-- Category filter chips -->
     <div class="flex items-center flex-wrap gap-2">
+      <span class="text-xs text-textMuted/80 mr-1 shrink-0">分类</span>
       <button
         @click="selectedCategoryFilter = 'all'"
         class="flex items-center px-3 py-1.5 rounded-full text-xs border transition-colors"
@@ -623,8 +825,66 @@ async function deleteCategoryAction(c: Category) {
       </button>
     </div>
 
+    <!-- Environment filter chips -->
+    <div v-if="envOptions.length > 0" class="flex items-center flex-wrap gap-2">
+      <span class="text-xs text-textMuted/80 mr-1 shrink-0">环境</span>
+      <button
+        @click="selectedEnvFilter = 'all'"
+        class="flex items-center px-3 py-1.5 rounded-full text-xs border transition-colors"
+        :class="selectedEnvFilter === 'all' ? 'bg-primary/15 text-primary border-primary/40' : 'bg-base text-textMuted border-border hover:text-textMain'"
+      >
+        全部
+        <span class="ml-1.5 text-[10px] opacity-75">{{ projectCountByEnv.all }}</span>
+      </button>
+      <button
+        v-if="projectCountByEnv.default > 0"
+        @click="selectedEnvFilter = 'default'"
+        class="flex items-center px-3 py-1.5 rounded-full text-xs border transition-colors"
+        :class="selectedEnvFilter === 'default' ? 'bg-primary/15 text-primary border-primary/40' : 'bg-base text-textMuted border-border hover:text-textMain'"
+        title="未指定环境的项目"
+      >
+        未指定
+        <span class="ml-1.5 text-[10px] opacity-75">{{ projectCountByEnv.default }}</span>
+      </button>
+      <button
+        v-for="env in envOptions"
+        :key="env"
+        @click="selectedEnvFilter = env"
+        class="flex items-center px-3 py-1.5 rounded-full text-xs border transition-colors font-mono"
+        :class="selectedEnvFilter === env ? 'bg-primary/15 text-primary border-primary/40' : `${envChipClass(env)} hover:opacity-90`"
+      >
+        {{ env }}
+        <span class="ml-1.5 text-[10px] opacity-75 font-sans">{{ projectCountByEnv[env] || 0 }}</span>
+      </button>
+    </div>
+
+    <!-- Tag filter chips (multi-select AND) -->
+    <div v-if="projectStore.tags.length > 0" class="flex items-center flex-wrap gap-2">
+      <span class="text-xs text-textMuted/80 mr-1 shrink-0">标签</span>
+      <button
+        v-for="t in projectStore.tags"
+        :key="t.id"
+        @click="toggleTagFilter(t.id)"
+        class="flex items-center px-3 py-1.5 rounded-full text-xs border transition-colors"
+        :class="selectedTagIds.includes(t.id) ? `${tagChipClass(t.color)} ring-1 ring-primary/40` : 'bg-base text-textMuted border-border hover:text-textMain hover:border-textMuted/40'"
+        :title="selectedTagIds.includes(t.id) ? '点击取消该标签筛选' : '点击叠加该标签筛选（多选为「与」逻辑）'"
+      >
+        <Tag class="w-3 h-3 mr-1.5" />
+        {{ t.name }}
+        <span v-if="t.projectCount != null" class="ml-1.5 text-[10px] opacity-75">{{ t.projectCount }}</span>
+      </button>
+      <button
+        v-if="selectedTagIds.length > 0"
+        @click="clearTagFilters"
+        class="flex items-center px-2 py-1.5 rounded-full text-[11px] text-textMuted hover:text-textMain transition-colors"
+        title="清空标签筛选"
+      >
+        <XIcon class="w-3 h-3 mr-1" /> 清空
+      </button>
+    </div>
+
     <!-- Card view -->
-    <div v-if="viewMode === 'card'" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+    <div v-if="viewMode === 'card'" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
       <div
         v-for="project in filteredProjects"
         :key="project.id"
@@ -659,7 +919,13 @@ async function deleteCategoryAction(c: Category) {
             <Tag class="w-3 h-3 mr-1" />
             {{ categoryNameOf(project.categoryId) }}
           </span>
-          <span v-if="project.env" class="inline-flex items-center px-2 py-0.5 rounded text-[10px] border bg-base text-textMuted border-border font-mono">{{ project.env }}</span>
+          <span v-if="project.env" class="inline-flex items-center px-2 py-0.5 rounded text-[10px] border font-mono" :class="envChipClass(project.env)">{{ project.env }}</span>
+          <ProjectTagsEditor
+            :model-value="project.tagIds || []"
+            size="sm"
+            :on-persist="(next) => persistProjectTags(project.id, next)"
+            :aria-label="`编辑「${project.name}」的标签`"
+          />
         </div>
 
         <div class="flex items-center justify-between border-t border-border pt-4 text-xs text-textMuted">
@@ -674,7 +940,15 @@ async function deleteCategoryAction(c: Category) {
               title="查看部署日志"
             >
               <ScrollText class="w-3.5 h-3.5 mr-1" />
-              <span>日志</span>
+              <span>部署日志</span>
+            </button>
+            <button
+              @click.stop="goToRunLogs(project.id)"
+              class="flex items-center text-textMuted hover:text-primary transition-colors"
+              title="查看运行日志"
+            >
+              <Activity class="w-3.5 h-3.5 mr-1" />
+              <span>运行日志</span>
             </button>
             <span class="flex items-center" :class="project.status === 'success' ? 'text-success' : project.status === 'failed' ? 'text-danger' : 'text-primary'">
               <span class="w-2 h-2 rounded-full mr-1.5" :class="project.status === 'success' ? 'bg-success shadow-[0_0_8px_#10b981]' : project.status === 'failed' ? 'bg-danger' : 'bg-primary'"></span>
@@ -690,7 +964,8 @@ async function deleteCategoryAction(c: Category) {
 
     <!-- List view -->
     <div v-else class="bg-panel border border-border rounded-xl overflow-hidden">
-      <table class="w-full text-sm">
+      <div class="overflow-x-auto">
+      <table class="w-full text-sm min-w-[720px]">
         <thead class="text-xs text-textMuted bg-base/40">
           <tr>
             <th class="text-left font-medium px-4 py-3">项目名</th>
@@ -720,13 +995,21 @@ async function deleteCategoryAction(c: Category) {
             </td>
             <td class="px-4 py-3 text-textMuted font-mono text-xs break-all max-w-xs">{{ project.destPath || '—' }}</td>
             <td class="px-4 py-3">
-              <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] border" :class="categoryChipClass(categoryMap.get(project.categoryId || '')?.color)">
-                <Tag class="w-3 h-3 mr-1" />
-                {{ categoryNameOf(project.categoryId) }}
-              </span>
+              <div class="flex items-center flex-wrap gap-1">
+                <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] border" :class="categoryChipClass(categoryMap.get(project.categoryId || '')?.color)">
+                  <Tag class="w-3 h-3 mr-1" />
+                  {{ categoryNameOf(project.categoryId) }}
+                </span>
+                <ProjectTagsEditor
+                  :model-value="project.tagIds || []"
+                  size="sm"
+                  :on-persist="(next) => persistProjectTags(project.id, next)"
+                  :aria-label="`编辑「${project.name}」的标签`"
+                />
+              </div>
             </td>
             <td class="px-4 py-3">
-              <span v-if="project.env" class="inline-flex items-center px-2 py-0.5 rounded text-[10px] border bg-base text-textMuted border-border font-mono">{{ project.env }}</span>
+              <span v-if="project.env" class="inline-flex items-center px-2 py-0.5 rounded text-[10px] border font-mono" :class="envChipClass(project.env)">{{ project.env }}</span>
               <span v-else class="text-textMuted text-xs">—</span>
             </td>
             <td class="px-4 py-3 text-textMuted text-xs" :title="project.lastDeployAt ? new Date(project.lastDeployAt).toLocaleString() : '从未部署'">
@@ -749,6 +1032,7 @@ async function deleteCategoryAction(c: Category) {
           </tr>
         </tbody>
       </table>
+      </div>
     </div>
 
     <!-- Card dropdown (teleported to body to avoid being clipped by card's overflow:hidden) -->
@@ -780,6 +1064,13 @@ async function deleteCategoryAction(c: Category) {
           >
             <ScrollText class="w-3.5 h-3.5 mr-2 text-textMuted" />
             部署日志
+          </button>
+          <button
+            class="flex items-center w-full px-3 py-2 text-sm text-textMain hover:bg-white/5 transition-colors"
+            @click="(() => { const id = openDropdownId; closeDropdown(); if (id) goToRunLogs(id) })()"
+          >
+            <Activity class="w-3.5 h-3.5 mr-2 text-textMuted" />
+            运行日志
           </button>
           <div class="border-t border-border my-1"></div>
           <div class="relative">
@@ -835,8 +1126,8 @@ async function deleteCategoryAction(c: Category) {
     </Teleport>
 
     <!-- Create Modal -->
-    <div v-if="showCreateModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div class="bg-panel border border-border rounded-xl w-full max-w-md p-6 shadow-2xl transform transition-all">
+    <div v-if="showCreateModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+      <div class="bg-panel border border-border rounded-xl w-full max-w-md p-6 shadow-2xl transform transition-all max-h-[90vh] overflow-y-auto">
         <h2 class="text-xl font-bold text-textMain mb-6">新建部署项目</h2>
         
         <div class="space-y-4">
@@ -885,6 +1176,26 @@ async function deleteCategoryAction(c: Category) {
           </div>
 
           <div>
+            <label class="block text-sm font-medium text-textMuted mb-1.5">标签 (可选，可多选)</label>
+            <div v-if="projectStore.tags.length === 0" class="text-xs text-textMuted">
+              还没有标签，可前往「管理标签」创建。
+            </div>
+            <div v-else class="flex items-center flex-wrap gap-1.5">
+              <button
+                v-for="t in projectStore.tags"
+                :key="t.id"
+                type="button"
+                @click="toggleTagOnForm(newProject, t.id)"
+                class="inline-flex items-center px-2 py-1 rounded text-[11px] border transition-colors"
+                :class="newProject.tagIds.includes(t.id) ? `${tagChipClass(t.color)} ring-1 ring-primary/40` : 'bg-base text-textMuted border-border hover:text-textMain hover:border-textMuted/40'"
+              >
+                <Tag class="w-3 h-3 mr-1" />
+                {{ t.name }}
+              </button>
+            </div>
+          </div>
+
+          <div>
             <label class="block text-sm font-medium text-textMuted mb-1.5">描述 (可选)</label>
             <textarea
               v-model="newProject.description"
@@ -921,7 +1232,7 @@ async function deleteCategoryAction(c: Category) {
     />
 
     <!-- Batch Create Modal -->
-    <div v-if="showBatchModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" @click.self="closeBatchModal">
+    <div v-if="showBatchModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" @click.self="closeBatchModal">
       <div class="bg-panel border border-border rounded-xl w-full max-w-6xl shadow-2xl flex flex-col" style="max-height: 85vh;">
         <div class="flex items-center justify-between px-6 py-4 border-b border-border">
           <div>
@@ -944,11 +1255,12 @@ async function deleteCategoryAction(c: Category) {
           <table class="w-full text-sm table-fixed">
             <thead class="text-xs text-textMuted sticky top-0 bg-panel">
               <tr class="border-b border-border">
-                <th class="text-left font-medium px-3 py-2 w-[18%]">项目名</th>
-                <th class="text-left font-medium px-3 py-2 w-[36%]">部署目录</th>
+                <th class="text-left font-medium px-3 py-2 w-[16%]">项目名</th>
+                <th class="text-left font-medium px-3 py-2 w-[30%]">部署目录</th>
                 <th class="text-left font-medium px-3 py-2 w-[10%]">环境标识</th>
-                <th class="text-left font-medium px-3 py-2 w-[14%]">分类</th>
-                <th class="text-left font-medium px-3 py-2 w-[22%]">描述</th>
+                <th class="text-left font-medium px-3 py-2 w-[12%]">分类</th>
+                <th class="text-left font-medium px-3 py-2 w-[16%]">标签</th>
+                <th class="text-left font-medium px-3 py-2 w-[16%]">描述</th>
               </tr>
             </thead>
             <tbody>
@@ -1001,6 +1313,22 @@ async function deleteCategoryAction(c: Category) {
                   </select>
                 </td>
                 <td class="px-3 py-2">
+                  <div v-if="projectStore.tags.length === 0" class="text-[11px] text-textMuted">无</div>
+                  <div v-else class="flex items-center flex-wrap gap-1">
+                    <button
+                      v-for="t in projectStore.tags"
+                      :key="t.id"
+                      type="button"
+                      :disabled="row.status === 'success' || isBatchSubmitting"
+                      @click="toggleTagOnForm(row, t.id)"
+                      class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] border transition-colors disabled:opacity-60"
+                      :class="row.tagIds.includes(t.id) ? `${tagChipClass(t.color)} ring-1 ring-primary/40` : 'bg-base text-textMuted border-border hover:text-textMain hover:border-textMuted/40'"
+                    >
+                      {{ t.name }}
+                    </button>
+                  </div>
+                </td>
+                <td class="px-3 py-2">
                   <div class="flex items-start gap-2">
                     <input
                       v-model="row.description"
@@ -1022,7 +1350,7 @@ async function deleteCategoryAction(c: Category) {
                 </td>
               </tr>
               <tr v-if="batchRows.length === 0">
-                <td colspan="5" class="px-3 py-8 text-center text-textMuted text-sm">没有待创建的项目</td>
+                <td colspan="6" class="px-3 py-8 text-center text-textMuted text-sm">没有待创建的项目</td>
               </tr>
             </tbody>
           </table>
@@ -1073,10 +1401,10 @@ async function deleteCategoryAction(c: Category) {
     <!-- Rename Modal -->
     <div
       v-if="showRenameModal"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
       @click.self="showRenameModal = false"
     >
-      <div class="bg-panel border border-border rounded-xl w-full max-w-md p-6 shadow-2xl">
+      <div class="bg-panel border border-border rounded-xl w-full max-w-md p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
         <h2 class="text-lg font-semibold text-textMain mb-4">重命名项目</h2>
         <div>
           <label class="block text-sm font-medium text-textMuted mb-1.5">项目名称</label>
@@ -1110,10 +1438,10 @@ async function deleteCategoryAction(c: Category) {
     <!-- Delete Modal -->
     <div
       v-if="showDeleteModal"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
       @click.self="!isDeleting && (showDeleteModal = false)"
     >
-      <div class="bg-panel border border-danger/30 rounded-xl w-full max-w-lg p-6 shadow-2xl">
+      <div class="bg-panel border border-danger/30 rounded-xl w-full max-w-lg p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
         <div class="flex items-start space-x-3 mb-5">
           <div class="p-2 rounded-lg bg-danger/10 border border-danger/20 shrink-0">
             <AlertTriangle class="w-5 h-5 text-danger" />
@@ -1164,7 +1492,7 @@ async function deleteCategoryAction(c: Category) {
     <!-- Manage Categories Modal -->
     <div
       v-if="showCategoryModal"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
       @click.self="showCategoryModal = false"
     >
       <div class="bg-panel border border-border rounded-xl w-full max-w-2xl shadow-2xl flex flex-col" style="max-height: 85vh;">
@@ -1261,6 +1589,123 @@ async function deleteCategoryAction(c: Category) {
         <div class="flex items-center justify-end px-6 py-4 border-t border-border">
           <button
             @click="showCategoryModal = false"
+            class="px-4 py-2 text-sm font-medium text-textMuted hover:text-textMain dark:hover:bg-white/5 hover:bg-black/5 rounded-md transition-colors"
+          >完成</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Manage Tags Modal -->
+    <div
+      v-if="showTagModal"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+      @click.self="showTagModal = false"
+    >
+      <div class="bg-panel border border-border rounded-xl w-full max-w-2xl shadow-2xl flex flex-col" style="max-height: 85vh;">
+        <div class="flex items-center justify-between px-6 py-4 border-b border-border">
+          <div>
+            <h2 class="text-xl font-bold text-textMain">管理标签</h2>
+            <p class="text-xs text-textMuted mt-1">创建、编辑、删除项目标签。删除标签会解除其与项目的关联。</p>
+          </div>
+          <button @click="showTagModal = false" class="text-textMuted hover:text-textMain p-1">
+            <XCircle class="w-5 h-5" />
+          </button>
+        </div>
+
+        <div class="px-6 py-4 border-b border-border">
+          <label class="block text-sm font-medium text-textMuted mb-2">新建标签</label>
+          <div class="flex items-center gap-2">
+            <input
+              v-model="newTagName"
+              type="text"
+              placeholder="如：前端 / Node / PM2"
+              :disabled="isCreatingTag"
+              class="flex-1 bg-base border border-border rounded-md px-3 py-2 text-textMain focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all text-sm disabled:opacity-60"
+              @keydown.enter.prevent="submitCreateTag"
+            />
+            <button
+              @click="submitCreateTag"
+              :disabled="isCreatingTag || !newTagName.trim()"
+              class="px-4 py-2 text-sm font-medium bg-primary text-white rounded-md hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center"
+            >
+              <RefreshCw v-if="isCreatingTag" class="w-4 h-4 mr-2 animate-spin" />
+              <Plus v-else class="w-4 h-4 mr-1" />
+              新建
+            </button>
+          </div>
+          <p class="text-xs text-textMuted mt-2">颜色将自动分配，可在下方点击色块切换。</p>
+        </div>
+
+        <div class="flex-1 overflow-auto px-6 py-4">
+          <div v-if="projectStore.tags.length === 0" class="text-center py-8 text-textMuted text-sm">
+            还没有标签，新建一个吧
+          </div>
+          <ul v-else class="divide-y divide-border">
+            <li
+              v-for="t in projectStore.tags"
+              :key="t.id"
+              class="py-3 flex items-center justify-between gap-3 flex-wrap"
+            >
+              <template v-if="editingTagId === t.id">
+                <input
+                  v-model="editTagName"
+                  type="text"
+                  :disabled="isSavingTag"
+                  class="flex-1 bg-base border border-border rounded-md px-3 py-2 text-textMain focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all text-sm disabled:opacity-60"
+                  @keydown.enter.prevent="submitEditTag"
+                />
+                <button
+                  @click="submitEditTag"
+                  :disabled="isSavingTag || !editTagName.trim()"
+                  class="px-3 py-1.5 text-xs font-medium bg-primary text-white rounded-md hover:bg-primary/90 disabled:opacity-50 transition-colors"
+                >保存</button>
+                <button
+                  @click="cancelEditTag"
+                  :disabled="isSavingTag"
+                  class="px-3 py-1.5 text-xs font-medium text-textMuted hover:text-textMain transition-colors"
+                >取消</button>
+              </template>
+              <template v-else>
+                <span class="inline-flex items-center px-2 py-1 rounded text-xs border" :class="tagChipClass(t.color)">
+                  <Tag class="w-3 h-3 mr-1.5" />
+                  {{ t.name }}
+                </span>
+                <div class="flex items-center gap-1">
+                  <button
+                    v-for="color in CHIP_COLOR_PALETTE"
+                    :key="color"
+                    type="button"
+                    :title="`切换为 ${color}`"
+                    @click="changeTagColor(t, color)"
+                    class="w-4 h-4 rounded-full border"
+                    :class="[tagChipClass(color), t.color === color ? 'ring-2 ring-primary' : '']"
+                  />
+                </div>
+                <span class="text-xs text-textMuted flex-1 min-w-[60px]">{{ t.projectCount || 0 }} 个项目</span>
+                <button
+                  @click="startEditTag(t)"
+                  class="px-3 py-1.5 text-xs font-medium text-textMuted hover:text-textMain transition-colors flex items-center"
+                >
+                  <Pencil class="w-3 h-3 mr-1" />
+                  编辑
+                </button>
+                <button
+                  @click="deleteTagAction(t)"
+                  :disabled="deletingTagId === t.id"
+                  class="px-3 py-1.5 text-xs font-medium text-danger hover:bg-danger/10 rounded-md transition-colors flex items-center disabled:opacity-50"
+                >
+                  <RefreshCw v-if="deletingTagId === t.id" class="w-3 h-3 mr-1 animate-spin" />
+                  <Trash2 v-else class="w-3 h-3 mr-1" />
+                  删除
+                </button>
+              </template>
+            </li>
+          </ul>
+        </div>
+
+        <div class="flex items-center justify-end px-6 py-4 border-t border-border">
+          <button
+            @click="showTagModal = false"
             class="px-4 py-2 text-sm font-medium text-textMuted hover:text-textMain dark:hover:bg-white/5 hover:bg-black/5 rounded-md transition-colors"
           >完成</button>
         </div>

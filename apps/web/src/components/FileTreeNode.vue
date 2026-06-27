@@ -8,6 +8,7 @@ interface TreeNode {
   name: string
   path: string
   isDir: boolean
+  isHidden?: boolean
   size?: number
   expanded?: boolean
   children?: TreeNode[]
@@ -40,7 +41,10 @@ function getIcon(name: string, isDir: boolean, expanded?: boolean) {
   <div>
     <button
       class="w-full flex items-center py-1.5 text-sm hover:bg-primary/5 transition-colors"
-      :class="selectedFile === node.path && !node.isDir ? 'bg-primary/10 text-primary' : 'text-textMain'"
+      :class="[
+        selectedFile === node.path && !node.isDir ? 'bg-primary/10 text-primary' : 'text-textMain',
+        node.isHidden ? 'opacity-60' : '',
+      ]"
       :style="{ paddingLeft: (depth * 16 + 12) + 'px' }"
       @click="node.isDir ? emit('toggle', node) : emit('select', node)"
     >

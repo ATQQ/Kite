@@ -1,0 +1,11 @@
+{
+  "projectId": "proj_f37e913a312b",
+  "outputDir": "./",
+  "files": [
+    "dist/**/*",
+    "scripts/**/*",
+    "package.json"
+  ],
+  "serverUrl": "https://kite.sugarat.top",
+  "postDeployAsync": true
+}

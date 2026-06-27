@@ -9,11 +9,13 @@ export const projects = sqliteTable('projects', {
   token: text('token').notNull().unique(),
   preDeployScript: text('pre_deploy_script'),
   postDeployScript: text('post_deploy_script'),
+  postDeployAsync: integer('post_deploy_async', { mode: 'boolean' }).default(false),
   env: text('env'),                          // optional environment label, e.g. 'test', 'prod'
   status: text('status').default('idle'), // 'idle' | 'success' | 'failed' | 'running'
   cleanMode: text('clean_mode'),             // 'merge' (default/null) | 'clean' | 'clean-all'
   protectPaths: text('protect_paths'),       // JSON string array of globs
   categoryId: text('category_id'),           // nullable: NULL = 默认（未分类）
+  pm2AppName: text('pm2_app_name'),          // nullable: 绑定的 PM2 应用名，用于拉取进程资源
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 });
@@ -48,6 +50,35 @@ export const deployments = sqliteTable('deployments', {
   artifactPath: text('artifact_path'),         // absolute path to ~/.kite/deployments/<projectId>/artifacts/<id>.zip (null = unarchived / cleaned)
   artifactSize: integer('artifact_size'),      // bytes
   rollbackOf: text('rollback_of'),             // source deployment id when this run is a rollback
+});
+
+// 项目日志源（PM2 / Nginx / 自定义文件路径）
+export const projectLogSources = sqliteTable('project_log_sources', {
+  id: text('id').primaryKey(),
+  projectId: text('project_id').references(() => projects.id).notNull(),
+  label: text('label').notNull(),
+  filePath: text('file_path').notNull(),
+  kind: text('kind').default('plain'),         // 'pm2' | 'nginx' | 'plain'
+  sortOrder: integer('sort_order').default(0),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+// 项目标签表（独立于分类，多对多）
+export const tags = sqliteTable('tags', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull().unique(),
+  color: text('color'),                      // 前端枚举: blue|green|yellow|purple|pink|cyan|gray
+  sortOrder: integer('sort_order').default(0),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+// 项目 ↔ 标签关联表（复合主键 (project_id, tag_id)）
+export const projectTags = sqliteTable('project_tags', {
+  projectId: text('project_id').references(() => projects.id).notNull(),
+  tagId: text('tag_id').references(() => tags.id).notNull(),
+  createdAt: text('created_at').notNull(),
 });
 
 // 操作日志（运维审计）表

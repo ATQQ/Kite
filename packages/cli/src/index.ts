@@ -596,6 +596,7 @@ cli.command('push', 'Push and deploy project')
   .option('--pre <script>', 'Pre-deploy script (Server side)')
   .option('--post <script>', 'Post-deploy script (Server side)')
   .option('--command <script>', 'Deploy command alias, same as --post')
+  .option('--post-deploy-async', 'Run postDeploy asynchronously (do not wait for it to finish)')
   .option('--set-env <vars>', 'Environment variables as JSON or KEY=VALUE (overrides config)')
   .option('--ignore <patterns>', 'Extra ignore patterns (comma separated, may repeat)')
   .option('--no-ignore-builtin', 'Disable built-in ignore patterns (node_modules, .git, .env*, etc.)')
@@ -669,6 +670,12 @@ cli.command('push', 'Push and deploy project')
       const files = projectConfig.files || [];
       const preDeploy = options.pre || localEnv.KITE_PRE_DEPLOY || projectConfig.preDeploy;
       const postDeploy = options.command || options.post || localEnv.KITE_DEPLOY_COMMAND || localEnv.KITE_POST_DEPLOY || projectConfig.command || projectConfig.postDeploy;
+      // postDeployAsync: CLI flag > env > project config（undefined = 不覆盖项目设置）
+      let postDeployAsync: boolean | undefined;
+      if (options.postDeployAsync === true) postDeployAsync = true;
+      else if (localEnv.KITE_POST_DEPLOY_ASYNC === 'true' || localEnv.KITE_POST_DEPLOY_ASYNC === '1') postDeployAsync = true;
+      else if (localEnv.KITE_POST_DEPLOY_ASYNC === 'false' || localEnv.KITE_POST_DEPLOY_ASYNC === '0') postDeployAsync = false;
+      else if (typeof projectConfig.postDeployAsync === 'boolean') postDeployAsync = projectConfig.postDeployAsync;
 
       // 解析 env: 项目配置 + CLI --set-env 覆盖
       let deployEnv: Record<string, string> | undefined = projectConfig.env || undefined;
@@ -723,6 +730,7 @@ cli.command('push', 'Push and deploy project')
         projectId,
         preDeploy,
         postDeploy,
+        postDeployAsync,
         env: deployEnv,
         startedAt: pushStartedAt
       });

@@ -85,7 +85,7 @@ export const deployRoutes = new Elysia()
     if (guard.locked) {
       const retrySec = Math.ceil(guard.retryAfterMs / 1000);
       set.status = 429;
-      set.headers = { ...(set.headers || {}), 'Retry-After': String(retrySec) };
+      set.headers['Retry-After'] = String(retrySec);
       await writeAudit({ headers }, {
         action: 'auth.login_failed',
         targetType: 'auth',
@@ -113,9 +113,24 @@ export const deployRoutes = new Elysia()
   }, {
     body: t.Object({ token: t.String() })
   })
-  .get('/api/projects', async ({ headers, set }) => {
+  .get('/api/projects', async ({ headers, query, set }) => {
     if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
-    return await db.projects.findAllWithMeta();
+    const items = await db.projects.findAllWithMeta();
+    // Attach tagIds[] per project (single bulk fetch)
+    const pairs = await db.projectTags.listAllPairs();
+    const tagMap = new Map<string, string[]>();
+    for (const p of pairs) {
+      if (!tagMap.has(p.projectId)) tagMap.set(p.projectId, []);
+      tagMap.get(p.projectId)!.push(p.tagId);
+    }
+    const withTags = items.map(p => ({ ...p, tagIds: tagMap.get(p.id) ?? [] }));
+    // ?tagIds=a,b,c → AND filter (project must have all)
+    const tagIdsParam = typeof query.tagIds === 'string' ? query.tagIds.trim() : '';
+    if (!tagIdsParam) return withTags;
+    const wantedIds = tagIdsParam.split(',').map(s => s.trim()).filter(Boolean);
+    if (wantedIds.length === 0) return withTags;
+    const matchIds = new Set(await db.projectTags.projectIdsHavingAll(wantedIds));
+    return withTags.filter(p => matchIds.has(p.id));
   })
   .post('/api/projects', async ({ headers, body, set }) => {
     if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
@@ -133,22 +148,46 @@ export const deployRoutes = new Elysia()
       if (!cat) { set.status = 400; return { error: '分类不存在' }; }
       categoryId = cat.id;
     }
+    const pm2AppName = typeof body.pm2AppName === 'string' && body.pm2AppName.trim() !== ''
+      ? body.pm2AppName.trim()
+      : null;
+    // Validate tagIds if provided
+    const tagIds: string[] = [];
+    if (Array.isArray(body.tagIds)) {
+      for (const tid of body.tagIds) {
+        if (typeof tid !== 'string' || !tid) continue;
+        const tag = await db.tags.findById(tid);
+        if (tag) tagIds.push(tag.id);
+      }
+    }
+    // Auto-attach built-in "PM2" tag when project is created with pm2AppName bound.
+    if (pm2AppName) {
+      const pm2Tag = await db.tags.findByName('PM2');
+      if (pm2Tag && !tagIds.includes(pm2Tag.id)) {
+        tagIds.push(pm2Tag.id);
+      }
+    }
+    const { tagIds: _omitTagIds, ...rest } = body as Record<string, any>;
     const project = await db.projects.create({
-      ...body,
+      ...rest,
       categoryId,
+      pm2AppName,
       id: 'proj_' + randomUUID().replace(/-/g, '').substring(0, 12),
       token: 'kt_' + randomUUID().replace(/-/g, ''),
     });
+    if (tagIds.length > 0) {
+      await db.projectTags.setForProject(project.id, tagIds);
+    }
     await writeAudit({ headers }, {
       action: 'project.create',
       targetType: 'project',
       targetId: project.id,
       targetName: project.name,
       before: null,
-      after: sanitize(project),
+      after: { ...(sanitize(project) as any), tagIds },
       summary: `创建项目 ${project.name}`,
     });
-    return { success: true, project };
+    return { success: true, project: { ...project, tagIds } };
   }, {
     body: t.Object({
       name: t.String(),
@@ -156,13 +195,16 @@ export const deployRoutes = new Elysia()
       deployPath: t.String(),
       env: t.Optional(t.String()),
       categoryId: t.Optional(t.Union([t.String(), t.Null()])),
+      pm2AppName: t.Optional(t.Union([t.String(), t.Null()])),
+      tagIds: t.Optional(t.Array(t.String())),
     })
   })
   .get('/api/projects/:id', async ({ headers, params, set }) => {
     if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
     const project = await db.projects.findById(params.id);
     if (!project) { set.status = 404; return { error: 'Project not found' }; }
-    return project;
+    const tagIds = await db.projectTags.listByProject(params.id);
+    return { ...project, tagIds };
   })
   .put('/api/projects/:id', async ({ headers, params, body, set }) => {
     if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
@@ -224,9 +266,62 @@ export const deployRoutes = new Elysia()
         return { error: 'categoryId must be string or null' };
       }
     }
+    if (typeof patch.pm2AppName !== 'undefined') {
+      if (patch.pm2AppName === null) {
+        // ok
+      } else if (typeof patch.pm2AppName === 'string') {
+        const v = patch.pm2AppName.trim();
+        patch.pm2AppName = v === '' ? null : v;
+      } else {
+        set.status = 400;
+        return { error: 'pm2AppName must be string or null' };
+      }
+    }
+    // tagIds handled outside main patch (separate table)
+    let nextTagIds: string[] | undefined;
+    if (typeof patch.tagIds !== 'undefined') {
+      if (!Array.isArray(patch.tagIds)) {
+        set.status = 400;
+        return { error: 'tagIds must be string[]' };
+      }
+      const validated: string[] = [];
+      for (const tid of patch.tagIds) {
+        if (typeof tid !== 'string' || !tid) continue;
+        const tag = await db.tags.findById(tid);
+        if (tag) validated.push(tag.id);
+      }
+      nextTagIds = validated;
+      delete patch.tagIds;
+    }
     const after = await db.projects.update(params.id, patch);
     if (!after) { set.status = 404; return { error: 'Project not found' }; }
+    const beforeTagIds = await db.projectTags.listByProject(params.id);
+    // Auto-attach built-in "PM2" tag when pm2AppName transitions from empty/different to a new non-empty value.
+    const beforePm2 = ((before as any).pm2AppName || '').trim();
+    const afterPm2 = ((after as any).pm2AppName || '').trim();
+    if (afterPm2 && afterPm2 !== beforePm2) {
+      const pm2Tag = await db.tags.findByName('PM2');
+      if (pm2Tag) {
+        const base = nextTagIds !== undefined ? nextTagIds : [...beforeTagIds];
+        if (!base.includes(pm2Tag.id)) {
+          base.push(pm2Tag.id);
+          nextTagIds = base;
+        }
+      }
+    }
+    if (nextTagIds !== undefined) {
+      await db.projectTags.setForProject(params.id, nextTagIds);
+    }
     const diff = diffFields(before as any, after as any, Object.keys(patch));
+    // tagIds diff (only when explicit set in body)
+    if (nextTagIds !== undefined) {
+      const sortedBefore = [...beforeTagIds].sort();
+      const sortedAfter = [...nextTagIds].sort();
+      if (sortedBefore.join(',') !== sortedAfter.join(',')) {
+        diff.before.tagIds = sortedBefore;
+        diff.after.tagIds = sortedAfter;
+      }
+    }
     if (Object.keys(diff.after).length > 0) {
       await writeAudit({ headers }, {
         action: 'project.update',
@@ -238,18 +333,22 @@ export const deployRoutes = new Elysia()
         summary: `更新项目配置：${Object.keys(diff.after).join(', ')}`,
       });
     }
-    return { success: true, project: after };
+    const respTagIds = nextTagIds !== undefined ? nextTagIds : beforeTagIds;
+    return { success: true, project: { ...after, tagIds: respTagIds } };
   }, {
     body: t.Object({
       name: t.Optional(t.String()),
       preDeployScript: t.Optional(t.String()),
       postDeployScript: t.Optional(t.String()),
+      postDeployAsync: t.Optional(t.Boolean()),
       deployPath: t.Optional(t.String()),
       description: t.Optional(t.String()),
       env: t.Optional(t.String()),
       cleanMode: t.Optional(t.Union([t.Literal('merge'), t.Literal('clean'), t.Literal('clean-all'), t.Null()])),
       protectPaths: t.Optional(t.Union([t.Array(t.String()), t.Null()])),
       categoryId: t.Optional(t.Union([t.String(), t.Null()])),
+      pm2AppName: t.Optional(t.Union([t.String(), t.Null()])),
+      tagIds: t.Optional(t.Array(t.String())),
     })
   })
   .delete('/api/projects/:id', async ({ headers, params, set }) => {
@@ -366,6 +465,17 @@ export const deployRoutes = new Elysia()
 
       const preDeployCmd = body.preDeploy || project.preDeployScript;
       const postDeployCmd = body.postDeploy || project.postDeployScript;
+      // postDeployAsync: 单次 > 项目级；FormData 传字符串 'true'/'false'，需归一化
+      const parseBool = (v: unknown): boolean | undefined => {
+        if (typeof v === 'boolean') return v;
+        if (typeof v === 'string') {
+          if (v === 'true' || v === '1') return true;
+          if (v === 'false' || v === '0' || v === '') return false;
+        }
+        return undefined;
+      };
+      const overrideAsync = parseBool(body.postDeployAsync);
+      const postDeployAsync = overrideAsync !== undefined ? overrideAsync : Boolean(project.postDeployAsync);
       // env 通过 FormData 传输为 JSON 字符串，需手动解析
       let deployEnv: Record<string, string> | undefined;
       if (body.env) {
@@ -495,19 +605,58 @@ export const deployRoutes = new Elysia()
 
             // Post-deploy
             if (postDeployCmd) {
-              sendEvent(controller, 'log', { data: `[Kite Deploy] Running Post-deploy: ${postDeployCmd}` });
-              await appendLog(`[Kite Deploy] Running Post-deploy: ${postDeployCmd}`);
-              let failed = false;
-              for await (const line of runShellCommand(postDeployCmd, destPath, deployEnv)) {
-                if (line.startsWith('\x00EXIT:')) {
-                  const exitCode = parseInt(line.slice(6));
-                  if (exitCode !== 0) { failed = true; }
-                } else {
-                  sendEvent(controller, 'log', { data: line });
-                  await appendLog(line);
+              if (postDeployAsync) {
+                const dispatchMsg = `[Kite Deploy] Dispatching Post-deploy asynchronously (not waiting): ${postDeployCmd}`;
+                sendEvent(controller, 'log', { data: dispatchMsg });
+                await appendLog(dispatchMsg);
+                // Fire-and-forget: 后台仍把输出 appendLog 到 deployments.output 并广播给订阅者；
+                // 主流程立即继续。注意：Kite 进程退出时子进程会随父进程组被回收，
+                // 需要常驻请在 postDeploy 里用 nohup/pm2/setsid 自行守护。
+                (async () => {
+                  try {
+                    for await (const line of runShellCommand(postDeployCmd, destPath, deployEnv)) {
+                      if (line.startsWith('\x00EXIT:')) {
+                        const exitCode = parseInt(line.slice(6));
+                        const exitMsg = exitCode === 0
+                          ? `[Kite Deploy] (async) Post-deploy exited with code 0`
+                          : `[Kite Deploy] (async) Post-deploy exited with code ${exitCode}`;
+                        await appendLog(exitMsg);
+                        if (exitCode !== 0) {
+                          try {
+                            await writeAudit({ headers }, {
+                              action: 'deploy.post_deploy_failed',
+                              targetType: 'project',
+                              targetId: project.id,
+                              targetName: project.name,
+                              summary: `异步 postDeploy 退出码 ${exitCode}（部署 ${deploymentRow.id}）`,
+                              status: 'failed',
+                              errorMessage: `Post-deploy exited with code ${exitCode}`,
+                            });
+                          } catch { /* audit best-effort */ }
+                        }
+                      } else {
+                        await appendLog(line);
+                      }
+                    }
+                  } catch (asyncErr: any) {
+                    await appendLog(`[Kite Deploy] (async) Post-deploy error: ${asyncErr?.message || asyncErr}`);
+                  }
+                })();
+              } else {
+                sendEvent(controller, 'log', { data: `[Kite Deploy] Running Post-deploy: ${postDeployCmd}` });
+                await appendLog(`[Kite Deploy] Running Post-deploy: ${postDeployCmd}`);
+                let failed = false;
+                for await (const line of runShellCommand(postDeployCmd, destPath, deployEnv)) {
+                  if (line.startsWith('\x00EXIT:')) {
+                    const exitCode = parseInt(line.slice(6));
+                    if (exitCode !== 0) { failed = true; }
+                  } else {
+                    sendEvent(controller, 'log', { data: line });
+                    await appendLog(line);
+                  }
                 }
+                if (failed) throw new Error('Post-deploy failed');
               }
-              if (failed) throw new Error('Post-deploy failed');
             }
 
             await fs.unlink(tempZipPath);
@@ -573,6 +722,7 @@ export const deployRoutes = new Elysia()
       projectId: t.String(),
       preDeploy: t.Optional(t.String()),
       postDeploy: t.Optional(t.String()),
+      postDeployAsync: t.Optional(t.Union([t.Boolean(), t.String()])),
       env: t.Optional(t.Any()),
       startedAt: t.Optional(t.String())
     })
@@ -595,25 +745,25 @@ export const deployRoutes = new Elysia()
     try {
       const entries = await fs.readdir(targetPath, { withFileTypes: true });
       const items = await Promise.all(
-        entries
-          .filter(e => !e.name.startsWith('.'))
-          .map(async (entry) => {
-            const fullPath = path.join(targetPath, entry.name);
-            const relativePath = subPath ? `${subPath}/${entry.name}` : entry.name;
-            const stat = await fs.stat(fullPath);
-            return {
-              name: entry.name,
-              path: relativePath,
-              isDir: entry.isDirectory(),
-              size: stat.size,
-              mtime: stat.mtime.toISOString()
-            };
-          })
+        entries.map(async (entry) => {
+          const fullPath = path.join(targetPath, entry.name);
+          const relativePath = subPath ? `${subPath}/${entry.name}` : entry.name;
+          const stat = await fs.stat(fullPath);
+          return {
+            name: entry.name,
+            path: relativePath,
+            isDir: entry.isDirectory(),
+            isHidden: entry.name.startsWith('.'),
+            size: stat.size,
+            mtime: stat.mtime.toISOString()
+          };
+        })
       );
 
-      // 目录排前，文件排后，按名称排序
+      // 目录排前，文件排后；隐藏项排到同类末尾；按名称排序
       items.sort((a, b) => {
         if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+        if (a.isHidden !== b.isHidden) return a.isHidden ? 1 : -1;
         return a.name.localeCompare(b.name);
       });
 
@@ -745,6 +895,72 @@ export const deployRoutes = new Elysia()
     body: t.Object({
       cleanMode: t.Optional(t.Union([t.Literal('merge'), t.Literal('clean'), t.Literal('clean-all'), t.Null()])),
       protectPaths: t.Optional(t.Array(t.String())),
+    })
+  })
+  .patch('/api/deployments/:id/status', async ({ headers, params, body, set }) => {
+    if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
+
+    const nextStatus = body.status;
+    if (nextStatus !== 'success' && nextStatus !== 'failed') {
+      set.status = 400;
+      return { error: 'status must be "success" or "failed"' };
+    }
+
+    const deployment = await db.deployments.findById(params.id);
+    if (!deployment) { set.status = 404; return { error: 'Deployment not found' }; }
+    if (deployment.status !== 'running') {
+      set.status = 409;
+      return { error: `Deployment is already ${deployment.status}, cannot mark`, code: 'NOT_RUNNING' };
+    }
+
+    const endTimeIso = new Date().toISOString();
+    const startMs = new Date(deployment.startTime).getTime();
+    const endMs = new Date(endTimeIso).getTime();
+    const durationStr = Number.isFinite(startMs) && Number.isFinite(endMs) && endMs >= startMs
+      ? ((endMs - startMs) / 1000).toFixed(1) + 's'
+      : (deployment.duration || '0s');
+
+    const markLine = `[Kite] Manually marked as ${nextStatus} by admin at ${endTimeIso}`;
+    const nextOutput = deployment.output ? `${deployment.output}\n${markLine}` : markLine;
+
+    await db.deployments.update(deployment.id, {
+      status: nextStatus,
+      endTime: endTimeIso,
+      duration: durationStr,
+      output: nextOutput,
+    });
+
+    const project = await db.projects.findById(deployment.projectId);
+    if (project && project.status === 'running') {
+      await db.projects.update(project.id, { status: nextStatus });
+    }
+
+    broadcastToSubscribers(deployment.id, 'log', markLine);
+    broadcastToSubscribers(deployment.id, 'status', JSON.stringify({ status: nextStatus, duration: durationStr }));
+
+    await writeAudit({ headers }, {
+      action: 'deployment.mark_status',
+      targetType: 'deployment',
+      targetId: deployment.id,
+      targetName: deployment.projectName,
+      before: { status: 'running', endTime: deployment.endTime ?? null, duration: deployment.duration ?? null },
+      after: { status: nextStatus, endTime: endTimeIso, duration: durationStr },
+      summary: `手动将部署 ${deployment.id.slice(0, 8)} 标记为 ${nextStatus}`,
+    });
+
+    return {
+      success: true,
+      deployment: {
+        ...deployment,
+        status: nextStatus,
+        endTime: endTimeIso,
+        duration: durationStr,
+        output: nextOutput,
+      },
+    };
+  }, {
+    body: t.Object({
+      status: t.Union([t.Literal('success'), t.Literal('failed')]),
     })
   })
   .post('/api/deployments/:id/rollback', async ({ headers, params, set }) => {
@@ -901,7 +1117,7 @@ export const deployRoutes = new Elysia()
 
 interface CleanPreviewCacheEntry {
   expiresAt: number;
-  payload: unknown;
+  payload: Record<string, unknown>;
 }
 const cleanPreviewCache = new Map<string, CleanPreviewCacheEntry>();
 const CLEAN_PREVIEW_CACHE_MAX = 64;

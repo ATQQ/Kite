@@ -63,6 +63,10 @@ Server 会：
 6. 在目标目录执行 `postDeploy` 后置命令。
 7. 将状态更新为 `success` 或 `failed`，并记录完整终端输出。
 
+> **`postDeploy` 同步 / 异步执行**
+>
+> 默认情况下，第 6 步会**阻塞等待** `postDeploy` 全部子进程结束。当 `postDeploy` 中包含「重启自身」「PM2 重启 Kite 自己」「热重载守护进程」等会让 stdout/stderr 一直挂起的命令时，可在项目设置中开启「postDeploy 异步执行」，或在 CLI 用 `kite push --post-deploy-async` 单次覆盖。开启后服务端 spawn 之后立即返回 success，子进程输出仍会落到该次部署日志，崩溃会落到 `audit_logs` 的 `deploy.post_deploy_failed`。详见 [CLI 文档 `postDeployAsync`](../cli.md#九、配置文件详解)。
+
 > **解压行为说明**
 >
 > 解压采用覆盖模式：同名文件会被覆盖，但目标目录中已存在而新 zip 中没有的文件会保留。如果需要保证部署结果与本地完全一致，可在 `preDeploy` 中添加清理逻辑（如 `rm -rf` 目标目录内容）。

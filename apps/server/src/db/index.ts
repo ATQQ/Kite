@@ -21,6 +21,7 @@ const initDb = async () => {
       token TEXT NOT NULL UNIQUE,
       pre_deploy_script TEXT,
       post_deploy_script TEXT,
+      post_deploy_async INTEGER DEFAULT 0,
       env TEXT,
       status TEXT DEFAULT 'idle',
       created_at TEXT NOT NULL,
@@ -41,6 +42,12 @@ const initDb = async () => {
   try { await client.execute(`ALTER TABLE projects ADD COLUMN category_id TEXT`); } catch { /* exists */ }
   await client.execute(`CREATE INDEX IF NOT EXISTS idx_projects_category_id ON projects(category_id);`);
 
+  // Migration: add post_deploy_async (default 0 = sync, keep current behavior)
+  try { await client.execute(`ALTER TABLE projects ADD COLUMN post_deploy_async INTEGER DEFAULT 0`); } catch { /* exists */ }
+
+  // Migration: add pm2_app_name for PM2 process resource binding
+  try { await client.execute(`ALTER TABLE projects ADD COLUMN pm2_app_name TEXT`); } catch { /* exists */ }
+
   await client.execute(`
     CREATE TABLE IF NOT EXISTS categories (
       id TEXT PRIMARY KEY,
@@ -52,6 +59,30 @@ const initDb = async () => {
     );
   `);
   await client.execute(`CREATE INDEX IF NOT EXISTS idx_categories_sort_order ON categories(sort_order);`);
+
+  // Tags & project_tags (项目标签多对多)
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS tags (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      color TEXT,
+      sort_order INTEGER DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_tags_sort_order ON tags(sort_order);`);
+
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS project_tags (
+      project_id TEXT NOT NULL REFERENCES projects(id),
+      tag_id TEXT NOT NULL REFERENCES tags(id),
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (project_id, tag_id)
+    );
+  `);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_project_tags_project_id ON project_tags(project_id);`);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_project_tags_tag_id ON project_tags(tag_id);`);
 
   await client.execute(`
     CREATE TABLE IF NOT EXISTS settings (
@@ -85,6 +116,38 @@ const initDb = async () => {
     sql: `INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`,
     args: ['artifact_keep_n', '10']
   });
+
+  // Seed built-in tags (only on first init, gated by settings flag so 用户删除后不会复活)
+  const seededRow = await client.execute({
+    sql: 'SELECT value FROM settings WHERE key = ?',
+    args: ['tags.seeded'],
+  });
+  if (!seededRow.rows[0]) {
+    const now = new Date().toISOString();
+    const seedTags: Array<{ name: string; color: string }> = [
+      { name: '前端', color: 'blue' },
+      { name: '后端', color: 'green' },
+      { name: 'Node', color: 'green' },
+      { name: 'Java', color: 'yellow' },
+      { name: 'Go', color: 'cyan' },
+      { name: 'Python', color: 'purple' },
+      { name: 'PM2', color: 'pink' },
+      { name: 'Docker', color: 'cyan' },
+      { name: 'SSR', color: 'purple' },
+      { name: '静态站点', color: 'gray' },
+    ];
+    for (let i = 0; i < seedTags.length; i++) {
+      const t = seedTags[i];
+      await client.execute({
+        sql: `INSERT OR IGNORE INTO tags (id, name, color, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+        args: ['tag_' + randomUUID().replace(/-/g, '').substring(0, 12), t.name, t.color, i, now, now],
+      });
+    }
+    await client.execute({
+      sql: `INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)`,
+      args: ['tags.seeded', '1'],
+    });
+  }
 
   await client.execute(`
     CREATE TABLE IF NOT EXISTS deployments (
@@ -128,6 +191,21 @@ const initDb = async () => {
   await client.execute(`CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);`);
   await client.execute(`CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);`);
   await client.execute(`CREATE INDEX IF NOT EXISTS idx_audit_logs_target_id ON audit_logs(target_id);`);
+
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS project_log_sources (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id),
+      label TEXT NOT NULL,
+      file_path TEXT NOT NULL,
+      kind TEXT DEFAULT 'plain',
+      sort_order INTEGER DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_project_log_sources_project_id ON project_log_sources(project_id);`);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_project_log_sources_sort_order ON project_log_sources(sort_order);`);
 
   // Seed a demo project on first run (no existing projects)
   if (process.env.KITE_SEED_DEMO_PROJECT !== 'false') {
@@ -257,9 +335,57 @@ export const db = {
 
       // Simultaneously delete related deployment records
       await ormDb.delete(schema.deployments).where(eq(schema.deployments.projectId, id));
+      await ormDb.delete(schema.projectLogSources).where(eq(schema.projectLogSources.projectId, id));
+      await ormDb.delete(schema.projectTags).where(eq(schema.projectTags.projectId, id));
       await ormDb.delete(schema.projects).where(eq(schema.projects.id, id));
       return true;
     }
+  },
+  logSources: {
+    async findByProject(projectId: string) {
+      await ensureDbReady();
+      return await ormDb.select().from(schema.projectLogSources)
+        .where(eq(schema.projectLogSources.projectId, projectId))
+        .orderBy(asc(schema.projectLogSources.sortOrder), asc(schema.projectLogSources.label));
+    },
+    async findById(id: string) {
+      await ensureDbReady();
+      const result = await ormDb.select().from(schema.projectLogSources)
+        .where(eq(schema.projectLogSources.id, id)).limit(1);
+      return result[0] || null;
+    },
+    async create(data: { projectId: string; label: string; filePath: string; kind?: string | null; sortOrder?: number | null }) {
+      await ensureDbReady();
+      const now = new Date().toISOString();
+      const row = {
+        id: 'lsrc_' + randomUUID().replace(/-/g, '').substring(0, 12),
+        projectId: data.projectId,
+        label: data.label,
+        filePath: data.filePath,
+        kind: data.kind ?? 'plain',
+        sortOrder: data.sortOrder ?? 0,
+        createdAt: now,
+        updatedAt: now,
+      };
+      await ormDb.insert(schema.projectLogSources).values(row);
+      return row;
+    },
+    async update(id: string, data: { label?: string; kind?: string | null; sortOrder?: number | null }) {
+      await ensureDbReady();
+      const patch: Record<string, any> = { updatedAt: new Date().toISOString() };
+      if (data.label !== undefined) patch.label = data.label;
+      if (data.kind !== undefined) patch.kind = data.kind;
+      if (data.sortOrder !== undefined) patch.sortOrder = data.sortOrder;
+      await ormDb.update(schema.projectLogSources).set(patch).where(eq(schema.projectLogSources.id, id));
+      return this.findById(id);
+    },
+    async remove(id: string) {
+      await ensureDbReady();
+      const existing = await this.findById(id);
+      if (!existing) return false;
+      await ormDb.delete(schema.projectLogSources).where(eq(schema.projectLogSources.id, id));
+      return true;
+    },
   },
   categories: {
     async findAll() {
@@ -318,6 +444,104 @@ export const db = {
         args: [id],
       });
       return Number(result.rows[0]?.count ?? 0);
+    },
+  },
+  tags: {
+    async findAll() {
+      await ensureDbReady();
+      return await ormDb.select().from(schema.tags)
+        .orderBy(asc(schema.tags.sortOrder), asc(schema.tags.name));
+    },
+    async findById(id: string) {
+      await ensureDbReady();
+      const result = await ormDb.select().from(schema.tags).where(eq(schema.tags.id, id)).limit(1);
+      return result[0] || null;
+    },
+    async findByName(name: string) {
+      await ensureDbReady();
+      const result = await ormDb.select().from(schema.tags).where(eq(schema.tags.name, name)).limit(1);
+      return result[0] || null;
+    },
+    async create(data: { id?: string; name: string; color?: string | null; sortOrder?: number | null }) {
+      await ensureDbReady();
+      const now = new Date().toISOString();
+      const row = {
+        id: data.id || 'tag_' + randomUUID().replace(/-/g, '').substring(0, 12),
+        name: data.name,
+        color: data.color ?? null,
+        sortOrder: data.sortOrder ?? 0,
+        createdAt: now,
+        updatedAt: now,
+      };
+      await ormDb.insert(schema.tags).values(row);
+      return row;
+    },
+    async update(id: string, data: { name?: string; color?: string | null; sortOrder?: number | null }) {
+      await ensureDbReady();
+      const patch: Record<string, any> = { updatedAt: new Date().toISOString() };
+      if (data.name !== undefined) patch.name = data.name;
+      if (data.color !== undefined) patch.color = data.color;
+      if (data.sortOrder !== undefined) patch.sortOrder = data.sortOrder;
+      await ormDb.update(schema.tags).set(patch).where(eq(schema.tags.id, id));
+      return this.findById(id);
+    },
+    async remove(id: string) {
+      await ensureDbReady();
+      const tag = await this.findById(id);
+      if (!tag) return false;
+      await ormDb.delete(schema.projectTags).where(eq(schema.projectTags.tagId, id));
+      await ormDb.delete(schema.tags).where(eq(schema.tags.id, id));
+      return true;
+    },
+    async countProjects(id: string) {
+      await ensureDbReady();
+      const result = await client.execute({
+        sql: 'SELECT COUNT(*) as count FROM project_tags WHERE tag_id = ?',
+        args: [id],
+      });
+      return Number(result.rows[0]?.count ?? 0);
+    },
+  },
+  projectTags: {
+    async listByProject(projectId: string): Promise<string[]> {
+      await ensureDbReady();
+      const rows = await ormDb.select().from(schema.projectTags)
+        .where(eq(schema.projectTags.projectId, projectId));
+      return rows.map(r => r.tagId);
+    },
+    async listAllPairs(): Promise<Array<{ projectId: string; tagId: string }>> {
+      await ensureDbReady();
+      const rows = await ormDb.select().from(schema.projectTags);
+      return rows.map(r => ({ projectId: r.projectId, tagId: r.tagId }));
+    },
+    async setForProject(projectId: string, tagIds: string[]) {
+      await ensureDbReady();
+      const now = new Date().toISOString();
+      await ormDb.delete(schema.projectTags).where(eq(schema.projectTags.projectId, projectId));
+      const unique = Array.from(new Set(tagIds.filter(Boolean)));
+      for (const tagId of unique) {
+        try {
+          await ormDb.insert(schema.projectTags).values({ projectId, tagId, createdAt: now });
+        } catch { /* ignore unknown tag id */ }
+      }
+    },
+    async projectIdsHavingAll(tagIds: string[]): Promise<string[]> {
+      await ensureDbReady();
+      const ids = Array.from(new Set(tagIds.filter(Boolean)));
+      if (ids.length === 0) return [];
+      const placeholders = ids.map(() => '?').join(',');
+      const res = await client.execute({
+        sql: `SELECT project_id AS pid FROM project_tags
+              WHERE tag_id IN (${placeholders})
+              GROUP BY project_id
+              HAVING COUNT(DISTINCT tag_id) = ?`,
+        args: [...ids, ids.length],
+      });
+      return res.rows.map(r => String(r.pid));
+    },
+    async clearProject(projectId: string) {
+      await ensureDbReady();
+      await ormDb.delete(schema.projectTags).where(eq(schema.projectTags.projectId, projectId));
     },
   },
   deployments: {

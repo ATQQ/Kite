@@ -8,6 +8,17 @@ import { diskRoutes } from "./routes/disk.js";
 import { statsRoutes } from "./routes/stats.js";
 import { fsRoutes } from "./routes/fs.js";
 import { categoryRoutes } from "./routes/categories.js";
+import { logSourceRoutes } from "./routes/log-sources.js";
+import { systemRoutes } from "./routes/system.js";
+import { pm2Routes } from "./routes/pm2.js";
+import { tagRoutes } from "./routes/tags.js";
+import {
+  terminalRoutes,
+  decideTerminalUpgrade,
+  attachTerminalSocket,
+  TERMINAL_SUBPROTOCOL,
+} from "./routes/terminal.js";
+import { shutdownAllSessions } from "./lib/terminal.js";
 import { staticPlugin } from "./static.js";
 import { ensureDbReady } from "./db/index.js";
 import { moduleLogger, pickTraceId, rootLogger } from "./lib/logger.js";
@@ -31,12 +42,70 @@ if (!isBun) {
 }
 
 const httpLog = moduleLogger('http');
+const wsLog = moduleLogger('ws');
+
+async function buildTerminalWss() {
+  try {
+    const { WebSocketServer } = await import('ws');
+    return new WebSocketServer({ noServer: true });
+  } catch (err) {
+    wsLog.warn({ err: (err as any)?.message }, '加载 ws 包失败，终端 WebSocket 将不可用');
+    return null;
+  }
+}
+
+const terminalWss = await buildTerminalWss();
+
+function headersFromIncoming(req: http.IncomingMessage): Record<string, string | string[] | undefined> {
+  return req.headers as any;
+}
+
+async function handleTerminalUpgrade(
+  req: http.IncomingMessage,
+  socket: any,
+  head: Buffer,
+  expectedOrigin: string,
+) {
+  if (!terminalWss) {
+    socket.destroy();
+    return;
+  }
+  const url = new URL(req.url || '/', `http://${req.headers.host || expectedOrigin}`);
+  const subs = (req.headers['sec-websocket-protocol'] as string | undefined)?.split(',').map(s => s.trim()).filter(Boolean) || [];
+  const decision = await decideTerminalUpgrade({
+    url,
+    headers: headersFromIncoming(req),
+    socketRemoteAddress: (req.socket as any)?.remoteAddress || null,
+    origin: (req.headers.origin as string) || null,
+    expectedOrigin,
+    subprotocols: subs,
+  });
+  if (!decision.ok) {
+    const status = decision.status || 400;
+    const reason = decision.reason || 'rejected';
+    wsLog.warn({ status, reason, path: url.pathname }, 'terminal upgrade rejected');
+    socket.write(`HTTP/1.1 ${status} ${reason}\r\nContent-Length: 0\r\n\r\n`);
+    socket.destroy();
+    return;
+  }
+  terminalWss.handleUpgrade(req, socket, head, (ws) => {
+    void attachTerminalSocket({
+      socket: ws as any,
+      ip: decision.ip!,
+      cwd: decision.cwd!,
+      projectId: decision.projectId ?? null,
+      cols: decision.cols!,
+      rows: decision.rows!,
+      headers: headersFromIncoming(req),
+    });
+  });
+}
 
 const app = new Elysia({ adapter })
-  .derive({ as: 'global' }, ({ request, headers, set }) => {
+  .derive({ as: 'global' }, ({ request: _request, headers, set }) => {
     const traceId = pickTraceId(headers as Record<string, string | undefined>) || randomUUID();
     // expose traceId to clients (echo back so CLI can correlate failures)
-    set.headers = { ...(set.headers || {}), 'x-kite-trace-id': traceId };
+    (set.headers as any) = { ...(set.headers || {}), 'x-kite-trace-id': traceId };
     return { _start: performance.now(), traceId };
   })
   .onAfterHandle({ as: 'global' }, ({ request, set, _start, traceId }) => {
@@ -62,75 +131,97 @@ const app = new Elysia({ adapter })
   .use(statsRoutes)
   .use(fsRoutes)
   .use(categoryRoutes)
+  .use(logSourceRoutes)
+  .use(systemRoutes)
+  .use(pm2Routes)
+  .use(tagRoutes)
+  .use(terminalRoutes)
   .use(staticPlugin);
 
-if (isBun) {
-  app.listen({ port, hostname: host });
-  rootLogger.info(
-    { module: 'boot', runtime: runtimeName, version: serverVersion, host: app.server?.hostname, port: app.server?.port },
-    `Kite server listening on http://${app.server?.hostname}:${app.server?.port}`,
-  );
-} else {
-  // For Node.js, use native HTTP module
-  const fetchHandler = app.fetch;
+// Both runtimes use node:http to create server for WebSocket upgrade support
+const fetchHandler = app.fetch;
 
-  const server = http.createServer(async (req, res) => {
-    const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+const server = http.createServer(async (req, res) => {
+  const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
 
-    // Create Request object
-    const headers = new Headers();
-    for (const [key, value] of Object.entries(req.headers)) {
-      if (value) {
-        headers.set(key, Array.isArray(value) ? value.join(', ') : value);
+  // Create Request object
+  const headers = new Headers();
+  for (const [key, value] of Object.entries(req.headers)) {
+    if (value) {
+      headers.set(key, Array.isArray(value) ? value.join(', ') : value);
+    }
+  }
+
+  const hasBody = req.method !== 'GET' && req.method !== 'HEAD';
+  const request = new Request(url.toString(), {
+    method: req.method,
+    headers,
+    body: hasBody ? new ReadableStream({
+      start(controller) {
+        req.on('data', (chunk: Buffer) => controller.enqueue(new Uint8Array(chunk)));
+        req.on('end', () => controller.close());
+        req.on('error', (err) => controller.error(err));
+      },
+    }) : undefined,
+    duplex: hasBody ? 'half' : undefined,
+  } as RequestInit);
+
+  // Get response from Elysia
+  const response = await fetchHandler(request);
+
+  // Send response
+  res.writeHead(response.status, Object.fromEntries(response.headers));
+
+  if (response.body) {
+    const reader = response.body.getReader();
+    const pump = async () => {
+      const { done, value } = await reader.read();
+      if (done) {
+        res.end();
+        return;
       }
-    }
-
-    const hasBody = req.method !== 'GET' && req.method !== 'HEAD';
-    const request = new Request(url.toString(), {
-      method: req.method,
-      headers,
-      body: hasBody ? new ReadableStream({
-        start(controller) {
-          req.on('data', (chunk: Buffer) => controller.enqueue(new Uint8Array(chunk)));
-          req.on('end', () => controller.close());
-          req.on('error', (err) => controller.error(err));
-        },
-      }) : undefined,
-      duplex: hasBody ? 'half' : undefined,
-    } as RequestInit);
-
-    // Get response from Elysia
-    const response = await fetchHandler(request);
-
-    // Send response
-    res.writeHead(response.status, Object.fromEntries(response.headers));
-
-    if (response.body) {
-      const reader = response.body.getReader();
-      const pump = async () => {
-        const { done, value } = await reader.read();
-        if (done) {
-          res.end();
-          return;
-        }
-        res.write(value);
-        await pump();
-      };
+      res.write(value);
       await pump();
-    } else {
-      res.end();
-    }
-  });
+    };
+    await pump();
+  } else {
+    res.end();
+  }
+});
 
-  server.listen(port, host, () => {
-    rootLogger.info(
-      { module: 'boot', runtime: runtimeName, version: serverVersion, host, port },
-      `Kite server listening on http://${host}:${port}`,
-    );
+if (terminalWss) {
+  server.on('upgrade', (req, socket, head) => {
+    const url = new URL(req.url || '/', `http://${req.headers.host || `${host}:${port}`}`);
+    if (!url.pathname.startsWith('/api/terminal/ws')) {
+      socket.destroy();
+      return;
+    }
+    const reqHost = req.headers.host || `${host}:${port}`;
+    const expectedOrigin = `http://${reqHost}`;
+    void handleTerminalUpgrade(req, socket, head, expectedOrigin);
   });
+} else {
+  rootLogger.warn({ module: 'terminal' }, 'ws 包不可用，终端 WebSocket 已关闭');
 }
+
+server.listen(port, host, () => {
+  rootLogger.info(
+    { module: 'boot', runtime: runtimeName, version: serverVersion, host, port },
+    `Kite server listening on http://${host}:${port}`,
+  );
+});
 
 const adminTokenPreview = process.env.ADMIN_TOKEN
   ? `${process.env.ADMIN_TOKEN.slice(0, 4)}****${process.env.ADMIN_TOKEN.slice(-4)}`
   : '未设置 (请通过 .env.local 配置)';
 rootLogger.info({ module: 'boot' }, `Admin token: ${adminTokenPreview}`);
+
+// silence unused symbol for runtime-only export
+void TERMINAL_SUBPROTOCOL;
+
+for (const sig of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(sig, () => {
+    try { shutdownAllSessions(sig); } catch {}
+    process.exit(0);
+  });
+}

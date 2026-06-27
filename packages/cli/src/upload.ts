@@ -8,6 +8,7 @@ interface UploadOptions {
   projectId: string;
   preDeploy?: string;
   postDeploy?: string;
+  postDeployAsync?: boolean;
   env?: Record<string, string>;
   startedAt?: string;
   traceId?: string;
@@ -22,7 +23,7 @@ interface UploadResult {
 }
 
 export async function uploadZip(options: UploadOptions): Promise<UploadResult> {
-  const { serverUrl, token, zipFilePath, projectId, preDeploy, postDeploy, env, startedAt } = options;
+  const { serverUrl, token, zipFilePath, projectId, preDeploy, postDeploy, postDeployAsync, env, startedAt } = options;
   const traceId = options.traceId || randomUUID();
 
   const fileData = await fs.promises.readFile(zipFilePath);
@@ -34,6 +35,7 @@ export async function uploadZip(options: UploadOptions): Promise<UploadResult> {
 
   if (preDeploy) form.append('preDeploy', preDeploy);
   if (postDeploy) form.append('postDeploy', postDeploy);
+  if (typeof postDeployAsync === 'boolean') form.append('postDeployAsync', postDeployAsync ? 'true' : 'false');
   if (env && Object.keys(env).length > 0) form.append('env', JSON.stringify(env));
   if (startedAt) form.append('startedAt', startedAt);
 

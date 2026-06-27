@@ -34,7 +34,7 @@ export const settingsRoutes = new Elysia()
   })
   .put('/api/settings', async ({ headers, body, set }) => {
     if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
-    const allowed = ['webhook_url', 'webhook_events', 'default_deploy_path', 'max_upload_size', 'global_deploy_token', 'artifact_keep_n'];
+    const allowed = ['webhook_url', 'webhook_events', 'default_deploy_path', 'max_upload_size', 'global_deploy_token', 'artifact_keep_n', 'deployment_stuck_threshold_min'];
     const beforeAll = await db.settings.getAll();
     const entries: Record<string, string> = {};
     for (const [key, value] of Object.entries(body)) {
@@ -48,6 +48,14 @@ export const settingsRoutes = new Elysia()
         set.status = 400;
         return { error: `global_deploy_token 强度不足：${result.reason}` };
       }
+    }
+    if (Object.prototype.hasOwnProperty.call(entries, 'deployment_stuck_threshold_min')) {
+      const n = Number(entries.deployment_stuck_threshold_min);
+      if (!Number.isFinite(n) || !Number.isInteger(n) || n < 1 || n > 1440) {
+        set.status = 400;
+        return { error: 'deployment_stuck_threshold_min 必须为 1~1440 之间的整数（分钟）' };
+      }
+      entries.deployment_stuck_threshold_min = String(n);
     }
     await db.settings.setMany(entries);
     const afterAll = await db.settings.getAll();
@@ -71,6 +79,7 @@ export const settingsRoutes = new Elysia()
       max_upload_size: t.Optional(t.String()),
       global_deploy_token: t.Optional(t.String()),
       artifact_keep_n: t.Optional(t.String()),
+      deployment_stuck_threshold_min: t.Optional(t.String()),
     })
   })
   .post('/api/settings/token', async ({ headers, body, set }) => {
@@ -80,7 +89,8 @@ export const settingsRoutes = new Elysia()
     if (guard.locked) {
       const retrySec = Math.ceil(guard.retryAfterMs / 1000);
       set.status = 429;
-      set.headers = { ...(set.headers || {}), 'Retry-After': String(retrySec) };
+      if (!set.headers) set.headers = {};
+      set.headers['Retry-After'] = String(retrySec);
       return { error: `Too many attempts, please retry after ${retrySec}s` };
     }
     const { oldToken, newToken } = body;

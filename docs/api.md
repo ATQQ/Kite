@@ -41,6 +41,7 @@ Authorization: Bearer <YOUR_ADMIN_TOKEN>
 ### 2.1 获取所有项目列表
 * **URL**: `/api/projects`
 * **Method**: `GET`
+* **Query (可选)**: `tagIds=<id1>,<id2>` — 按标签筛选，多个 id 之间为「与」逻辑（项目必须同时关联所有 id）
 * **Response**:
   ```json
   [
@@ -53,6 +54,9 @@ Authorization: Bearer <YOUR_ADMIN_TOKEN>
       "preDeployScript": "bun run build",
       "postDeployScript": "pm2 restart kite-web",
       "env": "production",
+      "categoryId": "cat_frontend",
+      "pm2AppName": "kite-web",
+      "tagIds": ["tag_frontend", "tag_pm2"],
       "status": "success",
       "createdAt": "2026-04-12T10:00:00Z",
       "updatedAt": "2026-04-12T10:45:00Z"
@@ -66,10 +70,13 @@ Authorization: Bearer <YOUR_ADMIN_TOKEN>
 * **Body**:
   ```json
   {
-    "name": "string",          // 必填，项目名称
-    "description": "string",   // 可选，项目描述
-    "deployPath": "string",    // 必填，服务器上的部署目录绝对路径
-    "env": "string"            // 可选，环境标识
+    "name": "string",            // 必填，项目名称
+    "description": "string",     // 可选，项目描述
+    "deployPath": "string",      // 必填，服务器上的部署目录绝对路径
+    "env": "string",             // 可选，环境标识
+    "categoryId": "string|null", // 可选，分类 id
+    "pm2AppName": "string|null", // 可选，绑定的 PM2 应用名
+    "tagIds": ["string"]         // 可选，标签 id 列表
   }
   ```
 * **Response**:
@@ -83,7 +90,7 @@ Authorization: Bearer <YOUR_ADMIN_TOKEN>
 ### 2.3 获取单个项目详情
 * **URL**: `/api/projects/:id`
 * **Method**: `GET`
-* **Response**: 返回单个项目对象，如不存在则返回 404。
+* **Response**: 返回单个项目对象（含 `categoryId / pm2AppName / tagIds`），如不存在则返回 404。
 
 ### 2.4 更新项目配置
 * **URL**: `/api/projects/:id`
@@ -93,7 +100,11 @@ Authorization: Bearer <YOUR_ADMIN_TOKEN>
   {
     "preDeployScript": "string",   // 可选
     "postDeployScript": "string",  // 可选
-    "deployPath": "string"         // 可选
+    "deployPath": "string",        // 可选
+    "postDeployAsync": false,      // 可选；true 时 postDeploy 异步执行（fire-and-forget），默认 false 保留旧行为
+    "categoryId": "string|null",   // 可选
+    "pm2AppName": "string|null",   // 可选；传空字符串等同于解绑（null）
+    "tagIds": ["string"]           // 可选；传入即覆盖该项目的全部标签关联
   }
   ```
 * **Response**:
@@ -228,6 +239,7 @@ Authorization: Bearer <YOUR_ADMIN_TOKEN>
   * `projectId`: 项目 ID (String)
   * `preDeploy`: CLI 覆盖的前置脚本 (String, 可选)
   * `postDeploy`: CLI 覆盖的后置脚本 (String, 可选)
+  * `postDeployAsync`: 单次部署覆盖项目级 `postDeployAsync` 设置 (String, 可选；接受 `"true"|"false"|"1"|"0"`)。`true` 时 server 在 spawn `postDeploy` 之后立刻返回 success，不阻塞等待子进程结束。
   * `env`: 部署时注入到 pre/post 脚本的环境变量，**JSON 字符串** 形式 (String, 可选)
 * **Response**: NDJSON 流（`Content-Type: application/x-ndjson`），每行一个 JSON 对象：
 
@@ -337,3 +349,210 @@ Authorization: Bearer <YOUR_ADMIN_TOKEN>
   ```
 * **Response 503**: 同结构，触发条件：`db.ok=false` / `kiteHome.writable=false` / `disk.percentUsed>=95`。
 * **平台说明**: Windows 下 `disk` 字段全部为 `null`。
+
+## 7. 日志源接口（项目运行日志）
+
+> 用于让前端把 PM2 / Nginx / 自定义服务的日志文件挂接到指定项目，提供「实时跟随 / 历史翻页 / 关键词搜索」三种视图。所有接口均需 `Authorization: Bearer <ADMIN_TOKEN>`。
+
+### 7.1 列出项目的日志源
+* **URL**: `GET /api/projects/:id/log-sources`
+* **Response**:
+  ```json
+  {
+    "items": [
+      {
+        "id": "lsrc_xxx",
+        "projectId": "proj_xxx",
+        "label": "pm2-out.log",
+        "filePath": "/Users/me/.pm2/logs/api-out.log",
+        "kind": "plain",
+        "sortOrder": 0,
+        "createdAt": "...",
+        "updatedAt": "..."
+      }
+    ]
+  }
+  ```
+
+### 7.2 批量添加日志源
+* **URL**: `POST /api/projects/:id/log-sources`
+* **Body**:
+  ```json
+  { "items": [ { "filePath": "/abs/path.log", "label": "可选展示名", "kind": "plain" } ] }
+  ```
+* **限制**: 单次最多 50 个；路径必须为绝对路径；不能命中黑名单（`~/.kite/config.json`、`~/.kite/kite.db`、`/etc/shadow` 等）。
+
+### 7.3 修改日志源
+* **URL**: `PATCH /api/log-sources/:sourceId`
+* **Body**: 允许更新 `label / kind / sortOrder`。`filePath` 不可更改。
+
+### 7.4 删除日志源
+* **URL**: `DELETE /api/log-sources/:sourceId`
+* **说明**: 仅解除关联，**不会**删除磁盘上的日志文件。
+
+### 7.5 获取元数据
+* **URL**: `GET /api/log-sources/:sourceId/meta`
+* **Response**:
+  ```json
+  { "id": "lsrc_xxx", "label": "...", "filePath": "...", "resolvedPath": "...", "kind": "plain", "size": 102400 }
+  ```
+
+### 7.6 字节窗口翻页
+* **URL**: `GET /api/log-sources/:sourceId/range`
+* **Query**:
+  * `offset`: 起始字节偏移（默认尾部）
+  * `size`: 窗口字节数，默认 64KB，最大 1MB
+  * `direction`: `forward | backward | tail`（默认根据是否传 `offset` 自动判断）
+* **Response**:
+  ```json
+  {
+    "startOffset": 0,
+    "endOffset": 65536,
+    "fileSize": 102400,
+    "lines": ["...", "..."],
+    "truncatedHead": false,
+    "truncatedTail": true,
+    "binary": false
+  }
+  ```
+* **说明**: 返回前后均自动对齐到换行符；二进制文件直接 `binary: true` 且 `lines` 为空。
+
+### 7.7 实时流（SSE）
+* **URL**: `GET /api/log-sources/:sourceId/stream`
+* **Query**: `tailLines`（初始尾部行数，默认 200，最大 5000）
+* **Headers**: `Content-Type: text/event-stream`
+* **事件**:
+  * `snapshot` — `{ "lines": ["..."], "size": 12345, "binary": false }`，初次连接 / 文件轮转后下发
+  * `lines` — `{ "lines": ["..."] }`，500ms 批量节流推送追加行
+  * `rotated` — `{ "at": "ISO8601" }`，检测到文件轮转
+  * `error` — `{ "message": "..." }`
+  * 心跳: `:keep-alive`（注释行，15s 一次）
+* **说明**: 基于 `fs.watch` + 1.5s `stat.size` 兜底轮询，可兼容 `logrotate copytruncate` / NFS 等场景。
+
+### 7.8 关键词搜索（SSE 流式 grep）
+* **URL**: `GET /api/log-sources/:sourceId/search`
+* **Query**:
+  * `q`（必填）: 搜索关键词或正则
+  * `regex`: `true / 1` 表示正则模式
+  * `caseInsensitive`: `true / 1` 表示忽略大小写
+  * `maxHits`: 最多命中数，默认 500，最大 5000
+  * `context`: 上下文行数，默认 2，最大 20
+  * `fromOffset` / `toOffset`: 限定字节范围
+* **事件**:
+  * `hit` — `{ "offset": 1024, "text": "...", "before": ["..."], "after": ["..."] }`
+  * `truncated` — `{ "maxHits": 500 }`，命中数达上限
+  * `done` — `{ "scannedBytes": 102400 }`，结束
+  * `error` — `{ "message": "..." }`
+
+---
+
+## 8. 分类与标签接口
+
+### 8.1 分类（Categories）
+项目分类是「单选 + 互斥」的归属概念，常用于「前端 / 后端 / 测试环境」等粗粒度分组。一个项目最多归属一个分类。
+
+* `GET /api/categories` — 列出全部分类
+* `POST /api/categories` — 新建分类
+  * Body: `{ "name": "string", "color": "blue|green|yellow|purple|pink|cyan|gray", "sortOrder": 0 }`
+* `PUT /api/categories/:id` — 修改分类
+* `DELETE /api/categories/:id` — 删除分类（相关项目会回落到「默认」）
+
+### 8.2 标签（Tags）
+标签是「多对多 + 可叠加」的属性概念，适合表达技术栈或运行时（前端 / Node / Java / PM2 / Docker 等）。一个项目可同时关联多个标签。
+
+* `GET /api/tags` — 列出全部标签，含 `projectCount`
+* `POST /api/tags` — 新建标签
+  * Body: `{ "name": "string", "color": "blue|green|yellow|purple|pink|cyan|gray", "sortOrder": 0 }`
+  * 颜色枚举与分类相同
+* `PUT /api/tags/:id` — 修改标签（名称、颜色、排序）
+* `DELETE /api/tags/:id` — 删除标签；返回 `{ success, detachedProjects }`，表示有多少个项目被解除关联
+
+> 在「项目筛选」场景下，使用 `GET /api/projects?tagIds=a,b` 实现 AND 逻辑（同时含有所有指定标签的项目）。
+
+---
+
+## 9. 服务器资源与 PM2 接口
+
+### 9.1 获取服务器资源快照
+* **URL**: `GET /api/system/resources`
+* **说明**: 一次性返回整机 CPU/内存/磁盘 + Kite 进程自身的资源占用。前端「概览页」每 5 秒轮询一次。
+* **Response**:
+  ```json
+  {
+    "collectedAt": "2026-06-24T10:00:00Z",
+    "host": {
+      "hostname": "kite-prod-01",
+      "platform": "linux",
+      "arch": "arm64",
+      "cpuModel": "Apple M2",
+      "cpuCount": 8,
+      "loadAvg": [0.42, 0.55, 0.62],
+      "uptimeSec": 86400
+    },
+    "cpu": { "percent": 12.4 },
+    "memory": { "totalBytes": 17179869184, "freeBytes": 268435456, "availableBytes": 4294967296, "usedBytes": 12884901888, "percentUsed": 75 },
+    "disk": { "freeBytes": 21474836480, "totalBytes": 107374182400, "percentUsed": 80 },
+    "process": {
+      "pid": 1234,
+      "runtime": "node",
+      "runtimeVersion": "v20.10.0",
+      "uptimeSec": 3600,
+      "cpuPercent": 0.8,
+      "memoryRssBytes": 134217728,
+      "memoryHeapUsedBytes": 67108864
+    }
+  }
+  ```
+
+> 内存口径说明：`freeBytes` 是 `os.freemem()` 的「纯空闲页」，在 macOS / Linux 上通常远小于用户直觉中的可用内存；`availableBytes` 才是「可立即回收并复用的内存」（macOS 解析 `vm_stat`，Linux 读取 `/proc/meminfo` 的 `MemAvailable`，Windows 退回到 `freeBytes`），`usedBytes / percentUsed` 都基于它计算，前端建议优先使用 `availableBytes` 展示。
+
+### 9.2 PM2 可用性检测
+* **URL**: `GET /api/pm2/available`
+* **Response**: `{ "available": true }` 或 `{ "available": false }`
+* **说明**: 服务端会探测 `pm2 jlist` 是否可执行（PATH 中以及 `~/.local/bin/pm2`、`/usr/local/bin/pm2`、`/opt/homebrew/bin/pm2` 等常见路径）。
+
+### 9.3 列出当前机器上的 PM2 应用
+* **URL**: `GET /api/pm2/apps`
+* **Response**:
+  ```json
+  {
+    "apps": [
+      { "name": "kite-web", "pmId": 0, "status": "online" },
+      { "name": "kite-api", "pmId": 1, "status": "stopped" }
+    ]
+  }
+  ```
+
+### 9.4 获取项目绑定的 PM2 应用状态
+* **URL**: `GET /api/projects/:id/pm2`
+* **Response (已绑定且找到应用)**:
+  ```json
+  {
+    "bound": true,
+    "found": true,
+    "name": "kite-web",
+    "pmId": 0,
+    "pid": 12345,
+    "status": "online",
+    "uptimeMs": 3600000,
+    "restarts": 2,
+    "unstableRestarts": 0,
+    "cpuPercent": 1.2,
+    "memoryBytes": 67108864,
+    "execMode": "cluster_mode",
+    "instances": 2,
+    "errorLogPath": "/Users/u/.pm2/logs/kite-web-error.log",
+    "outLogPath": "/Users/u/.pm2/logs/kite-web-out.log",
+    "createdAt": 1719200000000
+  }
+  ```
+* **Response (未绑定 / PM2 不可用 / 未找到应用)**:
+  ```json
+  { "bound": false, "message": "PM2 not detected on this server" }
+  ```
+  或
+  ```json
+  { "bound": true, "found": false, "name": "kite-web" }
+  ```
+* **说明**: cluster 模式多实例会自动聚合（cpu/memory 求和，uptime 取最大）。结果在服务端有 1.5 秒短缓存，避免高频拉取。
+

@@ -207,7 +207,7 @@ onMounted(loadProjects)
 </script>
 
 <template>
-  <div class="max-w-5xl mx-auto space-y-6 pb-12">
+  <div class="max-w-5xl mx-auto space-y-6 pb-12 p-4 sm:p-0">
     <div class="flex items-center space-x-3 mb-8">
       <Database class="w-7 h-7 text-primary" />
       <h1 class="text-2xl font-bold text-textMain tracking-tight">数据迁移</h1>
@@ -215,7 +215,7 @@ onMounted(loadProjects)
 
     <!-- Projects + Export -->
     <div class="bg-panel border border-border rounded-xl shadow-sm overflow-hidden">
-      <div class="px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02] flex items-center justify-between">
+      <div class="px-4 sm:px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02] flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
         <div>
           <h2 class="text-lg font-semibold text-textMain flex items-center">
             <Download class="w-5 h-5 mr-2 text-primary" />
@@ -225,7 +225,7 @@ onMounted(loadProjects)
         </div>
         <button
           @click="loadProjects"
-          class="flex items-center text-sm text-textMuted hover:text-primary transition-colors"
+          class="self-start sm:self-auto flex items-center text-sm text-textMuted hover:text-primary transition-colors"
           :disabled="loadingProjects"
         >
           <RefreshCw class="w-4 h-4 mr-1" :class="loadingProjects ? 'animate-spin' : ''" />
@@ -233,7 +233,7 @@ onMounted(loadProjects)
         </button>
       </div>
 
-      <div class="p-6 space-y-6">
+      <div class="p-4 sm:p-6 space-y-6">
         <div v-if="projectsError" class="p-3 rounded-lg bg-danger/10 border border-danger/30 text-danger text-sm flex items-center">
           <AlertTriangle class="w-4 h-4 mr-2" />{{ projectsError }}
         </div>
@@ -243,8 +243,8 @@ onMounted(loadProjects)
             <h3 class="text-sm font-medium text-textMain">项目列表</h3>
             <span class="text-xs text-textMuted">已选 {{ selectedIds.length }} / {{ projects.length }}</span>
           </div>
-          <div class="border border-border rounded-lg overflow-hidden">
-            <table class="w-full text-sm">
+          <div class="border border-border rounded-lg overflow-x-auto">
+            <table class="w-full text-sm min-w-[640px]">
               <thead class="dark:bg-white/[0.02] bg-black/[0.02] text-textMuted">
                 <tr>
                   <th class="w-10 px-3 py-2 text-left">
@@ -360,7 +360,7 @@ onMounted(loadProjects)
 
     <!-- Import -->
     <div class="bg-panel border border-border rounded-xl shadow-sm overflow-hidden">
-      <div class="px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02]">
+      <div class="px-4 sm:px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02]">
         <h2 class="text-lg font-semibold text-textMain flex items-center">
           <Upload class="w-5 h-5 mr-2 text-primary" />
           导入
@@ -368,16 +368,16 @@ onMounted(loadProjects)
         <p class="text-sm text-textMuted mt-1">从 kite-export-*.zip 还原项目、设置、部署日志与 artifacts。</p>
       </div>
 
-      <div class="p-6 space-y-5">
+      <div class="p-4 sm:p-6 space-y-5">
         <div>
           <label class="block text-sm font-medium text-textMain mb-2">选择文件</label>
-          <div class="flex items-center space-x-3">
-            <label class="inline-flex items-center px-3 py-2 rounded-lg border border-border bg-base text-sm text-textMain cursor-pointer hover:border-primary">
+          <div class="flex flex-col sm:flex-row sm:items-center gap-3">
+            <label class="self-start inline-flex items-center px-3 py-2 rounded-lg border border-border bg-base text-sm text-textMain cursor-pointer hover:border-primary">
               <FileArchive class="w-4 h-4 mr-2" />
               选择 zip 文件
               <input type="file" accept=".zip,application/zip" @change="handleFilePick" class="hidden" />
             </label>
-            <span v-if="importFile" class="text-sm text-textMuted">
+            <span v-if="importFile" class="text-sm text-textMuted break-all">
               {{ importFile.name }} ({{ (importFile.size / 1024).toFixed(1) }} KB)
             </span>
           </div>

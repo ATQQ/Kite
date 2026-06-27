@@ -74,34 +74,47 @@ export const fsRoutes = new Elysia()
       set.status = 500; return { error: err?.message || 'readdir failed', path: normalized };
     }
 
-    const dirEntries = raw.filter((e) => e.isDirectory() || e.isSymbolicLink());
-    const truncated = dirEntries.length > MAX_ENTRIES;
-    const sliced = truncated ? dirEntries.slice(0, MAX_ENTRIES) : dirEntries;
+    const includeRaw = typeof query.include === 'string' ? query.include : 'dirs';
+    const include: 'dirs' | 'files' | 'both' =
+      includeRaw === 'files' || includeRaw === 'both' ? includeRaw : 'dirs';
+
+    const wantedEntries = raw.filter((e) => e.isDirectory() || e.isFile() || e.isSymbolicLink());
+    const truncated = wantedEntries.length > MAX_ENTRIES;
+    const sliced = truncated ? wantedEntries.slice(0, MAX_ENTRIES) : wantedEntries;
 
     const entries = await Promise.all(sliced.map(async (e) => {
       const full = path.join(normalized, e.name);
       let isDir = e.isDirectory();
+      let isFile = e.isFile();
       const isSymlink = e.isSymbolicLink();
-      if (!isDir && isSymlink) {
+      if (isSymlink && !isDir && !isFile) {
         try {
           const s = await fs.stat(full);
           isDir = s.isDirectory();
+          isFile = s.isFile();
         } catch {
           isDir = false;
+          isFile = false;
         }
       }
       return {
         name: e.name,
         path: full,
         isDir,
+        isFile,
         isHidden: e.name.startsWith('.'),
         isSymlink,
       };
     }));
 
-    const dirOnly = entries.filter((e) => e.isDir);
-    dirOnly.sort((a, b) => {
+    const filtered = entries.filter((e) => {
+      if (include === 'dirs') return e.isDir;
+      if (include === 'files') return e.isFile;
+      return e.isDir || e.isFile;
+    });
+    filtered.sort((a, b) => {
       if (a.isHidden !== b.isHidden) return a.isHidden ? 1 : -1;
+      if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
       return a.name.localeCompare(b.name);
     });
 
@@ -111,6 +124,6 @@ export const fsRoutes = new Elysia()
       exists: true,
       isDir: true,
       truncated,
-      entries: dirOnly,
+      entries: filtered,
     };
   });
