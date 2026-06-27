@@ -89,7 +89,7 @@
 - 移除 @tursodatabase/database 依赖
 - 升级包版本至 v1.1.0 并更新变更日志
 
-## v1.1.0
+## v1.1.0 (2026/06/07)
 
 ### Feature
 

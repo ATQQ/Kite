@@ -18,7 +18,8 @@ export default defineConfig({
     nav: [
       { text: '快速开始', link: '/guide/quick-start' },
       { text: 'API', link: '/api' },
-      { text: 'CLI', link: '/cli' }
+      { text: 'CLI', link: '/cli' },
+      { text: '更新日志', link: '/changelog' }
     ],
     sidebar: [
       {
@@ -35,7 +36,8 @@ export default defineConfig({
         items: [
           { text: 'API 文档', link: '/api' },
           { text: 'CLI 文档', link: '/cli' },
-          { text: '技术方案', link: '/spec' }
+          { text: '技术方案', link: '/spec' },
+          { text: '更新日志', link: '/changelog' }
         ]
       }
     ],
