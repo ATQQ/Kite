@@ -29,6 +29,7 @@ import {
   loginSuccess,
   pickClientKey,
 } from '../lib/auth.js';
+import { notifyDeployment } from '../lib/webhook.js';
 
 const deployLog = moduleLogger('deploy');
 
@@ -633,6 +634,20 @@ export const deployRoutes = new Elysia()
                               errorMessage: `Post-deploy exited with code ${exitCode}`,
                             });
                           } catch { /* audit best-effort */ }
+                          void notifyDeployment({
+                            event: 'deploy_failure',
+                            trigger: 'async_post_deploy',
+                            project: { id: project.id, name: project.name, deployPath: project.deployPath },
+                            deployment: {
+                              id: deploymentRow.id,
+                              status: 'failed',
+                              duration: null,
+                              startTime: startTimeIso,
+                              endTime: new Date().toISOString(),
+                              rollbackOf: null,
+                            },
+                            errorMessage: `Post-deploy exited with code ${exitCode}`,
+                          });
                         }
                       } else {
                         await appendLog(line);
@@ -669,6 +684,20 @@ export const deployRoutes = new Elysia()
             await db.deployments.update(deploymentRow.id, { status: 'success', duration: durationStr, endTime: new Date().toISOString() });
             await db.projects.update(project.id, { status: 'success' });
 
+            void notifyDeployment({
+              event: 'deploy_success',
+              trigger: 'cli',
+              project: { id: project.id, name: project.name, deployPath: project.deployPath },
+              deployment: {
+                id: deploymentRow.id,
+                status: 'success',
+                duration: durationStr,
+                startTime: startTimeIso,
+                endTime: new Date().toISOString(),
+                rollbackOf: null,
+              },
+            });
+
             // GC older archives beyond keepN (non-fatal on errors)
             try {
               const keepN = await getArtifactKeepN();
@@ -694,6 +723,21 @@ export const deployRoutes = new Elysia()
 
             await db.deployments.update(deploymentRow.id, { status: 'failed', duration: durationStr, endTime: new Date().toISOString() });
             await db.projects.update(project.id, { status: 'failed' });
+
+            void notifyDeployment({
+              event: 'deploy_failure',
+              trigger: 'cli',
+              project: { id: project.id, name: project.name, deployPath: project.deployPath },
+              deployment: {
+                id: deploymentRow.id,
+                status: 'failed',
+                duration: durationStr,
+                startTime: startTimeIso,
+                endTime: new Date().toISOString(),
+                rollbackOf: null,
+              },
+              errorMessage: err?.message,
+            });
 
             sendEvent(controller, 'status', { status: 'failed', duration: durationStr, deployId: deploymentRow.id });
             broadcastToSubscribers(deploymentRow.id, 'status', JSON.stringify({ status: 'failed', duration: durationStr }));
@@ -948,6 +992,25 @@ export const deployRoutes = new Elysia()
       summary: `手动将部署 ${deployment.id.slice(0, 8)} 标记为 ${nextStatus}`,
     });
 
+    void notifyDeployment({
+      event: nextStatus === 'success' ? 'deploy_success' : 'deploy_failure',
+      trigger: 'manual',
+      project: {
+        id: deployment.projectId,
+        name: deployment.projectName,
+        deployPath: project?.deployPath ?? '',
+      },
+      deployment: {
+        id: deployment.id,
+        status: nextStatus,
+        duration: durationStr,
+        startTime: deployment.startTime,
+        endTime: endTimeIso,
+        rollbackOf: deployment.rollbackOf ?? null,
+      },
+      errorMessage: nextStatus === 'failed' ? `Manually marked as failed` : null,
+    });
+
     return {
       success: true,
       deployment: {
@@ -1079,6 +1142,20 @@ export const deployRoutes = new Elysia()
         summary: `回滚项目 ${project.name} 到部署 ${source.id.slice(0, 8)}`,
       });
 
+      void notifyDeployment({
+        event: 'deploy_success',
+        trigger: 'rollback',
+        project: { id: project.id, name: project.name, deployPath: project.deployPath },
+        deployment: {
+          id: newDeployId,
+          status: 'success',
+          duration: durationStr,
+          startTime: startedAt,
+          endTime: new Date().toISOString(),
+          rollbackOf: source.id,
+        },
+      });
+
       reqLog.info({ ms: Date.now() - startTime }, 'rollback success');
       return {
         success: true,
@@ -1104,6 +1181,21 @@ export const deployRoutes = new Elysia()
         after: { deployId: newDeployId, startTime: startedAt, duration: durationStr, status: 'failed' },
         summary: `回滚项目 ${project.name} 到部署 ${source.id.slice(0, 8)} 失败`,
         status: 'failed',
+        errorMessage: err?.message,
+      });
+
+      void notifyDeployment({
+        event: 'deploy_failure',
+        trigger: 'rollback',
+        project: { id: project.id, name: project.name, deployPath: project.deployPath },
+        deployment: {
+          id: newDeployId,
+          status: 'failed',
+          duration: durationStr,
+          startTime: startedAt,
+          endTime: new Date().toISOString(),
+          rollbackOf: source.id,
+        },
         errorMessage: err?.message,
       });
 

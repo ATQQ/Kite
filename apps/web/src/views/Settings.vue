@@ -160,6 +160,34 @@ const toggleEvent = (event: string) => {
   }
 }
 
+const webhookTesting = ref(false)
+const webhookTestResult = ref<{ success: boolean; message: string } | null>(null)
+
+async function runWebhookTest() {
+  if (!form.value.webhook_url || !form.value.webhook_url.trim()) {
+    webhookTestResult.value = { success: false, message: '请先填写 Webhook URL 并保存' }
+    return
+  }
+  webhookTesting.value = true
+  webhookTestResult.value = null
+  try {
+    const r: any = await projectStore.testWebhook()
+    if (r?.success) {
+      webhookTestResult.value = {
+        success: true,
+        message: `发送成功 · HTTP ${r.statusCode} · ${r.durationMs}ms · 尝试 ${r.attempts} 次`,
+      }
+    } else {
+      webhookTestResult.value = {
+        success: false,
+        message: r?.error || `发送失败${r?.statusCode ? ` · HTTP ${r.statusCode}` : ''}`,
+      }
+    }
+  } finally {
+    webhookTesting.value = false
+  }
+}
+
 // Terminal IP allowlist
 const terminalAllowlist = ref<string[]>([])
 const terminalAllowlistInput = ref('')
@@ -585,6 +613,26 @@ function addCurrentIpToAllowlist() {
               {{ opt.label }}
             </button>
           </div>
+        </div>
+        <div class="pt-2 border-t border-border/60 flex flex-col gap-2">
+          <div class="flex items-center gap-3">
+            <button
+              type="button"
+              @click="runWebhookTest"
+              :disabled="webhookTesting"
+              class="inline-flex items-center px-4 py-2 rounded-md text-sm font-medium border border-border bg-base text-textMain hover:border-primary/40 hover:text-primary disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+            >
+              {{ webhookTesting ? '发送中…' : '发送测试' }}
+            </button>
+            <p class="text-xs text-textMuted">向当前 Webhook URL 发送一条测试消息，须先保存配置。host 自动适配飞书 / 钉钉（请确保自定义关键词包含 <span class="font-mono">Kite</span>）/ 通用 JSON。</p>
+          </div>
+          <p
+            v-if="webhookTestResult"
+            class="text-xs font-mono"
+            :class="webhookTestResult.success ? 'text-green-400' : 'text-red-400'"
+          >
+            {{ webhookTestResult.message }}
+          </p>
         </div>
       </div>
     </div>

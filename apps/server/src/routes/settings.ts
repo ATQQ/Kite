@@ -3,6 +3,7 @@ import { db } from '../db/index.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { writeAudit, diffFields } from '../lib/audit.js';
+import { sendTestWebhook } from '../lib/webhook.js';
 import {
   verifyAdminToken,
   verifyAdminTokenValue,
@@ -156,5 +157,20 @@ export const settingsRoutes = new Elysia()
       successCount,
       failedCount,
       successRate: deployments.length > 0 ? Math.round((successCount / deployments.length) * 100) : 0,
+    };
+  })
+  .post('/api/settings/webhook-test', async ({ headers, set }) => {
+    if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
+    const result = await sendTestWebhook();
+    if (result.skipped === 'no_url') {
+      set.status = 400;
+      return { success: false, error: 'webhook_url 未配置，请先在设置中保存 Webhook URL' };
+    }
+    return {
+      success: result.success,
+      statusCode: result.statusCode,
+      durationMs: result.durationMs,
+      attempts: result.attempts,
+      error: result.error,
     };
   });
