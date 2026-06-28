@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { Folder, FolderOpen, ChevronRight, ArrowUp, Home, RefreshCw, X, Check, AlertTriangle, Eye, EyeOff, FileText } from 'lucide-vue-next'
+import { useI18n } from 'vue-i18n'
 import { useProjectStore } from '../store/project'
 import { useToast } from '../composables/useToast'
 
@@ -14,7 +15,7 @@ const props = withDefaults(defineProps<{
   pickKind?: PickKind
 }>(), {
   mode: 'multi',
-  title: '选择文件夹',
+  title: undefined,
   pickKind: 'dir',
 })
 
@@ -23,8 +24,11 @@ const emit = defineEmits<{
   (e: 'confirm', paths: string[]): void
 }>()
 
+const { t } = useI18n()
 const projectStore = useProjectStore()
 const toast = useToast()
+
+const resolvedTitle = computed(() => props.title ?? t('files.folderPicker.defaultTitle'))
 
 const LAST_DIR_STORAGE_KEY = 'kite:folderPicker:lastDir'
 
@@ -130,7 +134,7 @@ async function loadDir(p: string): Promise<boolean> {
     writeLastDir(data.path)
     return true
   } catch (e: any) {
-    const msg = e?.message || '读取目录失败'
+    const msg = e?.message || t('files.folderPicker.readDirFailed')
     errorMsg.value = msg
     entries.value = []
     truncated.value = false
@@ -158,7 +162,7 @@ async function initialize() {
     }
     await loadDir(fallback)
   } catch (e: any) {
-    errorMsg.value = e?.message || '初始化目录浏览器失败'
+    errorMsg.value = e?.message || t('files.folderPicker.initFailed')
   } finally {
     loading.value = false
   }
@@ -195,7 +199,7 @@ function onCancel() {
 
 function onConfirm() {
   if (selected.value.length === 0) {
-    toast.error(props.pickKind === 'file' ? '请至少选择一个文件' : '请至少选择一个目录')
+    toast.error(props.pickKind === 'file' ? t('files.folderPicker.pickFileRequired') : t('files.folderPicker.pickDirRequired'))
     return
   }
   emit('confirm', [...selected.value])
@@ -227,8 +231,8 @@ watch(() => props.open, (v) => {
         <div class="flex items-center justify-between px-5 py-4 border-b border-border">
           <div class="flex items-center space-x-2">
             <FolderOpen class="w-5 h-5 text-primary" />
-            <h3 class="text-base font-semibold text-textMain">{{ title }}</h3>
-            <span v-if="mode === 'multi'" class="text-xs text-textMuted ml-2">支持多选</span>
+            <h3 class="text-base font-semibold text-textMain">{{ resolvedTitle }}</h3>
+            <span v-if="mode === 'multi'" class="text-xs text-textMuted ml-2">{{ t('files.folderPicker.multiSelectHint') }}</span>
           </div>
           <button @click="onCancel" class="text-textMuted hover:text-textMain rounded p-1">
             <X class="w-4 h-4" />
@@ -242,7 +246,7 @@ watch(() => props.open, (v) => {
               @click="goParent"
               :disabled="!parentPath || loading"
               class="p-2 rounded-md border border-border text-textMuted hover:text-textMain disabled:opacity-40 disabled:cursor-not-allowed"
-              title="上一级"
+              :title="t('files.folderPicker.goUpTitle')"
             >
               <ArrowUp class="w-4 h-4" />
             </button>
@@ -250,7 +254,7 @@ watch(() => props.open, (v) => {
               @click="goHome"
               :disabled="!home || loading"
               class="p-2 rounded-md border border-border text-textMuted hover:text-textMain disabled:opacity-40 disabled:cursor-not-allowed"
-              title="回到 HOME"
+              :title="t('files.folderPicker.goHomeTitle')"
             >
               <Home class="w-4 h-4" />
             </button>
@@ -259,14 +263,14 @@ watch(() => props.open, (v) => {
               type="text"
               spellcheck="false"
               class="flex-1 bg-base border border-border rounded-md px-3 py-1.5 text-textMain font-mono text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50"
-              placeholder="粘贴绝对路径并回车跳转"
+              :placeholder="t('files.folderPicker.pathPlaceholder')"
               @keydown.enter.prevent="gotoInput"
             />
             <button
               @click="gotoInput"
               :disabled="loading"
               class="px-3 py-1.5 text-sm border border-border rounded-md text-textMuted hover:text-textMain disabled:opacity-40"
-            >跳转</button>
+            >{{ t('files.folderPicker.goButton') }}</button>
           </div>
 
           <!-- Breadcrumb -->
@@ -284,7 +288,7 @@ watch(() => props.open, (v) => {
         <!-- Entry list -->
         <div class="flex-1 overflow-auto px-2 py-2 min-h-[280px]">
           <div v-if="loading" class="flex items-center justify-center h-full text-textMuted text-sm">
-            <RefreshCw class="w-4 h-4 mr-2 animate-spin" /> 加载中…
+            <RefreshCw class="w-4 h-4 mr-2 animate-spin" /> {{ t('files.folderPicker.loading') }}
           </div>
           <div v-else-if="errorMsg" class="flex items-start justify-center h-full">
             <div class="flex items-start space-x-2 text-danger text-sm max-w-md p-4">
@@ -293,7 +297,7 @@ watch(() => props.open, (v) => {
             </div>
           </div>
           <div v-else-if="filteredEntries.length === 0" class="flex items-center justify-center h-full text-textMuted text-sm">
-            空目录
+            {{ t('files.folderPicker.emptyDir') }}
           </div>
           <ul v-else class="space-y-0.5">
             <li
@@ -319,7 +323,7 @@ watch(() => props.open, (v) => {
                 class="flex-1 text-sm text-textMain truncate font-mono"
                 @click="onEntryClick(e)"
               >{{ e.name }}</span>
-              <span v-if="e.isSymlink" class="text-[10px] text-textMuted mr-2">link</span>
+              <span v-if="e.isSymlink" class="text-[10px] text-textMuted mr-2">{{ t('files.folderPicker.linkBadge') }}</span>
               <ChevronRight
                 v-if="e.isDir"
                 class="w-4 h-4 text-textMuted opacity-0 group-hover:opacity-100"
@@ -328,7 +332,7 @@ watch(() => props.open, (v) => {
             </li>
           </ul>
           <p v-if="truncated" class="text-xs text-yellow-400 text-center mt-2">
-            目录条目过多，已截断展示前 500 项，请通过路径输入精确跳转。
+            {{ t('files.folderPicker.truncatedHint') }}
           </p>
         </div>
 
@@ -356,30 +360,30 @@ watch(() => props.open, (v) => {
               class="flex items-center hover:text-textMain"
             >
               <component :is="showHidden ? Eye : EyeOff" class="w-3.5 h-3.5 mr-1" />
-              {{ showHidden ? '隐藏点开头目录' : '显示点开头目录' }}
+              {{ showHidden ? t('files.folderPicker.hideHidden') : t('files.folderPicker.showHidden') }}
             </button>
             <button
               v-if="pickKind === 'dir'"
               @click="selectCurrent"
               :disabled="!currentPath || loading"
               class="flex items-center hover:text-textMain disabled:opacity-40 disabled:cursor-not-allowed"
-              title="把当前所在目录加入选中"
+              :title="t('files.folderPicker.pickCurrentTitle')"
             >
               <Check class="w-3.5 h-3.5 mr-1" />
-              选中当前目录
+              {{ t('files.folderPicker.pickCurrent') }}
             </button>
-            <span>已选 {{ selected.length }} 项</span>
+            <span>{{ t('files.folderPicker.selectedSummary', { count: selected.length }) }}</span>
           </div>
           <div class="flex items-center space-x-2">
             <button
               @click="onCancel"
               class="px-4 py-2 text-sm font-medium text-textMuted hover:text-textMain dark:hover:bg-white/5 hover:bg-black/5 rounded-md transition-colors"
-            >取消</button>
+            >{{ t('files.folderPicker.cancel') }}</button>
             <button
               @click="onConfirm"
               :disabled="selected.length === 0"
               class="px-4 py-2 text-sm font-medium bg-primary text-white rounded-md hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >确认（{{ selected.length }}）</button>
+            >{{ t('files.folderPicker.confirmWithCount', { count: selected.length }) }}</button>
           </div>
         </div>
       </div>

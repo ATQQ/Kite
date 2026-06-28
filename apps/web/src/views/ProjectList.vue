@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useProjectStore } from '../store/project'
 import type { Category, Tag as TagType } from '../store/project'
 import { Plus, MoreVertical, Server, Clock, ScrollText, FolderPlus, Trash2, RefreshCw, XCircle, AlertTriangle, Pencil, FolderOpen, LayoutGrid, List as ListIcon, Tag, FolderTree, ChevronRight, Tags as TagsIcon, X as XIcon, Activity } from 'lucide-vue-next'
@@ -12,6 +13,7 @@ import { CHIP_COLOR_PALETTE, chipClass as tagChipClass, pickFreeColor as pickFre
 const projectStore = useProjectStore()
 const router = useRouter()
 const toast = useToast()
+const { t } = useI18n()
 
 const VIEW_KEY = 'kite:projectList:viewMode'
 const viewMode = ref<'card' | 'list'>(((): 'card' | 'list' => {
@@ -128,23 +130,23 @@ function envChipClass(env?: string | null): string {
 }
 
 function categoryNameOf(categoryId?: string | null): string {
-  if (!categoryId) return '默认'
-  return categoryMap.value.get(categoryId)?.name ?? '默认'
+  if (!categoryId) return t('project.list.defaultCategory')
+  return categoryMap.value.get(categoryId)?.name ?? t('project.list.defaultCategory')
 }
 
 function formatRelativeTime(iso?: string | null): string {
-  if (!iso) return '从未部署'
-  const t = new Date(iso).getTime()
-  if (isNaN(t)) return '—'
-  const diff = Date.now() - t
+  if (!iso) return t('project.list.noDeploy')
+  const ts = new Date(iso).getTime()
+  if (isNaN(ts)) return '—'
+  const diff = Date.now() - ts
   const sec = Math.floor(diff / 1000)
-  if (sec < 60) return `${sec} 秒前`
+  if (sec < 60) return t('project.list.relativeSec', { n: sec })
   const min = Math.floor(sec / 60)
-  if (min < 60) return `${min} 分钟前`
+  if (min < 60) return t('project.list.relativeMin', { n: min })
   const hour = Math.floor(min / 60)
-  if (hour < 24) return `${hour} 小时前`
+  if (hour < 24) return t('project.list.relativeHour', { n: hour })
   const day = Math.floor(hour / 24)
-  if (day < 30) return `${day} 天前`
+  if (day < 30) return t('project.list.relativeDay', { n: day })
   return new Date(iso).toLocaleDateString()
 }
 
@@ -164,12 +166,12 @@ const createProject = async () => {
   if (result.ok) {
     showCreateModal.value = false
     newProject.value = { name: '', description: '', destPath: '', env: '', categoryId: '', tagIds: [] }
-    toast.success('项目创建成功')
+    toast.success(t('project.list.createSuccess'))
   } else {
     const detail = result.conflictProject
-      ? `部署目录已被项目「${result.conflictProject}」占用`
-      : result.error || '请稍后重试'
-    toast.error('创建失败', detail)
+      ? t('project.list.conflictOccupied', { name: result.conflictProject })
+      : result.error || t('project.list.retryHint')
+    toast.error(t('project.list.createFail'), detail)
   }
 }
 
@@ -266,10 +268,10 @@ async function confirmRename() {
   isRenaming.value = true
   try {
     await projectStore.updateProject(renameTarget.value.id, { name: newName })
-    toast.success('重命名成功')
+    toast.success(t('project.list.renameSuccess'))
     showRenameModal.value = false
   } catch (e: any) {
-    toast.error('重命名失败', e?.message || '请稍后重试')
+    toast.error(t('project.list.renameFailed'), e?.message || t('project.list.retryHint'))
   } finally {
     isRenaming.value = false
   }
@@ -300,13 +302,13 @@ async function confirmDelete() {
   try {
     const success = await projectStore.removeProject(deleteTarget.value.id)
     if (success) {
-      toast.success('项目已删除')
+      toast.success(t('project.list.deleteSuccess'))
       showDeleteModal.value = false
     } else {
-      toast.error('删除失败')
+      toast.error(t('project.list.deleteFailed'))
     }
   } catch (e: any) {
-    toast.error('删除失败', e?.message || '请稍后重试')
+    toast.error(t('project.list.deleteFailed'), e?.message || t('project.list.retryHint'))
   } finally {
     isDeleting.value = false
   }
@@ -408,21 +410,21 @@ const batchValidation = computed(() => {
     const entry: { name?: string; dest?: string } = {}
     const name = r.name.trim()
     if (!name) {
-      entry.name = '项目名不能为空'
+      entry.name = t('project.list.batchNameEmpty')
     } else if (existingNames.value.has(name)) {
-      entry.name = '与已有项目重名'
+      entry.name = t('project.list.batchNameDup')
     } else if (seenNames.has(name)) {
-      entry.name = '本次批量内重名'
+      entry.name = t('project.list.batchNameDupInBatch')
     } else {
       seenNames.set(name, r.id)
     }
     const dp = r.destPath.trim()
     if (!dp) {
-      entry.dest = '部署目录不能为空'
+      entry.dest = t('project.list.batchDestEmpty')
     } else if (existingDeployPaths.value.has(dp)) {
-      entry.dest = '该部署目录已被其他项目占用'
+      entry.dest = t('project.list.batchDestOccupied')
     } else if (seenPaths.has(dp)) {
-      entry.dest = '本次批量内部署目录重复'
+      entry.dest = t('project.list.batchDestDupInBatch')
     } else {
       seenPaths.set(dp, r.id)
     }
@@ -469,17 +471,17 @@ async function submitBatch() {
       } else {
         row.status = 'failed'
         row.errorMsg = result.conflictProject
-          ? `部署目录已被项目「${result.conflictProject}」占用`
-          : result.error || '创建失败'
+          ? t('project.list.conflictOccupied', { name: result.conflictProject })
+          : result.error || t('project.list.batchCreateFailed')
       }
     }
     const { success, failed } = batchSummary.value
     if (failed === 0) {
-      toast.success(`批量创建完成`, `成功 ${success} 个`)
+      toast.success(t('project.list.batchAllDone'), t('project.list.batchAllDoneDetail', { n: success }))
       batchRows.value = []
       showBatchModal.value = false
     } else {
-      toast.error(`部分创建失败`, `成功 ${success} 个，失败 ${failed} 个`)
+      toast.error(t('project.list.batchPartialFail'), t('project.list.batchPartialFailDetail', { ok: success, fail: failed }))
     }
   } finally {
     isBatchSubmitting.value = false
@@ -506,12 +508,12 @@ async function moveProjectToCategory(projectId: string, categoryId: string | nul
   isMovingCategory.value = true
   try {
     await projectStore.updateProject(projectId, { categoryId })
-    const name = categoryId ? (categoryMap.value.get(categoryId)?.name ?? '分类') : '默认'
-    toast.success(`已移动到「${name}」`)
+    const name = categoryId ? (categoryMap.value.get(categoryId)?.name ?? t('project.list.moveCategoryDefault')) : t('project.list.moveCategoryDefault')
+    toast.success(t('project.list.moveSuccess', { name }))
     moveSubmenuOpen.value = false
     closeDropdown()
   } catch (e: any) {
-    toast.error('移动失败', e?.message || '请稍后重试')
+    toast.error(t('project.list.moveFailed'), e?.message || t('project.list.retryHint'))
   } finally {
     isMovingCategory.value = false
   }
@@ -554,10 +556,10 @@ async function submitCreateCategory() {
   try {
     const res = await projectStore.createCategory({ name, color: pickFreeColor() })
     if (res.ok) {
-      toast.success('分类创建成功')
+      toast.success(t('project.list.categoryCreateSuccess'))
       newCategoryName.value = ''
     } else {
-      toast.error('创建失败', res.conflictCategory ? `分类名「${res.conflictCategory}」已存在` : res.error || '请稍后重试')
+      toast.error(t('project.list.categoryCreateFailed'), res.conflictCategory ? t('project.list.categoryConflict', { name: res.conflictCategory }) : res.error || t('project.list.retryHint'))
     }
   } finally {
     isCreatingCategory.value = false
@@ -582,10 +584,10 @@ async function submitEditCategory() {
   try {
     const res = await projectStore.updateCategory(editingCategoryId.value, { name })
     if (res.ok) {
-      toast.success('分类已更新')
+      toast.success(t('project.list.categoryUpdateSuccess'))
       cancelEditCategory()
     } else {
-      toast.error('更新失败', res.conflictCategory ? `分类名「${res.conflictCategory}」已存在` : res.error || '请稍后重试')
+      toast.error(t('project.list.categoryUpdateFailed'), res.conflictCategory ? t('project.list.categoryConflict', { name: res.conflictCategory }) : res.error || t('project.list.retryHint'))
     }
   } finally {
     isSavingCategory.value = false
@@ -597,18 +599,18 @@ async function deleteCategoryAction(c: Category) {
   const count = projectCountByCategory.value[c.id] || 0
   const ok = window.confirm(
     count > 0
-      ? `分类「${c.name}」下还有 ${count} 个项目，删除后这些项目会回落到默认。是否继续？`
-      : `确认删除分类「${c.name}」？`
+      ? t('project.list.categoryDeleteConfirmWith', { name: c.name, count })
+      : t('project.list.categoryDeleteConfirmEmpty', { name: c.name })
   )
   if (!ok) return
   deletingCategoryId.value = c.id
   try {
     const res = await projectStore.deleteCategory(c.id)
     if (res.ok) {
-      toast.success('分类已删除', res.detachedProjects ? `${res.detachedProjects} 个项目已回落到默认` : undefined)
+      toast.success(t('project.list.categoryDeleteSuccess'), res.detachedProjects ? t('project.list.categoryDetached', { n: res.detachedProjects }) : undefined)
       if (selectedCategoryFilter.value === c.id) selectedCategoryFilter.value = 'all'
     } else {
-      toast.error('删除失败', res.error || '请稍后重试')
+      toast.error(t('project.list.deleteFailed'), res.error || t('project.list.retryHint'))
     }
   } finally {
     deletingCategoryId.value = null
@@ -633,7 +635,7 @@ async function persistProjectTags(projectId: string, next: string[]) {
   try {
     await projectStore.updateProject(projectId, { tagIds: [...next] })
   } catch (e: any) {
-    toast.error('保存标签失败', e?.message || '请稍后重试')
+    toast.error(t('project.list.tagSaveFailed'), e?.message || t('project.list.retryHint'))
   }
 }
 
@@ -667,19 +669,19 @@ async function submitCreateTag() {
     const color = pickFreeChipColor(projectStore.tags)
     const res = await projectStore.createTag({ name, color })
     if (res.ok) {
-      toast.success('标签创建成功')
+      toast.success(t('project.list.tagCreateSuccess'))
       newTagName.value = ''
     } else {
-      toast.error('创建失败', res.conflictTag ? `标签名「${res.conflictTag}」已存在` : res.error || '请稍后重试')
+      toast.error(t('project.list.categoryCreateFailed'), res.conflictTag ? t('project.list.tagConflict', { name: res.conflictTag }) : res.error || t('project.list.retryHint'))
     }
   } finally {
     isCreatingTag.value = false
   }
 }
 
-function startEditTag(t: TagType) {
-  editingTagId.value = t.id
-  editTagName.value = t.name
+function startEditTag(tag: TagType) {
+  editingTagId.value = tag.id
+  editTagName.value = tag.name
 }
 
 function cancelEditTag() {
@@ -695,38 +697,38 @@ async function submitEditTag() {
   try {
     const res = await projectStore.updateTag(editingTagId.value, { name })
     if (res.ok) {
-      toast.success('标签已更新')
+      toast.success(t('project.list.tagUpdateSuccess'))
       cancelEditTag()
     } else {
-      toast.error('更新失败', res.conflictTag ? `标签名「${res.conflictTag}」已存在` : res.error || '请稍后重试')
+      toast.error(t('project.list.categoryUpdateFailed'), res.conflictTag ? t('project.list.tagConflict', { name: res.conflictTag }) : res.error || t('project.list.retryHint'))
     }
   } finally {
     isSavingTag.value = false
   }
 }
 
-async function changeTagColor(t: TagType, color: string) {
-  const res = await projectStore.updateTag(t.id, { color })
-  if (!res.ok) toast.error('更新失败', res.error || '请稍后重试')
+async function changeTagColor(tag: TagType, color: string) {
+  const res = await projectStore.updateTag(tag.id, { color })
+  if (!res.ok) toast.error(t('project.list.categoryUpdateFailed'), res.error || t('project.list.retryHint'))
 }
 
-async function deleteTagAction(t: TagType) {
+async function deleteTagAction(tag: TagType) {
   if (deletingTagId.value) return
-  const count = t.projectCount || 0
+  const count = tag.projectCount || 0
   const ok = window.confirm(
     count > 0
-      ? `标签「${t.name}」当前关联了 ${count} 个项目，删除后这些关联会被解除。是否继续？`
-      : `确认删除标签「${t.name}」？`
+      ? t('project.list.tagDeleteConfirmWith', { name: tag.name, count })
+      : t('project.list.tagDeleteConfirmEmpty', { name: tag.name })
   )
   if (!ok) return
-  deletingTagId.value = t.id
+  deletingTagId.value = tag.id
   try {
-    const res = await projectStore.deleteTag(t.id)
+    const res = await projectStore.deleteTag(tag.id)
     if (res.ok) {
-      toast.success('标签已删除', res.detachedProjects ? `${res.detachedProjects} 个项目已解除关联` : undefined)
-      selectedTagIds.value = selectedTagIds.value.filter((x) => x !== t.id)
+      toast.success(t('project.list.tagDeleteSuccess'), res.detachedProjects ? t('project.list.tagDetached', { n: res.detachedProjects }) : undefined)
+      selectedTagIds.value = selectedTagIds.value.filter((x) => x !== tag.id)
     } else {
-      toast.error('删除失败', res.error || '请稍后重试')
+      toast.error(t('project.list.deleteFailed'), res.error || t('project.list.retryHint'))
     }
   } finally {
     deletingTagId.value = null
@@ -738,8 +740,8 @@ async function deleteTagAction(t: TagType) {
   <div class="max-w-7xl mx-auto space-y-6">
     <div class="flex flex-col md:flex-row md:justify-between md:items-center gap-3 mb-8">
       <div>
-        <h1 class="text-2xl font-bold text-textMain tracking-tight">项目管理</h1>
-        <p class="text-textMuted text-sm mt-1">管理所有可部署的应用服务与脚本配置</p>
+        <h1 class="text-2xl font-bold text-textMain tracking-tight">{{ t('project.list.pageTitle') }}</h1>
+        <p class="text-textMuted text-sm mt-1">{{ t('project.list.pageSubtitle') }}</p>
       </div>
       <div class="flex items-center flex-wrap gap-2">
         <div class="flex items-center border border-border rounded-md overflow-hidden">
@@ -747,7 +749,7 @@ async function deleteTagAction(t: TagType) {
             @click="viewMode = 'card'"
             :class="viewMode === 'card' ? 'bg-primary/15 text-primary' : 'text-textMuted hover:text-textMain'"
             class="flex items-center px-2.5 py-1.5 text-xs transition-colors"
-            title="卡片视图"
+            :title="t('project.list.cardView')"
           >
             <LayoutGrid class="w-3.5 h-3.5" />
           </button>
@@ -755,7 +757,7 @@ async function deleteTagAction(t: TagType) {
             @click="viewMode = 'list'"
             :class="viewMode === 'list' ? 'bg-primary/15 text-primary' : 'text-textMuted hover:text-textMain'"
             class="flex items-center px-2.5 py-1.5 text-xs transition-colors border-l border-border"
-            title="列表视图"
+            :title="t('project.list.listView')"
           >
             <ListIcon class="w-3.5 h-3.5" />
           </button>
@@ -763,45 +765,45 @@ async function deleteTagAction(t: TagType) {
         <button
           @click="openCategoryModal"
           class="flex items-center px-3 py-2 border border-border hover:border-primary/50 text-textMain rounded-md transition-all font-medium text-sm"
-          title="管理分类"
+          :title="t('project.list.manageCategoriesBtn')"
         >
           <FolderTree class="w-4 h-4 mr-2" />
-          管理分类
+          {{ t('project.list.manageCategoriesBtn') }}
         </button>
         <button
           @click="openTagModal"
           class="flex items-center px-3 py-2 border border-border hover:border-primary/50 text-textMain rounded-md transition-all font-medium text-sm"
-          title="管理标签"
+          :title="t('project.list.manageTagsBtn')"
         >
           <TagsIcon class="w-4 h-4 mr-2" />
-          管理标签
+          {{ t('project.list.manageTagsBtn') }}
         </button>
         <button
           @click="openFolderPicker"
           class="flex items-center px-4 py-2 bg-primary hover:bg-primary/90 text-white rounded-md shadow-[0_0_15px_rgba(59,130,246,0.3)] transition-all font-medium text-sm"
         >
           <FolderPlus class="w-4 h-4 mr-2" />
-          选择文件夹新建
+          {{ t('project.list.pickFolderCreate') }}
         </button>
         <button
           @click="showCreateModal = true"
           class="flex items-center px-4 py-2 border border-border hover:border-primary/50 text-textMain rounded-md transition-all font-medium text-sm"
         >
           <Plus class="w-4 h-4 mr-2" />
-          新建项目
+          {{ t('project.list.newProjectBtn') }}
         </button>
       </div>
     </div>
 
     <!-- Category filter chips -->
     <div class="flex items-center flex-wrap gap-2">
-      <span class="text-xs text-textMuted/80 mr-1 shrink-0">分类</span>
+      <span class="text-xs text-textMuted/80 mr-1 shrink-0">{{ t('project.list.filterCategoryLabel') }}</span>
       <button
         @click="selectedCategoryFilter = 'all'"
         class="flex items-center px-3 py-1.5 rounded-full text-xs border transition-colors"
         :class="selectedCategoryFilter === 'all' ? 'bg-primary/15 text-primary border-primary/40' : 'bg-base text-textMuted border-border hover:text-textMain'"
       >
-        全部
+        {{ t('project.list.filterAll') }}
         <span class="ml-1.5 text-[10px] opacity-75">{{ projectCountByCategory.all }}</span>
       </button>
       <button
@@ -809,7 +811,7 @@ async function deleteTagAction(t: TagType) {
         class="flex items-center px-3 py-1.5 rounded-full text-xs border transition-colors"
         :class="selectedCategoryFilter === 'default' ? 'bg-primary/15 text-primary border-primary/40' : 'bg-base text-textMuted border-border hover:text-textMain'"
       >
-        默认
+        {{ t('project.list.filterDefault') }}
         <span class="ml-1.5 text-[10px] opacity-75">{{ projectCountByCategory.default }}</span>
       </button>
       <button
@@ -827,13 +829,13 @@ async function deleteTagAction(t: TagType) {
 
     <!-- Environment filter chips -->
     <div v-if="envOptions.length > 0" class="flex items-center flex-wrap gap-2">
-      <span class="text-xs text-textMuted/80 mr-1 shrink-0">环境</span>
+      <span class="text-xs text-textMuted/80 mr-1 shrink-0">{{ t('project.list.filterEnvLabel') }}</span>
       <button
         @click="selectedEnvFilter = 'all'"
         class="flex items-center px-3 py-1.5 rounded-full text-xs border transition-colors"
         :class="selectedEnvFilter === 'all' ? 'bg-primary/15 text-primary border-primary/40' : 'bg-base text-textMuted border-border hover:text-textMain'"
       >
-        全部
+        {{ t('project.list.filterAll') }}
         <span class="ml-1.5 text-[10px] opacity-75">{{ projectCountByEnv.all }}</span>
       </button>
       <button
@@ -841,9 +843,9 @@ async function deleteTagAction(t: TagType) {
         @click="selectedEnvFilter = 'default'"
         class="flex items-center px-3 py-1.5 rounded-full text-xs border transition-colors"
         :class="selectedEnvFilter === 'default' ? 'bg-primary/15 text-primary border-primary/40' : 'bg-base text-textMuted border-border hover:text-textMain'"
-        title="未指定环境的项目"
+        :title="t('project.list.filterEnvUnspecifiedTitle')"
       >
-        未指定
+        {{ t('project.list.filterEnvUnspecified') }}
         <span class="ml-1.5 text-[10px] opacity-75">{{ projectCountByEnv.default }}</span>
       </button>
       <button
@@ -860,26 +862,26 @@ async function deleteTagAction(t: TagType) {
 
     <!-- Tag filter chips (multi-select AND) -->
     <div v-if="projectStore.tags.length > 0" class="flex items-center flex-wrap gap-2">
-      <span class="text-xs text-textMuted/80 mr-1 shrink-0">标签</span>
+      <span class="text-xs text-textMuted/80 mr-1 shrink-0">{{ t('project.list.filterTagsLabel') }}</span>
       <button
-        v-for="t in projectStore.tags"
-        :key="t.id"
-        @click="toggleTagFilter(t.id)"
+        v-for="tg in projectStore.tags"
+        :key="tg.id"
+        @click="toggleTagFilter(tg.id)"
         class="flex items-center px-3 py-1.5 rounded-full text-xs border transition-colors"
-        :class="selectedTagIds.includes(t.id) ? `${tagChipClass(t.color)} ring-1 ring-primary/40` : 'bg-base text-textMuted border-border hover:text-textMain hover:border-textMuted/40'"
-        :title="selectedTagIds.includes(t.id) ? '点击取消该标签筛选' : '点击叠加该标签筛选（多选为「与」逻辑）'"
+        :class="selectedTagIds.includes(tg.id) ? `${tagChipClass(tg.color)} ring-1 ring-primary/40` : 'bg-base text-textMuted border-border hover:text-textMain hover:border-textMuted/40'"
+        :title="selectedTagIds.includes(tg.id) ? t('project.list.filterTagRemoveTitle') : t('project.list.filterTagAddTitle')"
       >
         <Tag class="w-3 h-3 mr-1.5" />
-        {{ t.name }}
-        <span v-if="t.projectCount != null" class="ml-1.5 text-[10px] opacity-75">{{ t.projectCount }}</span>
+        {{ tg.name }}
+        <span v-if="tg.projectCount != null" class="ml-1.5 text-[10px] opacity-75">{{ tg.projectCount }}</span>
       </button>
       <button
         v-if="selectedTagIds.length > 0"
         @click="clearTagFilters"
         class="flex items-center px-2 py-1.5 rounded-full text-[11px] text-textMuted hover:text-textMain transition-colors"
-        title="清空标签筛选"
+        :title="t('project.list.filterClearTagsTitle')"
       >
-        <XIcon class="w-3 h-3 mr-1" /> 清空
+        <XIcon class="w-3 h-3 mr-1" /> {{ t('project.list.filterClearTags') }}
       </button>
     </div>
 
@@ -911,7 +913,7 @@ async function deleteTagAction(t: TagType) {
         </div>
 
         <p class="text-sm text-textMuted mb-3 line-clamp-2 min-h-[40px]">
-          {{ project.description || '暂无描述' }}
+          {{ project.description || t('project.list.noDescription') }}
         </p>
 
         <div class="flex items-center flex-wrap gap-1.5 mb-3">
@@ -924,12 +926,12 @@ async function deleteTagAction(t: TagType) {
             :model-value="project.tagIds || []"
             size="sm"
             :on-persist="(next) => persistProjectTags(project.id, next)"
-            :aria-label="`编辑「${project.name}」的标签`"
+            :aria-label="t('project.list.tagsEditAriaLabel', { name: project.name })"
           />
         </div>
 
         <div class="flex items-center justify-between border-t border-border pt-4 text-xs text-textMuted">
-          <div class="flex items-center" :title="project.lastDeployAt ? new Date(project.lastDeployAt).toLocaleString() : '从未部署'">
+          <div class="flex items-center" :title="project.lastDeployAt ? new Date(project.lastDeployAt).toLocaleString() : t('project.list.noDeploy')">
             <Clock class="w-3.5 h-3.5 mr-1.5" />
             <span>{{ formatRelativeTime(project.lastDeployAt) }}</span>
           </div>
@@ -937,28 +939,28 @@ async function deleteTagAction(t: TagType) {
             <button
               @click.stop="goToLogs(project.id)"
               class="flex items-center text-textMuted hover:text-primary transition-colors"
-              title="查看部署日志"
+              :title="t('project.list.deployLogTitle')"
             >
               <ScrollText class="w-3.5 h-3.5 mr-1" />
-              <span>部署日志</span>
+              <span>{{ t('project.list.deployLog') }}</span>
             </button>
             <button
               @click.stop="goToRunLogs(project.id)"
               class="flex items-center text-textMuted hover:text-primary transition-colors"
-              title="查看运行日志"
+              :title="t('project.list.runLogTitle')"
             >
               <Activity class="w-3.5 h-3.5 mr-1" />
-              <span>运行日志</span>
+              <span>{{ t('project.list.runLog') }}</span>
             </button>
             <span class="flex items-center" :class="project.status === 'success' ? 'text-success' : project.status === 'failed' ? 'text-danger' : 'text-primary'">
               <span class="w-2 h-2 rounded-full mr-1.5" :class="project.status === 'success' ? 'bg-success shadow-[0_0_8px_#10b981]' : project.status === 'failed' ? 'bg-danger' : 'bg-primary'"></span>
-              {{ project.status === 'success' ? '正常' : project.status === 'failed' ? '异常' : '空闲' }}
+              {{ project.status === 'success' ? t('project.list.statusNormal') : project.status === 'failed' ? t('project.list.statusAbnormal') : t('project.list.statusIdle') }}
             </span>
           </div>
         </div>
       </div>
       <div v-if="filteredProjects.length === 0" class="col-span-full text-center py-16 text-textMuted text-sm">
-        当前分类下没有项目
+        {{ t('project.list.emptyUnderCategory') }}
       </div>
     </div>
 
@@ -968,12 +970,12 @@ async function deleteTagAction(t: TagType) {
       <table class="w-full text-sm min-w-[720px]">
         <thead class="text-xs text-textMuted bg-base/40">
           <tr>
-            <th class="text-left font-medium px-4 py-3">项目名</th>
-            <th class="text-left font-medium px-4 py-3">部署目录</th>
-            <th class="text-left font-medium px-4 py-3 w-28">分类</th>
-            <th class="text-left font-medium px-4 py-3 w-24">环境</th>
-            <th class="text-left font-medium px-4 py-3 w-36">上次部署</th>
-            <th class="text-left font-medium px-4 py-3 w-20">状态</th>
+            <th class="text-left font-medium px-4 py-3">{{ t('project.list.colName') }}</th>
+            <th class="text-left font-medium px-4 py-3">{{ t('project.list.colDestPath') }}</th>
+            <th class="text-left font-medium px-4 py-3 w-28">{{ t('project.list.colCategory') }}</th>
+            <th class="text-left font-medium px-4 py-3 w-24">{{ t('project.list.colEnv') }}</th>
+            <th class="text-left font-medium px-4 py-3 w-36">{{ t('project.list.colLastDeploy') }}</th>
+            <th class="text-left font-medium px-4 py-3 w-20">{{ t('project.list.colStatus') }}</th>
             <th class="text-right font-medium px-4 py-3 w-12"></th>
           </tr>
         </thead>
@@ -1004,7 +1006,7 @@ async function deleteTagAction(t: TagType) {
                   :model-value="project.tagIds || []"
                   size="sm"
                   :on-persist="(next) => persistProjectTags(project.id, next)"
-                  :aria-label="`编辑「${project.name}」的标签`"
+                  :aria-label="t('project.list.tagsEditAriaLabel', { name: project.name })"
                 />
               </div>
             </td>
@@ -1012,13 +1014,13 @@ async function deleteTagAction(t: TagType) {
               <span v-if="project.env" class="inline-flex items-center px-2 py-0.5 rounded text-[10px] border font-mono" :class="envChipClass(project.env)">{{ project.env }}</span>
               <span v-else class="text-textMuted text-xs">—</span>
             </td>
-            <td class="px-4 py-3 text-textMuted text-xs" :title="project.lastDeployAt ? new Date(project.lastDeployAt).toLocaleString() : '从未部署'">
+            <td class="px-4 py-3 text-textMuted text-xs" :title="project.lastDeployAt ? new Date(project.lastDeployAt).toLocaleString() : t('project.list.noDeploy')">
               {{ formatRelativeTime(project.lastDeployAt) }}
             </td>
             <td class="px-4 py-3">
               <span class="inline-flex items-center text-xs" :class="project.status === 'success' ? 'text-success' : project.status === 'failed' ? 'text-danger' : 'text-primary'">
                 <span class="w-2 h-2 rounded-full mr-1.5" :class="project.status === 'success' ? 'bg-success' : project.status === 'failed' ? 'bg-danger' : 'bg-primary'"></span>
-                {{ project.status === 'success' ? '正常' : project.status === 'failed' ? '异常' : '空闲' }}
+                {{ project.status === 'success' ? t('project.list.statusNormal') : project.status === 'failed' ? t('project.list.statusAbnormal') : t('project.list.statusIdle') }}
               </span>
             </td>
             <td class="px-4 py-3 text-right">
@@ -1028,7 +1030,7 @@ async function deleteTagAction(t: TagType) {
             </td>
           </tr>
           <tr v-if="filteredProjects.length === 0">
-            <td colspan="7" class="px-4 py-12 text-center text-textMuted text-sm">当前分类下没有项目</td>
+            <td colspan="7" class="px-4 py-12 text-center text-textMuted text-sm">{{ t('project.list.emptyUnderCategory') }}</td>
           </tr>
         </tbody>
       </table>
@@ -1049,28 +1051,28 @@ async function deleteTagAction(t: TagType) {
             @click="(() => { const p = projectStore.projects.find(x => x.id === openDropdownId); if (p) openRename(p.id, p.name) })()"
           >
             <Pencil class="w-3.5 h-3.5 mr-2 text-textMuted" />
-            重命名
+            {{ t('project.list.ddRename') }}
           </button>
           <button
             class="flex items-center w-full px-3 py-2 text-sm text-textMain hover:bg-white/5 transition-colors"
             @click.stop="(() => { const id = openDropdownId; closeDropdown(); if (id) goToFiles(id) })()"
           >
             <FolderOpen class="w-3.5 h-3.5 mr-2 text-textMuted" />
-            查看文件
+            {{ t('project.list.ddViewFiles') }}
           </button>
           <button
             class="flex items-center w-full px-3 py-2 text-sm text-textMain hover:bg-white/5 transition-colors"
             @click="(() => { const id = openDropdownId; closeDropdown(); if (id) goToLogs(id) })()"
           >
             <ScrollText class="w-3.5 h-3.5 mr-2 text-textMuted" />
-            部署日志
+            {{ t('project.list.deployLog') }}
           </button>
           <button
             class="flex items-center w-full px-3 py-2 text-sm text-textMain hover:bg-white/5 transition-colors"
             @click="(() => { const id = openDropdownId; closeDropdown(); if (id) goToRunLogs(id) })()"
           >
             <Activity class="w-3.5 h-3.5 mr-2 text-textMuted" />
-            运行日志
+            {{ t('project.list.runLog') }}
           </button>
           <div class="border-t border-border my-1"></div>
           <div class="relative">
@@ -1080,7 +1082,7 @@ async function deleteTagAction(t: TagType) {
             >
               <span class="flex items-center">
                 <FolderTree class="w-3.5 h-3.5 mr-2 text-textMuted" />
-                移动到分类
+                {{ t('project.list.ddMoveCategory') }}
               </span>
               <ChevronRight class="w-3.5 h-3.5 text-textMuted" />
             </button>
@@ -1095,7 +1097,7 @@ async function deleteTagAction(t: TagType) {
                 :disabled="isMovingCategory"
                 @click="openDropdownId && moveProjectToCategory(openDropdownId, null)"
               >
-                <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] border bg-base text-textMuted border-border">默认</span>
+                <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] border bg-base text-textMuted border-border">{{ t('project.list.moveDefaultChip') }}</span>
               </button>
               <button
                 v-for="c in projectStore.categories"
@@ -1109,7 +1111,7 @@ async function deleteTagAction(t: TagType) {
                 </span>
               </button>
               <div v-if="projectStore.categories.length === 0" class="px-3 py-2 text-xs text-textMuted">
-                还没有分类，请先在「管理分类」中创建
+                {{ t('project.list.noCategoriesHint') }}
               </div>
             </div>
           </div>
@@ -1119,7 +1121,7 @@ async function deleteTagAction(t: TagType) {
             @click="(() => { const p = projectStore.projects.find(x => x.id === openDropdownId); if (p) openDelete(p.id, p.name) })()"
           >
             <Trash2 class="w-3.5 h-3.5 mr-2" />
-            删除项目
+            {{ t('project.list.ddDeleteProject') }}
           </button>
         </div>
       </transition>
@@ -1128,79 +1130,79 @@ async function deleteTagAction(t: TagType) {
     <!-- Create Modal -->
     <div v-if="showCreateModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
       <div class="bg-panel border border-border rounded-xl w-full max-w-md p-6 shadow-2xl transform transition-all max-h-[90vh] overflow-y-auto">
-        <h2 class="text-xl font-bold text-textMain mb-6">新建部署项目</h2>
+        <h2 class="text-xl font-bold text-textMain mb-6">{{ t('project.list.createTitle') }}</h2>
         
         <div class="space-y-4">
           <div>
-            <label class="block text-sm font-medium text-textMuted mb-1.5">项目名称</label>
+            <label class="block text-sm font-medium text-textMuted mb-1.5">{{ t('project.list.createNameLabel') }}</label>
             <input 
               v-model="newProject.name"
               type="text" 
               class="w-full bg-base border border-border rounded-md px-3 py-2 text-textMain focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all text-sm"
-              placeholder="e.g. Kite Web Frontend"
+              :placeholder="t('project.list.createNamePlaceholder')"
             />
           </div>
           <div>
-            <label class="block text-sm font-medium text-textMuted mb-1.5">部署目录绝对路径 (Destination Path)</label>
+            <label class="block text-sm font-medium text-textMuted mb-1.5">{{ t('project.list.createDestPathLabel') }}</label>
             <input
               v-model="newProject.destPath"
               type="text"
               class="w-full bg-base border border-border rounded-md px-3 py-2 text-textMain font-mono focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all text-sm"
-              placeholder="e.g. /var/www/my-project"
+              :placeholder="t('project.list.createDestPathPlaceholder')"
             />
           </div>
           <div>
-            <label class="block text-sm font-medium text-textMuted mb-1.5">部署环境标识 (可选)</label>
+            <label class="block text-sm font-medium text-textMuted mb-1.5">{{ t('project.list.createEnvLabel') }}</label>
             <input
               v-model="newProject.env"
               type="text"
               class="w-full bg-base border border-border rounded-md px-3 py-2 text-textMain font-mono focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all text-sm"
-              placeholder="e.g. test, staging, prod"
+              :placeholder="t('project.list.createEnvPlaceholder')"
             />
             <p class="text-xs text-textMuted mt-1.5">
-              用于区分同一项目的不同部署环境。设置后，CLI 会生成 <code class="font-mono text-textMain">kite.config.{`{env}`}.json</code> 配置文件，
-              <code class="font-mono text-textMain">kite push --env {`{name}`}</code> 可精准推送到对应环境。
-              <span class="text-primary/80">常见场景：同一项目部署到测试/预发/生产等不同机器。</span>
+              {{ t('project.list.envInputHintPart1') }} <code class="font-mono text-textMain">kite.config.{`{env}`}.json</code> {{ t('project.list.envInputHintPart2') }}
+              <code class="font-mono text-textMain">kite push --env {`{name}`}</code> {{ t('project.list.envInputHintPart3') }}
+              <span class="text-primary/80">{{ t('project.list.createEnvHintScene') }}</span>
             </p>
           </div>
 
           <div>
-            <label class="block text-sm font-medium text-textMuted mb-1.5">分类 (可选)</label>
+            <label class="block text-sm font-medium text-textMuted mb-1.5">{{ t('project.list.createCategoryLabel') }}</label>
             <select
               v-model="newProject.categoryId"
               class="w-full bg-base border border-border rounded-md px-3 py-2 text-textMain focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all text-sm"
             >
-              <option value="">默认</option>
+              <option value="">{{ t('project.list.defaultCategory') }}</option>
               <option v-for="c in projectStore.categories" :key="c.id" :value="c.id">{{ c.name }}</option>
             </select>
           </div>
 
           <div>
-            <label class="block text-sm font-medium text-textMuted mb-1.5">标签 (可选，可多选)</label>
+            <label class="block text-sm font-medium text-textMuted mb-1.5">{{ t('project.list.createTagsLabel') }}</label>
             <div v-if="projectStore.tags.length === 0" class="text-xs text-textMuted">
-              还没有标签，可前往「管理标签」创建。
+              {{ t('project.list.createTagsEmpty') }}
             </div>
             <div v-else class="flex items-center flex-wrap gap-1.5">
               <button
-                v-for="t in projectStore.tags"
-                :key="t.id"
+                v-for="tg in projectStore.tags"
+                :key="tg.id"
                 type="button"
-                @click="toggleTagOnForm(newProject, t.id)"
+                @click="toggleTagOnForm(newProject, tg.id)"
                 class="inline-flex items-center px-2 py-1 rounded text-[11px] border transition-colors"
-                :class="newProject.tagIds.includes(t.id) ? `${tagChipClass(t.color)} ring-1 ring-primary/40` : 'bg-base text-textMuted border-border hover:text-textMain hover:border-textMuted/40'"
+                :class="newProject.tagIds.includes(tg.id) ? `${tagChipClass(tg.color)} ring-1 ring-primary/40` : 'bg-base text-textMuted border-border hover:text-textMain hover:border-textMuted/40'"
               >
                 <Tag class="w-3 h-3 mr-1" />
-                {{ t.name }}
+                {{ tg.name }}
               </button>
             </div>
           </div>
 
           <div>
-            <label class="block text-sm font-medium text-textMuted mb-1.5">描述 (可选)</label>
+            <label class="block text-sm font-medium text-textMuted mb-1.5">{{ t('project.list.createDescLabel') }}</label>
             <textarea
               v-model="newProject.description"
               class="w-full bg-base border border-border rounded-md px-3 py-2 text-textMain focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all text-sm h-24 resize-none"
-              placeholder="简要描述项目的用途..."
+              :placeholder="t('project.list.createDescPlaceholder')"
             ></textarea>
           </div>
         </div>
@@ -1210,14 +1212,14 @@ async function deleteTagAction(t: TagType) {
             @click="showCreateModal = false"
             class="px-4 py-2 text-sm font-medium text-textMuted hover:text-textMain dark:hover:bg-white/5 hover:bg-black/5 rounded-md transition-colors"
           >
-            取消
+            {{ t('common.cancel') }}
           </button>
           <button 
             @click="createProject"
             :disabled="!newProject.name || !newProject.destPath"
             class="px-4 py-2 text-sm font-medium bg-primary text-white rounded-md hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
-            确认创建
+            {{ t('project.list.createConfirm') }}
           </button>
         </div>
       </div>
@@ -1227,7 +1229,7 @@ async function deleteTagAction(t: TagType) {
     <FolderPickerDialog
       v-model:open="showFolderPicker"
       mode="multi"
-      title="选择部署目录"
+      :title="t('project.list.pickerTitle')"
       @confirm="onPickerConfirm"
     />
 
@@ -1236,8 +1238,8 @@ async function deleteTagAction(t: TagType) {
       <div class="bg-panel border border-border rounded-xl w-full max-w-6xl shadow-2xl flex flex-col" style="max-height: 85vh;">
         <div class="flex items-center justify-between px-6 py-4 border-b border-border">
           <div>
-            <h2 class="text-xl font-bold text-textMain">批量创建部署项目</h2>
-            <p class="text-xs text-textMuted mt-1">将创建 {{ batchRows.length }} 个项目，默认使用目录名作为项目名，可逐行修改</p>
+            <h2 class="text-xl font-bold text-textMain">{{ t('project.list.batchTitle') }}</h2>
+            <p class="text-xs text-textMuted mt-1">{{ t('project.list.batchSubtitle', { count: batchRows.length }) }}</p>
           </div>
           <button @click="closeBatchModal" :disabled="isBatchSubmitting" class="text-textMuted hover:text-textMain p-1 disabled:opacity-40">
             <XCircle class="w-5 h-5" />
@@ -1247,7 +1249,7 @@ async function deleteTagAction(t: TagType) {
         <div class="px-6 py-3 border-b border-border bg-yellow-400/15 dark:bg-yellow-400/5 flex items-start space-x-2">
           <AlertTriangle class="w-4 h-4 text-yellow-600 dark:text-yellow-400 flex-shrink-0 mt-0.5" />
           <p class="text-xs text-yellow-800 dark:text-yellow-200/90">
-            请确认所选目录用于部署。每次部署会在该目录下解压新构建产物，请勿选择关键系统目录或包含重要个人文件的目录。
+            {{ t('project.list.batchWarning') }}
           </p>
         </div>
 
@@ -1255,12 +1257,12 @@ async function deleteTagAction(t: TagType) {
           <table class="w-full text-sm table-fixed">
             <thead class="text-xs text-textMuted sticky top-0 bg-panel">
               <tr class="border-b border-border">
-                <th class="text-left font-medium px-3 py-2 w-[16%]">项目名</th>
-                <th class="text-left font-medium px-3 py-2 w-[30%]">部署目录</th>
-                <th class="text-left font-medium px-3 py-2 w-[10%]">环境标识</th>
-                <th class="text-left font-medium px-3 py-2 w-[12%]">分类</th>
-                <th class="text-left font-medium px-3 py-2 w-[16%]">标签</th>
-                <th class="text-left font-medium px-3 py-2 w-[16%]">描述</th>
+                <th class="text-left font-medium px-3 py-2 w-[16%]">{{ t('project.list.batchColName') }}</th>
+                <th class="text-left font-medium px-3 py-2 w-[30%]">{{ t('project.list.batchColDestPath') }}</th>
+                <th class="text-left font-medium px-3 py-2 w-[10%]">{{ t('project.list.batchColEnv') }}</th>
+                <th class="text-left font-medium px-3 py-2 w-[12%]">{{ t('project.list.batchColCategory') }}</th>
+                <th class="text-left font-medium px-3 py-2 w-[16%]">{{ t('project.list.batchColTags') }}</th>
+                <th class="text-left font-medium px-3 py-2 w-[16%]">{{ t('project.list.batchColDesc') }}</th>
               </tr>
             </thead>
             <tbody>
@@ -1297,7 +1299,7 @@ async function deleteTagAction(t: TagType) {
                   <input
                     v-model="row.env"
                     type="text"
-                    placeholder="test/prod"
+                    :placeholder="t('project.list.batchEnvPlaceholder')"
                     :disabled="row.status === 'success' || isBatchSubmitting"
                     class="w-full bg-base border border-border rounded px-2 py-1.5 text-textMain font-mono text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 disabled:opacity-60"
                   />
@@ -1308,23 +1310,23 @@ async function deleteTagAction(t: TagType) {
                     :disabled="row.status === 'success' || isBatchSubmitting"
                     class="w-full bg-base border border-border rounded px-2 py-1.5 text-textMain text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 disabled:opacity-60"
                   >
-                    <option value="">默认</option>
+                    <option value="">{{ t('project.list.filterDefault') }}</option>
                     <option v-for="c in projectStore.categories" :key="c.id" :value="c.id">{{ c.name }}</option>
                   </select>
                 </td>
                 <td class="px-3 py-2">
-                  <div v-if="projectStore.tags.length === 0" class="text-[11px] text-textMuted">无</div>
+                  <div v-if="projectStore.tags.length === 0" class="text-[11px] text-textMuted">{{ t('project.list.batchTagsNone') }}</div>
                   <div v-else class="flex items-center flex-wrap gap-1">
                     <button
-                      v-for="t in projectStore.tags"
-                      :key="t.id"
+                      v-for="tg in projectStore.tags"
+                      :key="tg.id"
                       type="button"
                       :disabled="row.status === 'success' || isBatchSubmitting"
-                      @click="toggleTagOnForm(row, t.id)"
+                      @click="toggleTagOnForm(row, tg.id)"
                       class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] border transition-colors disabled:opacity-60"
-                      :class="row.tagIds.includes(t.id) ? `${tagChipClass(t.color)} ring-1 ring-primary/40` : 'bg-base text-textMuted border-border hover:text-textMain hover:border-textMuted/40'"
+                      :class="row.tagIds.includes(tg.id) ? `${tagChipClass(tg.color)} ring-1 ring-primary/40` : 'bg-base text-textMuted border-border hover:text-textMain hover:border-textMuted/40'"
                     >
-                      {{ t.name }}
+                      {{ tg.name }}
                     </button>
                   </div>
                 </td>
@@ -1333,7 +1335,7 @@ async function deleteTagAction(t: TagType) {
                     <input
                       v-model="row.description"
                       type="text"
-                      placeholder="可选"
+                      :placeholder="t('project.list.batchDescPlaceholder')"
                       :disabled="row.status === 'success' || isBatchSubmitting"
                       class="flex-1 min-w-0 bg-base border border-border rounded px-2 py-1.5 text-textMain text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 disabled:opacity-60"
                     />
@@ -1342,7 +1344,7 @@ async function deleteTagAction(t: TagType) {
                       @click="removeBatchRow(row.id)"
                       :disabled="isBatchSubmitting"
                       class="shrink-0 mt-1.5 text-textMuted hover:text-danger disabled:opacity-40"
-                      title="移除该行"
+                      :title="t('project.list.batchRemoveRow')"
                     >
                       <Trash2 class="w-3.5 h-3.5" />
                     </button>
@@ -1350,7 +1352,7 @@ async function deleteTagAction(t: TagType) {
                 </td>
               </tr>
               <tr v-if="batchRows.length === 0">
-                <td colspan="6" class="px-3 py-8 text-center text-textMuted text-sm">没有待创建的项目</td>
+                <td colspan="6" class="px-3 py-8 text-center text-textMuted text-sm">{{ t('project.list.batchEmptyRow') }}</td>
               </tr>
             </tbody>
           </table>
@@ -1363,10 +1365,10 @@ async function deleteTagAction(t: TagType) {
               :disabled="isBatchSubmitting"
               class="flex items-center px-3 py-1.5 text-xs border border-border rounded-md text-textMuted hover:text-textMain disabled:opacity-40"
             >
-              <FolderPlus class="w-3.5 h-3.5 mr-1.5" /> 继续添加
+              <FolderPlus class="w-3.5 h-3.5 mr-1.5" /> {{ t('project.list.batchContinueAdd') }}
             </button>
             <div class="text-xs text-textMuted">
-              共 {{ batchSummary.total }} · 待提交 {{ batchSummary.pending }} · 成功 {{ batchSummary.success }} · 失败 {{ batchSummary.failed }}
+              {{ t('project.list.batchSummary', { total: batchSummary.total, pending: batchSummary.pending, success: batchSummary.success, failed: batchSummary.failed }) }}
             </div>
           </div>
           <div class="flex items-center space-x-2">
@@ -1374,14 +1376,14 @@ async function deleteTagAction(t: TagType) {
               @click="closeBatchModal"
               :disabled="isBatchSubmitting"
               class="px-4 py-2 text-sm font-medium text-textMuted hover:text-textMain dark:hover:bg-white/5 hover:bg-black/5 rounded-md transition-colors disabled:opacity-50"
-            >{{ batchSummary.success > 0 ? '完成' : '取消' }}</button>
+            >{{ batchSummary.success > 0 ? t('project.list.batchDone') : t('project.list.batchCancel') }}</button>
             <button
               @click="submitBatch"
               :disabled="!canSubmitBatch"
               class="px-4 py-2 text-sm font-medium bg-primary text-white rounded-md hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center"
             >
               <RefreshCw v-if="isBatchSubmitting" class="w-4 h-4 mr-2 animate-spin" />
-              {{ isBatchSubmitting ? '提交中…' : `提交（${batchSummary.pending}）` }}
+              {{ isBatchSubmitting ? t('project.list.batchSubmitting') : t('project.list.batchSubmit', { count: batchSummary.pending }) }}
             </button>
           </div>
         </div>
@@ -1405,15 +1407,15 @@ async function deleteTagAction(t: TagType) {
       @click.self="showRenameModal = false"
     >
       <div class="bg-panel border border-border rounded-xl w-full max-w-md p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
-        <h2 class="text-lg font-semibold text-textMain mb-4">重命名项目</h2>
+        <h2 class="text-lg font-semibold text-textMain mb-4">{{ t('project.list.renameTitle') }}</h2>
         <div>
-          <label class="block text-sm font-medium text-textMuted mb-1.5">项目名称</label>
+          <label class="block text-sm font-medium text-textMuted mb-1.5">{{ t('project.list.createNameLabel') }}</label>
           <input
             v-model="renameInput"
             type="text"
             :disabled="isRenaming"
             class="w-full bg-base border border-border rounded-md px-3 py-2 text-textMain focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all text-sm disabled:opacity-60"
-            placeholder="输入新的项目名称"
+            :placeholder="t('project.list.renameNamePlaceholder')"
             @keydown.enter.prevent="confirmRename"
           />
         </div>
@@ -1422,14 +1424,14 @@ async function deleteTagAction(t: TagType) {
             @click="showRenameModal = false"
             :disabled="isRenaming"
             class="px-4 py-2 text-sm font-medium text-textMuted hover:text-textMain dark:hover:bg-white/5 hover:bg-black/5 rounded-md transition-colors disabled:opacity-50"
-          >取消</button>
+          >{{ t('common.cancel') }}</button>
           <button
             @click="confirmRename"
             :disabled="isRenaming || !renameInput.trim() || renameInput.trim() === renameTarget?.name"
             class="px-4 py-2 text-sm font-medium bg-primary text-white rounded-md hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center"
           >
             <RefreshCw v-if="isRenaming" class="w-4 h-4 mr-2 animate-spin" />
-            确认
+            {{ t('project.list.renameConfirm') }}
           </button>
         </div>
       </div>
@@ -1447,18 +1449,17 @@ async function deleteTagAction(t: TagType) {
             <AlertTriangle class="w-5 h-5 text-danger" />
           </div>
           <div>
-            <h2 class="text-lg font-semibold text-textMain">确认删除项目</h2>
+            <h2 class="text-lg font-semibold text-textMain">{{ t('project.list.deleteTitle') }}</h2>
             <p class="text-sm text-textMuted mt-1">
-              即将删除项目
-              <span class="font-mono text-textMain">{{ deleteTarget?.name }}</span>，
-              此操作不可恢复。
+              {{ t('project.list.deleteIntro') }}
+              <span class="font-mono text-textMain">{{ deleteTarget?.name }}</span>{{ t('project.list.deleteIntro2') }}
             </p>
           </div>
         </div>
 
         <div class="mb-4">
           <label class="block text-sm font-medium text-textMuted mb-1.5">
-            请输入项目名称 <span class="font-mono text-textMain">{{ deleteTarget?.name }}</span> 以确认删除
+            {{ t('project.list.deleteConfirmInputLabel') }} <span class="font-mono text-textMain">{{ deleteTarget?.name }}</span> {{ t('project.list.deleteConfirmInputLabel2') }}
           </label>
           <input
             v-model="deleteConfirmText"
@@ -1475,7 +1476,7 @@ async function deleteTagAction(t: TagType) {
             @click="showDeleteModal = false"
             :disabled="isDeleting"
             class="px-4 py-2 text-sm font-medium text-textMuted hover:text-textMain dark:hover:bg-white/5 hover:bg-black/5 rounded-md transition-colors disabled:opacity-50"
-          >取消</button>
+          >{{ t('common.cancel') }}</button>
           <button
             @click="confirmDelete"
             :disabled="!canConfirmDelete"
@@ -1483,7 +1484,7 @@ async function deleteTagAction(t: TagType) {
           >
             <RefreshCw v-if="isDeleting" class="w-4 h-4 mr-2 animate-spin" />
             <Trash2 v-else class="w-4 h-4 mr-2" />
-            {{ isDeleting ? '正在删除...' : '永久删除' }}
+            {{ isDeleting ? t('project.list.deleteDeleting') : t('project.list.deletePermanent') }}
           </button>
         </div>
       </div>
@@ -1498,8 +1499,8 @@ async function deleteTagAction(t: TagType) {
       <div class="bg-panel border border-border rounded-xl w-full max-w-2xl shadow-2xl flex flex-col" style="max-height: 85vh;">
         <div class="flex items-center justify-between px-6 py-4 border-b border-border">
           <div>
-            <h2 class="text-xl font-bold text-textMain">管理分类</h2>
-            <p class="text-xs text-textMuted mt-1">创建、编辑、删除分类。删除分类后，相关项目将回落到「默认」。</p>
+            <h2 class="text-xl font-bold text-textMain">{{ t('project.list.categoryModalTitle') }}</h2>
+            <p class="text-xs text-textMuted mt-1">{{ t('project.list.categoryModalSubtitle') }}</p>
           </div>
           <button @click="showCategoryModal = false" class="text-textMuted hover:text-textMain p-1">
             <XCircle class="w-5 h-5" />
@@ -1507,12 +1508,12 @@ async function deleteTagAction(t: TagType) {
         </div>
 
         <div class="px-6 py-4 border-b border-border">
-          <label class="block text-sm font-medium text-textMuted mb-2">新建分类</label>
+          <label class="block text-sm font-medium text-textMuted mb-2">{{ t('project.list.categoryNewLabel') }}</label>
           <div class="flex items-center gap-2">
             <input
               v-model="newCategoryName"
               type="text"
-              placeholder="如：前端 / 后端 / 测试环境"
+              :placeholder="t('project.list.categoryNewPlaceholder')"
               :disabled="isCreatingCategory"
               class="flex-1 bg-base border border-border rounded-md px-3 py-2 text-textMain focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all text-sm disabled:opacity-60"
               @keydown.enter.prevent="submitCreateCategory"
@@ -1524,15 +1525,15 @@ async function deleteTagAction(t: TagType) {
             >
               <RefreshCw v-if="isCreatingCategory" class="w-4 h-4 mr-2 animate-spin" />
               <Plus v-else class="w-4 h-4 mr-1" />
-              新建
+              {{ t('project.list.categoryNewBtn') }}
             </button>
           </div>
-          <p class="text-xs text-textMuted mt-2">颜色将自动分配，不同分类之间不重复。</p>
+          <p class="text-xs text-textMuted mt-2">{{ t('project.list.categoryColorHint') }}</p>
         </div>
 
         <div class="flex-1 overflow-auto px-6 py-4">
           <div v-if="projectStore.categories.length === 0" class="text-center py-8 text-textMuted text-sm">
-            还没有分类，新建一个吧
+            {{ t('project.list.categoryEmptyTip') }}
           </div>
           <ul v-else class="divide-y divide-border">
             <li
@@ -1552,25 +1553,25 @@ async function deleteTagAction(t: TagType) {
                   @click="submitEditCategory"
                   :disabled="isSavingCategory || !editCategoryName.trim()"
                   class="px-3 py-1.5 text-xs font-medium bg-primary text-white rounded-md hover:bg-primary/90 disabled:opacity-50 transition-colors"
-                >保存</button>
+                >{{ t('project.list.categorySaveBtn') }}</button>
                 <button
                   @click="cancelEditCategory"
                   :disabled="isSavingCategory"
                   class="px-3 py-1.5 text-xs font-medium text-textMuted hover:text-textMain transition-colors"
-                >取消</button>
+                >{{ t('common.cancel') }}</button>
               </template>
               <template v-else>
                 <span class="inline-flex items-center px-2 py-1 rounded text-xs border" :class="categoryChipClass(c.color)">
                   <Tag class="w-3 h-3 mr-1.5" />
                   {{ c.name }}
                 </span>
-                <span class="text-xs text-textMuted flex-1">{{ projectCountByCategory[c.id] || 0 }} 个项目</span>
+                <span class="text-xs text-textMuted flex-1">{{ t('project.list.categoryProjectCount', { n: projectCountByCategory[c.id] || 0 }) }}</span>
                 <button
                   @click="startEditCategory(c)"
                   class="px-3 py-1.5 text-xs font-medium text-textMuted hover:text-textMain transition-colors flex items-center"
                 >
                   <Pencil class="w-3 h-3 mr-1" />
-                  编辑
+                  {{ t('project.list.categoryEditBtn') }}
                 </button>
                 <button
                   @click="deleteCategoryAction(c)"
@@ -1579,7 +1580,7 @@ async function deleteTagAction(t: TagType) {
                 >
                   <RefreshCw v-if="deletingCategoryId === c.id" class="w-3 h-3 mr-1 animate-spin" />
                   <Trash2 v-else class="w-3 h-3 mr-1" />
-                  删除
+                  {{ t('project.list.categoryDeleteBtn') }}
                 </button>
               </template>
             </li>
@@ -1590,7 +1591,7 @@ async function deleteTagAction(t: TagType) {
           <button
             @click="showCategoryModal = false"
             class="px-4 py-2 text-sm font-medium text-textMuted hover:text-textMain dark:hover:bg-white/5 hover:bg-black/5 rounded-md transition-colors"
-          >完成</button>
+          >{{ t('project.list.categoryDoneBtn') }}</button>
         </div>
       </div>
     </div>
@@ -1604,8 +1605,8 @@ async function deleteTagAction(t: TagType) {
       <div class="bg-panel border border-border rounded-xl w-full max-w-2xl shadow-2xl flex flex-col" style="max-height: 85vh;">
         <div class="flex items-center justify-between px-6 py-4 border-b border-border">
           <div>
-            <h2 class="text-xl font-bold text-textMain">管理标签</h2>
-            <p class="text-xs text-textMuted mt-1">创建、编辑、删除项目标签。删除标签会解除其与项目的关联。</p>
+            <h2 class="text-xl font-bold text-textMain">{{ t('project.list.tagModalTitle') }}</h2>
+            <p class="text-xs text-textMuted mt-1">{{ t('project.list.tagModalSubtitle') }}</p>
           </div>
           <button @click="showTagModal = false" class="text-textMuted hover:text-textMain p-1">
             <XCircle class="w-5 h-5" />
@@ -1613,12 +1614,12 @@ async function deleteTagAction(t: TagType) {
         </div>
 
         <div class="px-6 py-4 border-b border-border">
-          <label class="block text-sm font-medium text-textMuted mb-2">新建标签</label>
+          <label class="block text-sm font-medium text-textMuted mb-2">{{ t('project.list.tagNewLabel') }}</label>
           <div class="flex items-center gap-2">
             <input
               v-model="newTagName"
               type="text"
-              placeholder="如：前端 / Node / PM2"
+              :placeholder="t('project.list.tagNewPlaceholder')"
               :disabled="isCreatingTag"
               class="flex-1 bg-base border border-border rounded-md px-3 py-2 text-textMain focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all text-sm disabled:opacity-60"
               @keydown.enter.prevent="submitCreateTag"
@@ -1630,23 +1631,23 @@ async function deleteTagAction(t: TagType) {
             >
               <RefreshCw v-if="isCreatingTag" class="w-4 h-4 mr-2 animate-spin" />
               <Plus v-else class="w-4 h-4 mr-1" />
-              新建
+              {{ t('project.list.categoryNewBtn') }}
             </button>
           </div>
-          <p class="text-xs text-textMuted mt-2">颜色将自动分配，可在下方点击色块切换。</p>
+          <p class="text-xs text-textMuted mt-2">{{ t('project.list.tagColorHint') }}</p>
         </div>
 
         <div class="flex-1 overflow-auto px-6 py-4">
           <div v-if="projectStore.tags.length === 0" class="text-center py-8 text-textMuted text-sm">
-            还没有标签，新建一个吧
+            {{ t('project.list.tagEmptyTip') }}
           </div>
           <ul v-else class="divide-y divide-border">
             <li
-              v-for="t in projectStore.tags"
-              :key="t.id"
+              v-for="tg in projectStore.tags"
+              :key="tg.id"
               class="py-3 flex items-center justify-between gap-3 flex-wrap"
             >
-              <template v-if="editingTagId === t.id">
+              <template v-if="editingTagId === tg.id">
                 <input
                   v-model="editTagName"
                   type="text"
@@ -1658,45 +1659,45 @@ async function deleteTagAction(t: TagType) {
                   @click="submitEditTag"
                   :disabled="isSavingTag || !editTagName.trim()"
                   class="px-3 py-1.5 text-xs font-medium bg-primary text-white rounded-md hover:bg-primary/90 disabled:opacity-50 transition-colors"
-                >保存</button>
+                >{{ t('project.list.categorySaveBtn') }}</button>
                 <button
                   @click="cancelEditTag"
                   :disabled="isSavingTag"
                   class="px-3 py-1.5 text-xs font-medium text-textMuted hover:text-textMain transition-colors"
-                >取消</button>
+                >{{ t('common.cancel') }}</button>
               </template>
               <template v-else>
-                <span class="inline-flex items-center px-2 py-1 rounded text-xs border" :class="tagChipClass(t.color)">
+                <span class="inline-flex items-center px-2 py-1 rounded text-xs border" :class="tagChipClass(tg.color)">
                   <Tag class="w-3 h-3 mr-1.5" />
-                  {{ t.name }}
+                  {{ tg.name }}
                 </span>
                 <div class="flex items-center gap-1">
                   <button
                     v-for="color in CHIP_COLOR_PALETTE"
                     :key="color"
                     type="button"
-                    :title="`切换为 ${color}`"
-                    @click="changeTagColor(t, color)"
+                    :title="t('project.list.tagColorChangeTitle', { color })"
+                    @click="changeTagColor(tg, color)"
                     class="w-4 h-4 rounded-full border"
-                    :class="[tagChipClass(color), t.color === color ? 'ring-2 ring-primary' : '']"
+                    :class="[tagChipClass(color), tg.color === color ? 'ring-2 ring-primary' : '']"
                   />
                 </div>
-                <span class="text-xs text-textMuted flex-1 min-w-[60px]">{{ t.projectCount || 0 }} 个项目</span>
+                <span class="text-xs text-textMuted flex-1 min-w-[60px]">{{ t('project.list.categoryProjectCount', { n: tg.projectCount || 0 }) }}</span>
                 <button
-                  @click="startEditTag(t)"
+                  @click="startEditTag(tg)"
                   class="px-3 py-1.5 text-xs font-medium text-textMuted hover:text-textMain transition-colors flex items-center"
                 >
                   <Pencil class="w-3 h-3 mr-1" />
-                  编辑
+                  {{ t('project.list.categoryEditBtn') }}
                 </button>
                 <button
-                  @click="deleteTagAction(t)"
-                  :disabled="deletingTagId === t.id"
+                  @click="deleteTagAction(tg)"
+                  :disabled="deletingTagId === tg.id"
                   class="px-3 py-1.5 text-xs font-medium text-danger hover:bg-danger/10 rounded-md transition-colors flex items-center disabled:opacity-50"
                 >
-                  <RefreshCw v-if="deletingTagId === t.id" class="w-3 h-3 mr-1 animate-spin" />
+                  <RefreshCw v-if="deletingTagId === tg.id" class="w-3 h-3 mr-1 animate-spin" />
                   <Trash2 v-else class="w-3 h-3 mr-1" />
-                  删除
+                  {{ t('project.list.categoryDeleteBtn') }}
                 </button>
               </template>
             </li>
@@ -1707,7 +1708,7 @@ async function deleteTagAction(t: TagType) {
           <button
             @click="showTagModal = false"
             class="px-4 py-2 text-sm font-medium text-textMuted hover:text-textMain dark:hover:bg-white/5 hover:bg-black/5 rounded-md transition-colors"
-          >完成</button>
+          >{{ t('project.list.categoryDoneBtn') }}</button>
         </div>
       </div>
     </div>

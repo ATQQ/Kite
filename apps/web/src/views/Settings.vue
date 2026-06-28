@@ -1,19 +1,26 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useProjectStore } from '../store/project'
 import { useThemeStore } from '../store/theme'
 import type { ThemeMode } from '../store/theme'
-import { Settings, Server, Key, HardDrive, Webhook, Save, CheckCircle2, AlertTriangle, Activity, Sun, Moon, Monitor, RefreshCw, Eye, EyeOff, Copy, HeartPulse, Terminal as TerminalIcon, Plus, X } from 'lucide-vue-next'
+import { useLocaleStore, SUPPORTED_LOCALES, type SupportedLocale } from '../store/locale'
+import { Settings, Server, Key, HardDrive, Webhook, Save, CheckCircle2, AlertTriangle, Activity, Sun, Moon, Monitor, RefreshCw, Eye, EyeOff, Copy, HeartPulse, Terminal as TerminalIcon, Plus, X, Languages } from 'lucide-vue-next'
 
+const { t } = useI18n()
 const projectStore = useProjectStore()
 const themeStore = useThemeStore()
+const localeStore = useLocaleStore()
 
-// Theme options
-const themeOptions: { value: ThemeMode; label: string; icon: typeof Sun; desc: string }[] = [
-  { value: 'light', label: '浅色模式', icon: Sun, desc: '始终使用浅色主题' },
-  { value: 'dark', label: '深色模式', icon: Moon, desc: '始终使用深色主题' },
-  { value: 'system', label: '跟随系统', icon: Monitor, desc: '自动匹配系统外观设置' },
-]
+const themeOptions = computed<{ value: ThemeMode; label: string; icon: typeof Sun; desc: string }[]>(() => [
+  { value: 'light', label: t('settings.themeLight'), icon: Sun, desc: t('theme.light') },
+  { value: 'dark', label: t('settings.themeDark'), icon: Moon, desc: t('theme.dark') },
+  { value: 'system', label: t('settings.themeSystem'), icon: Monitor, desc: t('theme.system') },
+])
+
+const localeOptions = computed<{ value: SupportedLocale; label: string }[]>(() =>
+  SUPPORTED_LOCALES.map(v => ({ value: v, label: t(`locale.${v}`) }))
+)
 
 // System status
 const status = ref<any>(null)
@@ -75,10 +82,10 @@ const tokenMessageType = ref<'success' | 'error'>('success')
 const isSaving = ref(false)
 const saveMessage = ref('')
 
-const eventOptions = [
-  { key: 'deploy_success', label: '部署成功' },
-  { key: 'deploy_failure', label: '部署失败' },
-]
+const eventOptions = computed(() => [
+  { key: 'deploy_success', label: t('settings.webhookEventDeploySuccess') },
+  { key: 'deploy_failure', label: t('settings.webhookEventDeployFailure') },
+])
 
 onMounted(async () => {
   const [settingsData, statusData] = await Promise.all([
@@ -104,7 +111,7 @@ const saveSettings = async () => {
   saveMessage.value = ''
   const thresholdNum = Number(form.value.deployment_stuck_threshold_min)
   if (!Number.isInteger(thresholdNum) || thresholdNum < 1 || thresholdNum > 1440) {
-    saveMessage.value = '卡死阈值需在 1~1440 分钟之间'
+    saveMessage.value = t('settings.stuckThresholdInvalid')
     isSaving.value = false
     setTimeout(() => saveMessage.value = '', 3000)
     return
@@ -118,7 +125,7 @@ const saveSettings = async () => {
     artifact_keep_n: form.value.artifact_keep_n,
     deployment_stuck_threshold_min: String(thresholdNum),
   })
-  saveMessage.value = success ? '保存成功' : '保存失败'
+  saveMessage.value = success ? t('settings.saveOk') : t('settings.saveFail')
   isSaving.value = false
   setTimeout(() => saveMessage.value = '', 3000)
 }
@@ -126,22 +133,22 @@ const saveSettings = async () => {
 const changeToken = async () => {
   tokenMessage.value = ''
   if (tokenForm.value.newToken !== tokenForm.value.confirmPassword) {
-    tokenMessage.value = '两次输入的新 Token 不一致'
+    tokenMessage.value = t('settings.tokenMismatch')
     tokenMessageType.value = 'error'
     return
   }
   if (tokenForm.value.newToken.length < 8) {
-    tokenMessage.value = '新 Token 长度不能少于 8 位'
+    tokenMessage.value = t('settings.tokenTooShort')
     tokenMessageType.value = 'error'
     return
   }
   const result = await projectStore.changeAdminToken(tokenForm.value.oldToken, tokenForm.value.newToken)
   if (result.success) {
-    tokenMessage.value = result.message || 'Token 已更新'
+    tokenMessage.value = result.message || t('settings.tokenUpdated')
     tokenMessageType.value = 'success'
     tokenForm.value = { oldToken: '', newToken: '', confirmPassword: '' }
   } else {
-    tokenMessage.value = result.error || '修改失败'
+    tokenMessage.value = result.error || t('settings.tokenChangeFailed')
     tokenMessageType.value = 'error'
   }
 }
@@ -165,7 +172,7 @@ const webhookTestResult = ref<{ success: boolean; message: string } | null>(null
 
 async function runWebhookTest() {
   if (!form.value.webhook_url || !form.value.webhook_url.trim()) {
-    webhookTestResult.value = { success: false, message: '请先填写 Webhook URL 并保存' }
+    webhookTestResult.value = { success: false, message: t('settings.webhookFillFirst') }
     return
   }
   webhookTesting.value = true
@@ -175,12 +182,12 @@ async function runWebhookTest() {
     if (r?.success) {
       webhookTestResult.value = {
         success: true,
-        message: `发送成功 · HTTP ${r.statusCode} · ${r.durationMs}ms · 尝试 ${r.attempts} 次`,
+        message: t('settings.webhookSendSuccess', { code: r.statusCode, ms: r.durationMs, attempts: r.attempts }),
       }
     } else {
       webhookTestResult.value = {
         success: false,
-        message: r?.error || `发送失败${r?.statusCode ? ` · HTTP ${r.statusCode}` : ''}`,
+        message: r?.error || (r?.statusCode ? t('settings.webhookSendFailedWithCode', { code: r.statusCode }) : t('settings.webhookSendFailed')),
       }
     }
   } finally {
@@ -221,7 +228,7 @@ function addTerminalAllowlistEntry(value?: string) {
   const candidate = (value ?? terminalAllowlistInput.value).trim()
   if (!candidate) return
   if (terminalAllowlist.value.includes(candidate)) {
-    showTerminalMsg('该 IP / CIDR 已在白名单中', 'error')
+    showTerminalMsg(t('settings.terminalDupEntry'), 'error')
     return
   }
   terminalAllowlist.value = [...terminalAllowlist.value, candidate]
@@ -238,16 +245,16 @@ async function saveTerminalAllowlist() {
   terminalAllowlistSaving.value = false
   if (result.success) {
     if (result.entries) terminalAllowlist.value = result.entries
-    showTerminalMsg('已保存终端 IP 白名单', 'success')
+    showTerminalMsg(t('settings.terminalSaveSuccess'), 'success')
   } else {
-    showTerminalMsg(result.error || '保存失败', 'error')
+    showTerminalMsg(result.error || t('settings.saveFail'), 'error')
   }
 }
 
 function addCurrentIpToAllowlist() {
   const ip = terminalWhoami.value?.trustedIp || terminalWhoami.value?.socketIp
   if (!ip) {
-    showTerminalMsg('当前访问 IP 未知', 'error')
+    showTerminalMsg(t('settings.terminalCurrentIpUnknown'), 'error')
     return
   }
   addTerminalAllowlistEntry(ip)
@@ -259,7 +266,7 @@ function addCurrentIpToAllowlist() {
     <!-- Header -->
     <div class="flex items-center space-x-3 mb-8">
       <Settings class="w-7 h-7 text-primary" />
-      <h1 class="text-2xl font-bold text-textMain tracking-tight">系统设置</h1>
+      <h1 class="text-2xl font-bold text-textMain tracking-tight">{{ t('settings.pageTitle') }}</h1>
     </div>
 
     <!-- System Status Card -->
@@ -267,44 +274,44 @@ function addCurrentIpToAllowlist() {
       <div class="px-4 sm:px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02]">
         <h2 class="text-lg font-semibold text-textMain flex items-center">
           <Server class="w-5 h-5 mr-2 text-primary" />
-          系统信息
+          {{ t('settings.systemInfoTitle') }}
         </h2>
       </div>
       <div class="p-4 sm:p-6">
         <div v-if="status" class="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div class="bg-base border border-border rounded-lg p-4 text-center">
             <p class="text-2xl font-bold text-primary">{{ status.version }}</p>
-            <p class="text-xs text-textMuted mt-1">版本号</p>
+            <p class="text-xs text-textMuted mt-1">{{ t('settings.versionNumber') }}</p>
           </div>
           <div class="bg-base border border-border rounded-lg p-4 text-center">
             <p class="text-2xl font-bold text-textMain">{{ status.uptime }}</p>
-            <p class="text-xs text-textMuted mt-1">运行时间</p>
+            <p class="text-xs text-textMuted mt-1">{{ t('settings.uptimeLabel') }}</p>
           </div>
           <div class="bg-base border border-border rounded-lg p-4 text-center">
             <p class="text-2xl font-bold text-textMain">{{ status.projectCount }}</p>
-            <p class="text-xs text-textMuted mt-1">项目总数</p>
+            <p class="text-xs text-textMuted mt-1">{{ t('settings.projectsCount') }}</p>
           </div>
           <div class="bg-base border border-border rounded-lg p-4 text-center">
             <p class="text-2xl font-bold text-textMain">{{ status.deploymentCount }}</p>
-            <p class="text-xs text-textMuted mt-1">部署总次数</p>
+            <p class="text-xs text-textMuted mt-1">{{ t('settings.deploysCount') }}</p>
           </div>
           <div class="bg-base border border-border rounded-lg p-4 text-center">
             <p class="text-2xl font-bold text-success">{{ status.successCount }}</p>
-            <p class="text-xs text-textMuted mt-1">成功部署</p>
+            <p class="text-xs text-textMuted mt-1">{{ t('settings.successDeploys') }}</p>
           </div>
           <div class="bg-base border border-border rounded-lg p-4 text-center">
             <p class="text-2xl font-bold text-danger">{{ status.failedCount }}</p>
-            <p class="text-xs text-textMuted mt-1">失败次数</p>
+            <p class="text-xs text-textMuted mt-1">{{ t('settings.failedCount') }}</p>
           </div>
           <div class="bg-base border border-border rounded-lg p-4 text-center col-span-2">
             <div class="flex items-center justify-center space-x-2">
               <Activity class="w-5 h-5 text-primary" />
               <p class="text-2xl font-bold text-textMain">{{ status.successRate }}%</p>
             </div>
-            <p class="text-xs text-textMuted mt-1">部署成功率</p>
+            <p class="text-xs text-textMuted mt-1">{{ t('settings.successRate') }}</p>
           </div>
         </div>
-        <div v-else class="text-textMuted text-sm py-4 text-center">加载中...</div>
+        <div v-else class="text-textMuted text-sm py-4 text-center">{{ t('settings.loading') }}</div>
       </div>
     </div>
 
@@ -314,9 +321,13 @@ function addCurrentIpToAllowlist() {
         <div>
           <h2 class="text-lg font-semibold text-textMain flex items-center">
             <HeartPulse class="w-5 h-5 mr-2 text-primary" />
-            服务健康
+            {{ t('settings.healthTitle') }}
           </h2>
-          <p class="text-sm text-textMuted mt-1">实时探活 DB、磁盘、Kite Home 与最近部署成功率，等同 <code class="font-mono text-primary">kite doctor</code> 远端段。</p>
+          <p class="text-sm text-textMuted mt-1">
+            <i18n-t keypath="settings.healthDesc" tag="span">
+              <template #cmd><code class="font-mono text-primary">kite doctor</code></template>
+            </i18n-t>
+          </p>
         </div>
         <button
           @click="refreshHealth"
@@ -328,8 +339,8 @@ function addCurrentIpToAllowlist() {
         </button>
       </div>
       <div class="p-4 sm:p-6">
-        <div v-if="!health && !healthLoading" class="text-textMuted text-sm py-4 text-center">暂无数据</div>
-        <div v-else-if="healthLoading && !health" class="text-textMuted text-sm py-4 text-center">加载中...</div>
+        <div v-if="!health && !healthLoading" class="text-textMuted text-sm py-4 text-center">{{ t('settings.healthEmpty') }}</div>
+        <div v-else-if="healthLoading && !health" class="text-textMuted text-sm py-4 text-center">{{ t('settings.loading') }}</div>
         <div v-else class="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div class="bg-base border border-border rounded-lg p-4">
             <div class="flex items-center justify-between mb-1">
@@ -342,40 +353,40 @@ function addCurrentIpToAllowlist() {
           </div>
           <div class="bg-base border border-border rounded-lg p-4">
             <div class="flex items-center justify-between mb-1">
-              <p class="text-xs text-textMuted">Kite Home</p>
+              <p class="text-xs text-textMuted">{{ t('settings.healthKiteHome') }}</p>
               <CheckCircle2 v-if="health.kiteHome?.writable" class="w-4 h-4 text-success" />
               <AlertTriangle v-else class="w-4 h-4 text-danger" />
             </div>
             <p class="text-sm font-mono text-textMain truncate" :title="health.kiteHome?.path">{{ health.kiteHome?.path || 'N/A' }}</p>
-            <p class="text-xs text-textMuted mt-1">tmp {{ health.kiteHome?.tmpWritable ? '可写' : '不可写' }}</p>
+            <p class="text-xs text-textMuted mt-1">{{ health.kiteHome?.tmpWritable ? t('settings.healthTmpWritable') : t('settings.healthTmpNotWritable') }}</p>
           </div>
           <div class="bg-base border border-border rounded-lg p-4">
             <div class="flex items-center justify-between mb-1">
-              <p class="text-xs text-textMuted">磁盘</p>
+              <p class="text-xs text-textMuted">{{ t('settings.healthDisk') }}</p>
               <Activity class="w-4 h-4" :class="diskTone(health.disk?.percentUsed)" />
             </div>
             <p class="text-sm font-mono" :class="diskTone(health.disk?.percentUsed)">
               {{ health.disk?.percentUsed != null ? health.disk.percentUsed + '%' : 'N/A' }}
             </p>
-            <p class="text-xs text-textMuted mt-1">{{ formatBytes(health.disk?.freeBytes) }} 可用</p>
+            <p class="text-xs text-textMuted mt-1">{{ t('settings.healthDiskAvail', { value: formatBytes(health.disk?.freeBytes) }) }}</p>
           </div>
           <div class="bg-base border border-border rounded-lg p-4">
             <div class="flex items-center justify-between mb-1">
-              <p class="text-xs text-textMuted">最近 5 次部署</p>
+              <p class="text-xs text-textMuted">{{ t('settings.healthRecent5') }}</p>
               <Activity class="w-4 h-4 text-primary" />
             </div>
             <p class="text-sm font-mono text-textMain">
               {{ health.deploy?.successRate != null ? Math.round(health.deploy.successRate * 100) + '%' : 'N/A' }}
             </p>
-            <p class="text-xs text-textMuted mt-1">共 {{ health.deploy?.last5?.length ?? 0 }} 条</p>
+            <p class="text-xs text-textMuted mt-1">{{ t('settings.healthRecentTotal', { n: health.deploy?.last5?.length ?? 0 }) }}</p>
           </div>
           <div class="bg-base border border-border rounded-lg p-4 col-span-2">
-            <p class="text-xs text-textMuted mb-1">Runtime</p>
+            <p class="text-xs text-textMuted mb-1">{{ t('settings.healthRuntime') }}</p>
             <p class="text-sm font-mono text-textMain">{{ health.runtime?.name }} {{ health.runtime?.version }}</p>
-            <p class="text-xs text-textMuted mt-1">uptime {{ health.uptimeSec }}s · 内存 RSS {{ health.memoryMB?.rss }}MB / Heap {{ health.memoryMB?.heapUsed }}MB</p>
+            <p class="text-xs text-textMuted mt-1">{{ t('settings.healthRuntimeStats', { uptime: health.uptimeSec, rss: health.memoryMB?.rss, heap: health.memoryMB?.heapUsed }) }}</p>
           </div>
           <div class="bg-base border border-border rounded-lg p-4 col-span-2">
-            <p class="text-xs text-textMuted mb-1">服务器时间</p>
+            <p class="text-xs text-textMuted mb-1">{{ t('settings.healthServerTime') }}</p>
             <p class="text-sm font-mono text-textMain">{{ health.serverTime }}</p>
             <p class="text-xs text-textMuted mt-1">version {{ health.version }}</p>
           </div>
@@ -388,33 +399,59 @@ function addCurrentIpToAllowlist() {
       <div class="px-4 sm:px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02]">
         <h2 class="text-lg font-semibold text-textMain flex items-center">
           <Sun class="w-5 h-5 mr-2 text-primary" />
-          外观设置
+          {{ t('settings.sectionAppearance') }}
         </h2>
-        <p class="text-sm text-textMuted mt-1">选择界面的色彩方案，或跟随系统自动切换。</p>
+        <p class="text-sm text-textMuted mt-1">{{ t('settings.sectionAppearanceDesc') }}</p>
       </div>
-      <div class="p-4 sm:p-6">
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <button
-            v-for="opt in themeOptions"
-            :key="opt.value"
-            @click="themeStore.setMode(opt.value)"
-            class="relative flex flex-col items-center p-4 rounded-lg border-2 transition-all"
-            :class="themeStore.mode === opt.value
-              ? 'border-primary bg-primary/5 shadow-[0_0_12px_rgba(59,130,246,0.15)]'
-              : 'border-border hover:border-textMuted/50 bg-base'"
-          >
-            <component
-              :is="opt.icon"
-              class="w-6 h-6 mb-2"
-              :class="themeStore.mode === opt.value ? 'text-primary' : 'text-textMuted'"
-            />
-            <span class="text-sm font-medium" :class="themeStore.mode === opt.value ? 'text-primary' : 'text-textMain'">{{ opt.label }}</span>
-            <span class="text-xs text-textMuted mt-1">{{ opt.desc }}</span>
-            <CheckCircle2
-              v-if="themeStore.mode === opt.value"
-              class="absolute top-2 right-2 w-4 h-4 text-primary"
-            />
-          </button>
+      <div class="p-4 sm:p-6 space-y-6">
+        <div>
+          <label class="block text-sm font-medium text-textMain mb-3">{{ t('settings.themeLabel') }}</label>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <button
+              v-for="opt in themeOptions"
+              :key="opt.value"
+              @click="themeStore.setMode(opt.value)"
+              class="relative flex flex-col items-center p-4 rounded-lg border-2 transition-all"
+              :class="themeStore.mode === opt.value
+                ? 'border-primary bg-primary/5 shadow-[0_0_12px_rgba(59,130,246,0.15)]'
+                : 'border-border hover:border-textMuted/50 bg-base'"
+            >
+              <component
+                :is="opt.icon"
+                class="w-6 h-6 mb-2"
+                :class="themeStore.mode === opt.value ? 'text-primary' : 'text-textMuted'"
+              />
+              <span class="text-sm font-medium" :class="themeStore.mode === opt.value ? 'text-primary' : 'text-textMain'">{{ opt.label }}</span>
+              <span class="text-xs text-textMuted mt-1">{{ opt.desc }}</span>
+              <CheckCircle2
+                v-if="themeStore.mode === opt.value"
+                class="absolute top-2 right-2 w-4 h-4 text-primary"
+              />
+            </button>
+          </div>
+        </div>
+        <div>
+          <label class="text-sm font-medium text-textMain mb-3 flex items-center">
+            <Languages class="w-4 h-4 mr-2 text-primary" />
+            {{ t('settings.languageLabel') }}
+          </label>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <button
+              v-for="opt in localeOptions"
+              :key="opt.value"
+              @click="localeStore.setLocale(opt.value)"
+              class="relative flex items-center justify-center p-3 rounded-lg border-2 transition-all"
+              :class="localeStore.locale === opt.value
+                ? 'border-primary bg-primary/5 shadow-[0_0_12px_rgba(59,130,246,0.15)] text-primary'
+                : 'border-border hover:border-textMuted/50 bg-base text-textMain'"
+            >
+              <span class="text-sm font-medium">{{ opt.label }}</span>
+              <CheckCircle2
+                v-if="localeStore.locale === opt.value"
+                class="absolute top-2 right-2 w-4 h-4 text-primary"
+              />
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -424,36 +461,36 @@ function addCurrentIpToAllowlist() {
       <div class="px-4 sm:px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02]">
         <h2 class="text-lg font-semibold text-textMain flex items-center">
           <Key class="w-5 h-5 mr-2 text-primary" />
-          管理员 Token
+          {{ t('settings.adminTokenTitle') }}
         </h2>
-        <p class="text-sm text-textMuted mt-1">修改管理后台的登录凭证。修改后需使用新 Token 重新登录。</p>
+        <p class="text-sm text-textMuted mt-1">{{ t('settings.adminTokenDesc') }}</p>
       </div>
       <div class="p-4 sm:p-6 space-y-4">
         <div>
-          <label class="block text-sm font-medium text-textMain mb-2">当前 Token</label>
+          <label class="block text-sm font-medium text-textMain mb-2">{{ t('settings.currentTokenLabel') }}</label>
           <input
             v-model="tokenForm.oldToken"
             type="password"
             class="w-full bg-base border border-border rounded-md px-4 py-3 text-textMain font-mono text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all"
-            placeholder="请输入当前 Token"
+            :placeholder="t('settings.currentTokenPlaceholder')"
           />
         </div>
         <div>
-          <label class="block text-sm font-medium text-textMain mb-2">新 Token</label>
+          <label class="block text-sm font-medium text-textMain mb-2">{{ t('settings.newTokenLabel') }}</label>
           <input
             v-model="tokenForm.newToken"
             type="password"
             class="w-full bg-base border border-border rounded-md px-4 py-3 text-textMain font-mono text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all"
-            placeholder="请输入新 Token（至少 8 位）"
+            :placeholder="t('settings.newTokenPlaceholder')"
           />
         </div>
         <div>
-          <label class="block text-sm font-medium text-textMain mb-2">确认新 Token</label>
+          <label class="block text-sm font-medium text-textMain mb-2">{{ t('settings.confirmTokenLabel') }}</label>
           <input
             v-model="tokenForm.confirmPassword"
             type="password"
             class="w-full bg-base border border-border rounded-md px-4 py-3 text-textMain font-mono text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all"
-            placeholder="请再次输入新 Token"
+            :placeholder="t('settings.confirmTokenPlaceholder')"
           />
         </div>
         <div v-if="tokenMessage" class="flex items-center space-x-2 text-sm" :class="tokenMessageType === 'success' ? 'text-success' : 'text-danger'">
@@ -467,7 +504,7 @@ function addCurrentIpToAllowlist() {
             class="flex items-center px-6 py-2.5 bg-primary hover:bg-primary/90 text-white rounded-md transition-all font-medium shadow-[0_0_15px_rgba(59,130,246,0.3)]"
           >
             <Key class="w-4 h-4 mr-2" />
-            修改 Token
+            {{ t('settings.changeTokenBtn') }}
           </button>
         </div>
       </div>
@@ -478,20 +515,20 @@ function addCurrentIpToAllowlist() {
       <div class="px-4 sm:px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02]">
         <h2 class="text-lg font-semibold text-textMain flex items-center">
           <HardDrive class="w-5 h-5 mr-2 text-primary" />
-          全局部署配置
+          {{ t('settings.deployConfigTitle') }}
         </h2>
-        <p class="text-sm text-textMuted mt-1">设置全局默认的部署参数，可在项目级别覆盖。</p>
+        <p class="text-sm text-textMuted mt-1">{{ t('settings.deployConfigDesc') }}</p>
       </div>
       <div class="p-4 sm:p-6 space-y-4">
         <div>
-          <label class="block text-sm font-medium text-textMain mb-2">全局部署 Token</label>
+          <label class="block text-sm font-medium text-textMain mb-2">{{ t('settings.globalDeployToken') }}</label>
           <div class="flex gap-2">
             <div class="relative flex-1">
               <input
                 v-model="form.global_deploy_token"
                 :type="showGlobalToken ? 'text' : 'password'"
                 class="w-full bg-base border border-border rounded-md px-4 py-3 pr-10 text-textMain font-mono text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all"
-                placeholder="留空则不启用全局 Token"
+                :placeholder="t('settings.globalDeployTokenPlaceholder')"
               />
               <button
                 @click="showGlobalToken = !showGlobalToken"
@@ -505,7 +542,7 @@ function addCurrentIpToAllowlist() {
             <button
               @click="generateGlobalToken"
               class="flex items-center px-3 bg-base border border-border rounded-md text-textMuted hover:text-textMain hover:border-primary/50 transition-all"
-              title="生成随机 Token"
+              :title="t('settings.genRandomToken')"
               type="button"
             >
               <RefreshCw class="w-4 h-4" />
@@ -514,27 +551,27 @@ function addCurrentIpToAllowlist() {
               @click="copyGlobalToken"
               :disabled="!form.global_deploy_token"
               class="flex items-center px-3 bg-base border border-border rounded-md text-textMuted hover:text-textMain hover:border-primary/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-              title="复制 Token"
+              :title="t('settings.copyToken')"
               type="button"
             >
               <CheckCircle2 v-if="isGlobalTokenCopied" class="w-4 h-4 text-success" />
               <Copy v-else class="w-4 h-4" />
             </button>
           </div>
-          <p class="text-xs text-textMuted mt-2">所有项目共用的部署 Token。CLI 使用全局 Token 时，配合 --project 指定项目即可部署，无需为每个项目单独配置 Token。留空则禁用。</p>
+          <p class="text-xs text-textMuted mt-2">{{ t('settings.globalDeployTokenHint') }}</p>
         </div>
         <div>
-          <label class="block text-sm font-medium text-textMain mb-2">默认部署路径</label>
+          <label class="block text-sm font-medium text-textMain mb-2">{{ t('settings.defaultDeployPath') }}</label>
           <input
             v-model="form.default_deploy_path"
             type="text"
             class="w-full bg-base border border-border rounded-md px-4 py-3 text-textMain font-mono text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all"
             placeholder="e.g. .deployments"
           />
-          <p class="text-xs text-textMuted mt-2">新项目创建时的默认部署目录（相对于工作目录）。</p>
+          <p class="text-xs text-textMuted mt-2">{{ t('settings.defaultDeployPathHint') }}</p>
         </div>
         <div>
-          <label class="block text-sm font-medium text-textMain mb-2">最大上传大小 (MB)</label>
+          <label class="block text-sm font-medium text-textMain mb-2">{{ t('settings.maxUploadSize') }}</label>
           <input
             v-model="form.max_upload_size"
             type="number"
@@ -543,10 +580,10 @@ function addCurrentIpToAllowlist() {
             class="w-full bg-base border border-border rounded-md px-4 py-3 text-textMain font-mono text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all"
             placeholder="50"
           />
-          <p class="text-xs text-textMuted mt-2">单次部署上传的 ZIP 文件大小上限。</p>
+          <p class="text-xs text-textMuted mt-2">{{ t('settings.maxUploadSizeHint') }}</p>
         </div>
         <div>
-          <label class="block text-sm font-medium text-textMain mb-2">归档保留份数 (artifact_keep_n)</label>
+          <label class="block text-sm font-medium text-textMain mb-2">{{ t('settings.artifactKeepN') }}</label>
           <input
             v-model="form.artifact_keep_n"
             type="number"
@@ -556,12 +593,11 @@ function addCurrentIpToAllowlist() {
             placeholder="10"
           />
           <p class="text-xs text-textMuted mt-2">
-            每个项目保留最近多少份部署归档 ZIP（位于 <code class="font-mono text-textMain">~/.kite/deployments/&lt;projectId&gt;/artifacts/</code>），超出部分按时间倒序清理。
-            归档保留越多，可回滚的历史越长，占用磁盘也越大。被任何 <code class="font-mono text-textMain">rollback</code> 引用的归档不会被清理。
+            {{ t('settings.artifactKeepNHint1') }} <code class="font-mono text-textMain">~/.kite/deployments/&lt;projectId&gt;/artifacts/</code>{{ t('settings.artifactKeepNHint2') }} <code class="font-mono text-textMain">rollback</code> {{ t('settings.artifactKeepNHint3') }}
           </p>
         </div>
         <div>
-          <label class="block text-sm font-medium text-textMain mb-2">卡死部署阈值 (分钟)</label>
+          <label class="block text-sm font-medium text-textMain mb-2">{{ t('settings.stuckThreshold') }}</label>
           <input
             v-model="form.deployment_stuck_threshold_min"
             type="number"
@@ -571,7 +607,7 @@ function addCurrentIpToAllowlist() {
             placeholder="10"
           />
           <p class="text-xs text-textMuted mt-2">
-            部署日志页面中，运行时长超过该分钟数的"进行中"部署会显示<strong class="text-textMain">「标记为成功 / 失败」</strong>按钮，用于修正服务异常退出残留的状态。范围 1~1440，默认 10。
+            {{ t('settings.stuckThresholdHint') }}<strong class="text-textMain">{{ t('settings.stuckThresholdMark') }}</strong>{{ t('settings.stuckThresholdHint2') }}
           </p>
         </div>
       </div>
@@ -582,23 +618,23 @@ function addCurrentIpToAllowlist() {
       <div class="px-4 sm:px-6 py-5 border-b border-border dark:bg-white/[0.02] bg-black/[0.02]">
         <h2 class="text-lg font-semibold text-textMain flex items-center">
           <Webhook class="w-5 h-5 mr-2 text-primary" />
-          Webhook 通知
+          {{ t('settings.webhookTitle') }}
         </h2>
-        <p class="text-sm text-textMuted mt-1">部署事件发生时，向指定 URL 发送 POST 通知。</p>
+        <p class="text-sm text-textMuted mt-1">{{ t('settings.webhookDesc') }}</p>
       </div>
       <div class="p-4 sm:p-6 space-y-4">
         <div>
-          <label class="block text-sm font-medium text-textMain mb-2">Webhook URL</label>
+          <label class="block text-sm font-medium text-textMain mb-2">{{ t('settings.webhookUrlLabel') }}</label>
           <input
             v-model="form.webhook_url"
             type="url"
             class="w-full bg-base border border-border rounded-md px-4 py-3 text-textMain font-mono text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all"
             placeholder="https://example.com/webhook"
           />
-          <p class="text-xs text-textMuted mt-2">留空则不发送通知。支持飞书、钉钉、Slack 等标准 Webhook。</p>
+          <p class="text-xs text-textMuted mt-2">{{ t('settings.webhookUrlHint') }}</p>
         </div>
         <div>
-          <label class="block text-sm font-medium text-textMain mb-3">触发事件</label>
+          <label class="block text-sm font-medium text-textMain mb-3">{{ t('settings.webhookEvents') }}</label>
           <div class="flex flex-wrap gap-3">
             <button
               v-for="opt in eventOptions"
@@ -622,9 +658,13 @@ function addCurrentIpToAllowlist() {
               :disabled="webhookTesting"
               class="inline-flex items-center px-4 py-2 rounded-md text-sm font-medium border border-border bg-base text-textMain hover:border-primary/40 hover:text-primary disabled:opacity-50 disabled:cursor-not-allowed transition-all"
             >
-              {{ webhookTesting ? '发送中…' : '发送测试' }}
+              {{ webhookTesting ? t('settings.webhookSending') : t('settings.webhookSend') }}
             </button>
-            <p class="text-xs text-textMuted">向当前 Webhook URL 发送一条测试消息，须先保存配置。host 自动适配飞书 / 钉钉（请确保自定义关键词包含 <span class="font-mono">Kite</span>）/ 通用 JSON。</p>
+            <p class="text-xs text-textMuted">
+              <i18n-t keypath="settings.webhookSendHint" tag="span">
+                <template #kite><span class="font-mono">Kite</span></template>
+              </i18n-t>
+            </p>
           </div>
           <p
             v-if="webhookTestResult"
@@ -643,10 +683,10 @@ function addCurrentIpToAllowlist() {
         <div>
           <h2 class="text-lg font-semibold text-textMain flex items-center">
             <TerminalIcon class="w-5 h-5 mr-2 text-primary" />
-            终端 IP 白名单
+            {{ t('settings.terminalAllowlistTitle') }}
           </h2>
           <p class="text-sm text-textMuted mt-1">
-            限制可使用 Web 终端的来源 IP。留空表示<strong class="text-textMain">不启用</strong>白名单（任何已登录用户均可使用）。支持 IPv4、IPv6、CIDR 表示。
+            {{ t('settings.terminalAllowlistDesc1') }}<strong class="text-textMain">{{ t('settings.terminalAllowlistDescStrong') }}</strong>{{ t('settings.terminalAllowlistDesc2') }}
           </p>
         </div>
         <button
@@ -655,22 +695,22 @@ function addCurrentIpToAllowlist() {
           :disabled="terminalAllowlistLoading"
         >
           <RefreshCw class="w-4 h-4 mr-1.5" :class="terminalAllowlistLoading ? 'animate-spin' : ''" />
-          刷新
+          {{ t('settings.terminalRefresh') }}
         </button>
       </div>
       <div class="p-4 sm:p-6 space-y-4">
         <div v-if="terminalAvailable === false" class="flex items-start gap-2 text-sm text-yellow-500 bg-yellow-500/10 border border-yellow-500/30 rounded-md p-3">
           <AlertTriangle class="w-4 h-4 mt-0.5 shrink-0" />
-          <span>当前实例的终端能力不可用（仅 macOS / Linux + node-pty 可用）。即便配置白名单也无法使用 Web 终端。</span>
+          <span>{{ t('settings.terminalUnavailable') }}</span>
         </div>
 
         <div class="bg-base border border-border rounded-md p-4">
           <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div class="text-sm">
-              <div class="text-textMuted">当前访问 IP</div>
-              <div class="font-mono text-textMain mt-1">{{ terminalWhoami?.trustedIp || terminalWhoami?.socketIp || '未知' }}</div>
+              <div class="text-textMuted">{{ t('settings.terminalCurrentIp') }}</div>
+              <div class="font-mono text-textMain mt-1">{{ terminalWhoami?.trustedIp || terminalWhoami?.socketIp || t('settings.terminalUnknownIp') }}</div>
               <div v-if="terminalWhoami?.forwardedIp && terminalWhoami.forwardedIp !== terminalWhoami.trustedIp" class="text-xs text-textMuted mt-1">
-                XFF 头声明：{{ terminalWhoami.forwardedIp }}（不被信任，仅供参考）
+                {{ t('settings.terminalXffHint', { ip: terminalWhoami.forwardedIp }) }}
               </div>
             </div>
             <button
@@ -679,19 +719,19 @@ function addCurrentIpToAllowlist() {
               class="flex items-center px-3 py-2 text-sm bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 rounded-md transition-all disabled:opacity-50"
             >
               <Plus class="w-4 h-4 mr-1.5" />
-              加入白名单
+              {{ t('settings.terminalAddToAllowlist') }}
             </button>
           </div>
         </div>
 
         <div>
-          <label class="block text-sm font-medium text-textMain mb-2">添加 IP / CIDR</label>
+          <label class="block text-sm font-medium text-textMain mb-2">{{ t('settings.terminalAddIpCidr') }}</label>
           <div class="flex gap-2">
             <input
               v-model="terminalAllowlistInput"
               type="text"
               class="flex-1 bg-base border border-border rounded-md px-4 py-2.5 text-textMain font-mono text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all"
-              placeholder="例如 192.168.1.0/24 或 ::1"
+              :placeholder="t('settings.terminalIpPlaceholder')"
               @keydown.enter.prevent="addTerminalAllowlistEntry()"
             />
             <button
@@ -699,18 +739,18 @@ function addCurrentIpToAllowlist() {
               class="flex items-center px-4 py-2.5 bg-base border border-border hover:border-primary/50 hover:text-primary text-textMuted rounded-md transition-all"
             >
               <Plus class="w-4 h-4 mr-1.5" />
-              添加
+              {{ t('settings.terminalAddBtn') }}
             </button>
           </div>
         </div>
 
         <div>
           <label class="block text-sm font-medium text-textMain mb-2">
-            当前白名单（{{ terminalAllowlist.length }} 条）
-            <span v-if="terminalAllowlist.length === 0" class="ml-2 text-xs text-yellow-500 font-normal">空 = 不启用白名单</span>
+            {{ t('settings.terminalAllowlistLabel', { n: terminalAllowlist.length }) }}
+            <span v-if="terminalAllowlist.length === 0" class="ml-2 text-xs text-yellow-500 font-normal">{{ t('settings.terminalEmptyMeansDisabled') }}</span>
           </label>
           <div v-if="terminalAllowlist.length === 0" class="text-sm text-textMuted py-3">
-            暂无条目。
+            {{ t('settings.terminalNoEntries') }}
           </div>
           <ul v-else class="space-y-1.5">
             <li
@@ -722,7 +762,7 @@ function addCurrentIpToAllowlist() {
               <button
                 @click="removeTerminalAllowlistEntry(entry)"
                 class="p-1 text-textMuted hover:text-danger rounded transition-colors"
-                title="移除"
+                :title="t('settings.terminalRemove')"
               >
                 <X class="w-4 h-4" />
               </button>
@@ -740,7 +780,7 @@ function addCurrentIpToAllowlist() {
             class="flex items-center px-5 py-2 bg-primary hover:bg-primary/90 text-white rounded-md transition-all font-medium disabled:opacity-50"
           >
             <Save class="w-4 h-4 mr-2" />
-            {{ terminalAllowlistSaving ? '保存中...' : '保存白名单' }}
+            {{ terminalAllowlistSaving ? t('settings.terminalSaving') : t('settings.terminalSaveAllowlist') }}
           </button>
         </div>
       </div>
@@ -748,7 +788,7 @@ function addCurrentIpToAllowlist() {
 
     <!-- Save Bar -->
     <div class="flex items-center justify-end space-x-4 pt-4">
-      <span v-if="saveMessage" class="text-sm" :class="saveMessage === '保存成功' ? 'text-success' : 'text-danger'">
+      <span v-if="saveMessage" class="text-sm" :class="saveMessage === t('settings.saveOk') ? 'text-success' : 'text-danger'">
         {{ saveMessage }}
       </span>
       <button
@@ -757,7 +797,7 @@ function addCurrentIpToAllowlist() {
         class="flex items-center px-6 py-2.5 bg-primary hover:bg-primary/90 text-white rounded-md transition-all font-medium shadow-[0_0_15px_rgba(59,130,246,0.3)] disabled:opacity-50"
       >
         <Save class="w-4 h-4 mr-2" />
-        {{ isSaving ? '保存中...' : '保存配置' }}
+        {{ isSaving ? t('settings.saveBtnPending') : t('settings.saveBtn') }}
       </button>
     </div>
   </div>

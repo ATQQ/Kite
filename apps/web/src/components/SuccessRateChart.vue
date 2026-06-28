@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 interface Point { date: string; success: number; failed: number; total: number; rate: number | null }
 
@@ -7,6 +8,8 @@ const props = defineProps<{
   points: Point[]
   loading?: boolean
 }>()
+
+const { t } = useI18n()
 
 const VIEWBOX_W = 600
 const VIEWBOX_H = 180
@@ -57,18 +60,18 @@ function fmtPct(n: number | null | undefined): string {
   <div class="bg-panel border border-border rounded-xl p-4 sm:p-6 shadow-sm">
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
       <div>
-        <h3 class="text-base font-semibold text-textMain">近 {{ points.length }} 天部署成功率</h3>
+        <h3 class="text-base font-semibold text-textMain">{{ t('chart.successRateTitle', { days: points.length }) }}</h3>
         <p class="text-xs text-textMuted mt-1">
-          总计 {{ totals.total }} 次 · 成功 <span class="text-success">{{ totals.success }}</span>
-          · 失败 <span class="text-danger">{{ totals.failed }}</span>
-          · 均值 <span class="font-mono">{{ fmtPct(chart.avg) }}</span>
+          {{ t('chart.successRateSummary', { total: totals.total }) }} <span class="text-success">{{ totals.success }}</span>
+          {{ t('chart.successRateFailedLabel') }} <span class="text-danger">{{ totals.failed }}</span>
+          {{ t('chart.successRateAvgLabel') }} <span class="font-mono">{{ fmtPct(chart.avg) }}</span>
         </p>
       </div>
     </div>
 
-    <div v-if="loading" class="text-sm text-textMuted py-8 text-center">加载中…</div>
-    <div v-else-if="!totals.total" class="text-sm text-textMuted py-8 text-center">暂无部署</div>
-    <svg v-else :viewBox="`0 0 ${VIEWBOX_W} ${VIEWBOX_H}`" class="w-full h-44 overflow-visible" role="img" aria-label="部署成功率折线图">
+    <div v-if="loading" class="text-sm text-textMuted py-8 text-center">{{ t('chart.successRateLoading') }}</div>
+    <div v-else-if="!totals.total" class="text-sm text-textMuted py-8 text-center">{{ t('chart.successRateEmpty') }}</div>
+    <svg v-else :viewBox="`0 0 ${VIEWBOX_W} ${VIEWBOX_H}`" class="w-full h-44 overflow-visible" role="img" :aria-label="t('chart.successRateAria')">
       <g class="text-textMuted" stroke="currentColor" stroke-opacity="0.15">
         <line :x1="PAD_L" :y1="PAD_T" :x2="VIEWBOX_W - PAD_R" :y2="PAD_T" />
         <line :x1="PAD_L" :y1="PAD_T + (VIEWBOX_H - PAD_T - PAD_B) * 0.5" :x2="VIEWBOX_W - PAD_R" :y2="PAD_T + (VIEWBOX_H - PAD_T - PAD_B) * 0.5" />
@@ -98,7 +101,7 @@ function fmtPct(n: number | null | undefined): string {
           :class="c.p.rate === null ? 'text-textMuted' : (c.p.rate < 0.8 ? 'text-danger' : 'text-primary')"
           fill="currentColor"
         >
-          <title>{{ c.p.date }} · 成功 {{ c.p.success }} / 失败 {{ c.p.failed }} · {{ fmtPct(c.p.rate) }}</title>
+          <title>{{ t('chart.pointTooltip', { date: c.p.date, success: c.p.success, failed: c.p.failed, rate: fmtPct(c.p.rate) }) }}</title>
         </circle>
       </g>
       <g class="text-textMuted" fill="currentColor" font-size="10" font-family="monospace">
