@@ -199,6 +199,7 @@ function canRollbackLog(log: DeploymentLog): boolean {
   if (!log) return false
   if (log.status === 'running') return false
   if ((log as any).triggerSource === 'rollback') return false
+  if (log.id === currentDeploymentId.value) return false
   return !!log.artifactPath
 }
 
@@ -206,6 +207,7 @@ function rollbackDisabledReason(log: DeploymentLog): string {
   if (!log) return ''
   if (log.status === 'running') return t('project.detail.rollbackInProgress')
   if ((log as any).triggerSource === 'rollback') return t('project.detail.rollbackOfRollback')
+  if (log.id === currentDeploymentId.value) return ''
   if (!log.artifactPath) return t('project.detail.rollbackNoArtifact')
   return ''
 }
@@ -1004,7 +1006,7 @@ function switchTab(tab: DetailTab) {
                 {{ t('project.detail.rollbackToThisVersion') }}
               </button>
               <span
-                v-else
+                v-else-if="rollbackDisabledReason(log)"
                 class="inline-flex items-center px-2.5 py-1 text-xs font-medium bg-base text-textMuted/60 border border-border rounded-md cursor-not-allowed"
                 :title="rollbackDisabledReason(log)"
               >
