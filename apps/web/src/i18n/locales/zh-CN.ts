@@ -138,6 +138,13 @@ export default {
     loginError: '登录异常，请稍后重试。',
     hint: 'Token 可以在服务端启动目录的 .env.local 文件中找到。',
   },
+  oss: {
+    github: 'GitHub',
+    githubTitle: '在 GitHub 上查看 Kite',
+    starsTitle: '{count} Stars',
+    license: '{name} 协议',
+    licenseTitle: '查看开源协议',
+  },
   dashboard: {
     title: '概览',
     subtitle: '欢迎回到 Kite Deploy 管理控制台',

@@ -138,6 +138,13 @@ export default {
     loginError: 'Login failed. Please retry later.',
     hint: 'You can find the token inside the .env.local file at the server start directory.',
   },
+  oss: {
+    github: 'GitHub',
+    githubTitle: 'View Kite on GitHub',
+    starsTitle: '{count} Stars',
+    license: '{name} License',
+    licenseTitle: 'View open source license',
+  },
   dashboard: {
     title: 'Dashboard',
     subtitle: 'Welcome back to the Kite Deploy console',

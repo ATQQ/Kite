@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { LayoutDashboard, FolderArchive, TerminalSquare, ScrollText, Database, HardDrive, Settings, LogOut, Sun, Moon, Monitor, Menu, X, Terminal as TerminalIcon, Languages } from 'lucide-vue-next'
+import { LayoutDashboard, FolderArchive, TerminalSquare, ScrollText, Database, HardDrive, Settings, LogOut, Sun, Moon, Monitor, Menu, X, Terminal as TerminalIcon, Languages, Github, Scale, Star } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { useProjectStore } from '../store/project'
 import { useThemeStore, type ThemeMode } from '../store/theme'
 import { useLocaleStore } from '../store/locale'
-import { APP_VERSION } from '../constants'
+import { APP_VERSION, GITHUB_URL, LICENSE_NAME } from '../constants'
+import { useGithubStars, formatStars } from '../composables/useGithubStars'
 import LogoSvg from '../assets/logo.svg'
 
 const { t } = useI18n()
@@ -44,6 +45,9 @@ const localeTitle = computed(() => t('locale.title', { label: localeLabel.value 
 const cycleLocale = () => {
   localeStore.toggleLocale()
 }
+
+const { stars } = useGithubStars()
+const licenseUrl = `${GITHUB_URL}/blob/main/LICENSE`
 
 const handleLogout = () => {
   projectStore.logout()
@@ -129,6 +133,36 @@ onBeforeUnmount(() => {
           <LogOut class="w-5 h-5 mr-3" />
           {{ t('nav.logout') }}
         </button>
+        <div class="mt-3 pt-3 border-t border-border flex items-center justify-between text-[11px] text-textMuted">
+          <a
+            :href="GITHUB_URL"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="flex items-center gap-1.5 hover:text-textMain transition-colors"
+            :title="t('oss.githubTitle')"
+          >
+            <Github class="w-3.5 h-3.5" />
+            <span>{{ t('oss.github') }}</span>
+            <span
+              v-if="stars !== null"
+              class="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-base border border-border text-[10px] tabular-nums"
+              :title="t('oss.starsTitle', { count: stars })"
+            >
+              <Star class="w-2.5 h-2.5" />
+              {{ formatStars(stars) }}
+            </span>
+          </a>
+          <a
+            :href="licenseUrl"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="flex items-center gap-1 hover:text-textMain transition-colors"
+            :title="t('oss.licenseTitle')"
+          >
+            <Scale class="w-3.5 h-3.5" />
+            <span>{{ t('oss.license', { name: LICENSE_NAME }) }}</span>
+          </a>
+        </div>
       </div>
     </aside>
 
@@ -194,6 +228,36 @@ onBeforeUnmount(() => {
           <LogOut class="w-5 h-5 mr-3" />
           {{ t('nav.logout') }}
         </button>
+        <div class="mt-3 pt-3 border-t border-border flex items-center justify-between text-[11px] text-textMuted">
+          <a
+            :href="GITHUB_URL"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="flex items-center gap-1.5 hover:text-textMain transition-colors"
+            :title="t('oss.githubTitle')"
+          >
+            <Github class="w-3.5 h-3.5" />
+            <span>{{ t('oss.github') }}</span>
+            <span
+              v-if="stars !== null"
+              class="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-base border border-border text-[10px] tabular-nums"
+              :title="t('oss.starsTitle', { count: stars })"
+            >
+              <Star class="w-2.5 h-2.5" />
+              {{ formatStars(stars) }}
+            </span>
+          </a>
+          <a
+            :href="licenseUrl"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="flex items-center gap-1 hover:text-textMain transition-colors"
+            :title="t('oss.licenseTitle')"
+          >
+            <Scale class="w-3.5 h-3.5" />
+            <span>{{ t('oss.license', { name: LICENSE_NAME }) }}</span>
+          </a>
+        </div>
       </div>
     </aside>
 
