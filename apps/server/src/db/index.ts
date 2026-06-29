@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { createClient } from '@libsql/client';
 import { drizzle } from 'drizzle-orm/libsql';
 import * as schema from './schema.js';
-import { eq, desc, asc, and, gte, lte } from 'drizzle-orm';
+import { eq, desc, asc, and, gte, lte, inArray } from 'drizzle-orm';
 import path from 'node:path';
 
 // Initialize libSQL client (using local file for now, can be swapped to Turso URL)
@@ -307,6 +307,11 @@ export const db = {
       const result = await ormDb.select().from(schema.projects).where(eq(schema.projects.id, id)).limit(1);
       return result[0] || null;
     },
+    async findManyByIds(ids: string[]) {
+      await ensureDbReady();
+      if (ids.length === 0) return [];
+      return await ormDb.select().from(schema.projects).where(inArray(schema.projects.id, ids));
+    },
     async create(data: any) {
       await ensureDbReady();
       const now = new Date().toISOString();
@@ -385,6 +390,12 @@ export const db = {
       if (!existing) return false;
       await ormDb.delete(schema.projectLogSources).where(eq(schema.projectLogSources.id, id));
       return true;
+    },
+    async findManyByIds(ids: string[]) {
+      await ensureDbReady();
+      if (ids.length === 0) return [];
+      return await ormDb.select().from(schema.projectLogSources)
+        .where(inArray(schema.projectLogSources.id, ids));
     },
   },
   categories: {
@@ -543,6 +554,21 @@ export const db = {
       await ensureDbReady();
       await ormDb.delete(schema.projectTags).where(eq(schema.projectTags.projectId, projectId));
     },
+    async addPair(projectId: string, tagId: string) {
+      await ensureDbReady();
+      const now = new Date().toISOString();
+      try {
+        await ormDb.insert(schema.projectTags).values({ projectId, tagId, createdAt: now });
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    async removePair(projectId: string, tagId: string) {
+      await ensureDbReady();
+      await ormDb.delete(schema.projectTags)
+        .where(and(eq(schema.projectTags.projectId, projectId), eq(schema.projectTags.tagId, tagId)));
+    },
   },
   deployments: {
     async insert(data: any) {
@@ -594,7 +620,7 @@ export const db = {
       await ormDb.update(schema.deployments)
         .set({ artifactPath: null, artifactSize: null })
         .where(eq(schema.deployments.id, id));
-    }
+    },
   },
   auditLogs: {
     async create(data: {

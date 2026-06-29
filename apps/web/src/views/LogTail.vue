@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, Plus, RefreshCw, Trash2, FileText, Play, Pause, ChevronDown, ChevronUp, Search, X, AlertTriangle, Loader2, Activity, History as HistoryIcon, Pencil, Zap } from 'lucide-vue-next'
+import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
+import { ArrowLeft, Plus, RefreshCw, Trash2, FileText, Play, Pause, ChevronDown, ChevronUp, Search, X, AlertTriangle, Loader2, Activity, History as HistoryIcon, Pencil, Zap, CheckSquare, Square, MinusSquare } from 'lucide-vue-next'
 import { useProjectStore, type Pm2AppStatus } from '../store/project'
 import { useToast } from '../composables/useToast'
 import FolderPickerDialog from '../components/FolderPickerDialog.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
+import BulkActionBar from '../components/BulkActionBar.vue'
+import { useBulkSelection } from '../composables/useBulkSelection'
 import { useLogTailStream } from '../composables/useLogTailStream'
 import { useLogSearchStream, type SearchHit } from '../composables/useLogSearchStream'
 
@@ -191,6 +193,88 @@ async function confirmDelete() {
     toast.success('已删除')
   } catch (e: any) {
     toast.error(e?.message || '删除失败')
+  }
+}
+
+// ---------- Bulk selection: log sources ----------
+const BULK_LOG_SRC_MAX = 200
+const sourceBulk = useBulkSelection(sources)
+const isBulkDeletingSources = ref(false)
+const showBulkDeleteSources = ref(false)
+
+onBeforeRouteLeave(() => {
+  sourceBulk.clear()
+})
+
+const bulkDeleteSourcesRequireText = computed(() => `delete ${sourceBulk.selectedCount.value} log sources`)
+
+function toggleSourceSelection(e: Event, id: string) {
+  e.stopPropagation()
+  sourceBulk.toggle(id)
+}
+
+function toggleAllSources() {
+  if (sourceBulk.isAllSelected.value) {
+    sourceBulk.clear()
+    return
+  }
+  if (sources.value.length > BULK_LOG_SRC_MAX) {
+    toast.error('已超出单次上限', `单次最多操作 ${BULK_LOG_SRC_MAX} 条`)
+    return
+  }
+  sourceBulk.selectAll()
+}
+
+function openBulkDeleteSources() {
+  if (sourceBulk.selectedCount.value === 0) return
+  if (sourceBulk.selectedCount.value > BULK_LOG_SRC_MAX) {
+    toast.error('已超出单次上限', `单次最多操作 ${BULK_LOG_SRC_MAX} 条`)
+    return
+  }
+  showBulkDeleteSources.value = true
+}
+
+async function confirmBulkDeleteSources() {
+  if (isBulkDeletingSources.value) return
+  const ids = Array.from(sourceBulk.selectedIds.value)
+  if (ids.length === 0) return
+  isBulkDeletingSources.value = true
+  try {
+    const res = await fetch('/api/log-sources/bulk', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${store.adminToken}`,
+      },
+      body: JSON.stringify({ ids, action: 'delete' }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      toast.error('批量删除失败', data?.error || `HTTP ${res.status}`)
+      return
+    }
+    const success = Number(data?.success || 0)
+    const failed = Array.isArray(data?.failed) ? data.failed.length : 0
+    if (failed === 0) {
+      toast.success(`已删除 ${success} 个日志源`)
+    } else {
+      toast.error('部分成功', `成功 ${success} 条，失败 ${failed} 条`)
+    }
+    if (activeSourceId.value && ids.includes(activeSourceId.value)) {
+      tail.disconnect()
+      search.abort()
+      activeSourceId.value = ''
+      liveLines.value = []
+      historyLines.value = []
+      searchHits.value = []
+    }
+    showBulkDeleteSources.value = false
+    sourceBulk.clear()
+    await loadSources()
+  } catch (err: any) {
+    toast.error('批量删除失败', err?.message || 'network error')
+  } finally {
+    isBulkDeletingSources.value = false
   }
 }
 
@@ -478,7 +562,21 @@ onUnmounted(() => {
       <!-- Source list -->
       <aside class="col-span-12 lg:col-span-3 bg-panel border border-border rounded-lg p-3">
         <div class="text-xs text-textMuted mb-2 px-1 flex items-center justify-between">
-          <span>日志源</span>
+          <span class="flex items-center gap-1.5">
+            <button
+              v-if="sources.length > 0"
+              type="button"
+              class="p-0.5 rounded hover:text-textMain transition-colors"
+              :class="sourceBulk.isAllSelected.value || sourceBulk.isIndeterminate.value ? 'text-primary' : 'text-textMuted'"
+              :title="sourceBulk.isAllSelected.value ? '清空选中' : '全选'"
+              @click="toggleAllSources"
+            >
+              <CheckSquare v-if="sourceBulk.isAllSelected.value" class="w-3.5 h-3.5" />
+              <MinusSquare v-else-if="sourceBulk.isIndeterminate.value" class="w-3.5 h-3.5" />
+              <Square v-else class="w-3.5 h-3.5" />
+            </button>
+            <span>日志源</span>
+          </span>
           <span>{{ sources.length }}</span>
         </div>
         <div v-if="loadingSources" class="text-xs text-textMuted py-6 text-center">
@@ -494,9 +592,19 @@ onUnmounted(() => {
             v-for="s in sources"
             :key="s.id"
             class="group rounded-md border transition-all"
-            :class="activeSourceId === s.id ? 'border-primary/60 bg-primary/5' : 'border-transparent hover:bg-white/5'"
+            :class="sourceBulk.isSelected(s.id) ? 'border-primary/60 bg-primary/10' : (activeSourceId === s.id ? 'border-primary/60 bg-primary/5' : 'border-transparent hover:bg-white/5')"
           >
             <div class="flex items-start p-2">
+              <button
+                type="button"
+                class="p-1 mr-1 rounded transition-colors shrink-0"
+                :class="sourceBulk.isSelected(s.id) ? 'text-primary' : 'text-textMuted opacity-0 group-hover:opacity-100 hover:text-textMain'"
+                :title="sourceBulk.isSelected(s.id) ? '取消选中' : '选中此日志源'"
+                @click.stop="toggleSourceSelection($event, s.id)"
+              >
+                <CheckSquare v-if="sourceBulk.isSelected(s.id)" class="w-3.5 h-3.5" />
+                <Square v-else class="w-3.5 h-3.5" />
+              </button>
               <button
                 @click="pickSource(s.id)"
                 class="flex-1 text-left min-w-0"
@@ -727,6 +835,37 @@ onUnmounted(() => {
       tone="danger"
       @update:open="confirmDeleteOpen = $event"
       @confirm="confirmDelete"
+    />
+
+    <BulkActionBar
+      :count="sourceBulk.selectedCount.value"
+      :total="sources.length"
+      @clear="sourceBulk.clear"
+    >
+      <template #actions>
+        <button
+          type="button"
+          :disabled="isBulkDeletingSources"
+          class="flex items-center px-2.5 py-1.5 text-xs rounded-md border border-danger/40 text-danger hover:bg-danger/10 transition-colors disabled:opacity-50"
+          @click="openBulkDeleteSources"
+        >
+          <Trash2 class="w-3.5 h-3.5 mr-1.5" />
+          删除选中
+        </button>
+      </template>
+    </BulkActionBar>
+
+    <ConfirmDialog
+      v-model:open="showBulkDeleteSources"
+      tone="danger"
+      title="批量移除日志源？"
+      :message="`将移除 ${sourceBulk.selectedCount.value} 个日志源。日志文件本身不会被删除。`"
+      confirm-text="确认删除"
+      cancel-text="取消"
+      :require-text="bulkDeleteSourcesRequireText"
+      :require-text-hint="`请输入 ${bulkDeleteSourcesRequireText} 以确认`"
+      :loading="isBulkDeletingSources"
+      @confirm="confirmBulkDeleteSources"
     />
   </div>
 </template>

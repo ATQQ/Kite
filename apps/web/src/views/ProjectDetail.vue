@@ -3,7 +3,7 @@ import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useProjectStore, type CleanPreviewResult, type DeploymentLog, type Pm2AppStatus } from '../store/project'
-import { ArrowLeft, Save, Key, Copy, RefreshCw, Trash2, CheckCircle2, TerminalSquare, FolderOpen, AlertTriangle, XCircle, ScrollText, Eye, Shield, ShieldAlert, Plus, History, RotateCcw, Archive, ArchiveX, CheckCheck, FileText, Activity, Cpu, MemoryStick, ChevronDown, ChevronUp, Pencil, Check, SlidersHorizontal, LayoutDashboard } from 'lucide-vue-next'
+import { ArrowLeft, Save, Key, Copy, RefreshCw, Trash2, CheckCircle2, TerminalSquare, FolderOpen, AlertTriangle, XCircle, ScrollText, Eye, Shield, ShieldAlert, Plus, History, RotateCcw, Archive, ArchiveX, CheckCheck, FileText, Activity, Cpu, MemoryStick, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Pencil, Check, SlidersHorizontal, LayoutDashboard } from 'lucide-vue-next'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import CleanPreviewDialog from '../components/CleanPreviewDialog.vue'
 import ProjectTagsEditor from '../components/ProjectTagsEditor.vue'
@@ -121,13 +121,37 @@ const showRollbackConfirm = ref(false)
 const isRollingBack = ref(false)
 const rollbackTarget = ref<DeploymentLog | null>(null)
 
+// ---------- Deployment history pagination ----------
+const DEPLOYMENT_PAGE_SIZE = 10
+const deploymentPage = ref(1)
+const totalDeploymentPages = computed(() => Math.max(1, Math.ceil(deployments.value.length / DEPLOYMENT_PAGE_SIZE)))
+const pagedDeployments = computed(() => {
+  const start = (deploymentPage.value - 1) * DEPLOYMENT_PAGE_SIZE
+  return deployments.value.slice(start, start + DEPLOYMENT_PAGE_SIZE)
+})
+const deploymentPageRange = computed(() => {
+  const total = deployments.value.length
+  if (total === 0) return { from: 0, to: 0, total: 0 }
+  const from = (deploymentPage.value - 1) * DEPLOYMENT_PAGE_SIZE + 1
+  const to = Math.min(deploymentPage.value * DEPLOYMENT_PAGE_SIZE, total)
+  return { from, to, total }
+})
+function goPrevDeploymentPage() {
+  if (deploymentPage.value > 1) deploymentPage.value -= 1
+}
+function goNextDeploymentPage() {
+  if (deploymentPage.value < totalDeploymentPages.value) deploymentPage.value += 1
+}
+
 async function loadDeployments() {
   isLoadingDeployments.value = true
   try {
     await projectStore.fetchLogs()
     deployments.value = projectStore.logs
       .filter(l => l.projectId === projectId)
-      .slice(0, 10)
+    if (deploymentPage.value > totalDeploymentPages.value) {
+      deploymentPage.value = Math.max(1, totalDeploymentPages.value)
+    }
   } catch (e) {
     deployments.value = []
   } finally {
@@ -913,7 +937,7 @@ function switchTab(tab: DetailTab) {
           </div>
           <ul v-else class="divide-y divide-border">
             <li
-              v-for="log in deployments"
+              v-for="log in pagedDeployments"
               :key="log.id"
               class="flex items-center gap-3 py-3 hover:bg-black/[0.02] dark:hover:bg-white/[0.02] -mx-2 px-2 rounded-md transition-colors"
             >
@@ -988,6 +1012,38 @@ function switchTab(tab: DetailTab) {
               </span>
             </li>
           </ul>
+
+          <div
+            v-if="deployments.length > DEPLOYMENT_PAGE_SIZE"
+            class="mt-4 flex items-center justify-between text-xs text-textMuted"
+          >
+            <span class="font-mono">
+              {{ t('project.detail.pageRange', { from: deploymentPageRange.from, to: deploymentPageRange.to, total: deploymentPageRange.total }) }}
+            </span>
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                :disabled="deploymentPage === 1"
+                class="inline-flex items-center px-2.5 py-1 text-xs bg-base border border-border rounded-md transition-all disabled:opacity-40 disabled:cursor-not-allowed hover:border-primary/50 hover:text-primary"
+                @click="goPrevDeploymentPage"
+              >
+                <ChevronLeft class="w-3.5 h-3.5 mr-1" />
+                {{ t('project.detail.pagePrev') }}
+              </button>
+              <span class="font-mono">
+                {{ t('project.detail.pageIndicator', { current: deploymentPage, total: totalDeploymentPages }) }}
+              </span>
+              <button
+                type="button"
+                :disabled="deploymentPage >= totalDeploymentPages"
+                class="inline-flex items-center px-2.5 py-1 text-xs bg-base border border-border rounded-md transition-all disabled:opacity-40 disabled:cursor-not-allowed hover:border-primary/50 hover:text-primary"
+                @click="goNextDeploymentPage"
+              >
+                {{ t('project.detail.pageNext') }}
+                <ChevronRight class="w-3.5 h-3.5 ml-1" />
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
