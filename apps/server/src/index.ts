@@ -12,6 +12,7 @@ import { logSourceRoutes } from "./routes/log-sources.js";
 import { systemRoutes } from "./routes/system.js";
 import { pm2Routes } from "./routes/pm2.js";
 import { tagRoutes } from "./routes/tags.js";
+import { searchRoutes } from "./routes/search.js";
 import {
   terminalRoutes,
   decideTerminalUpgrade,
@@ -135,6 +136,7 @@ const app = new Elysia({ adapter })
   .use(systemRoutes)
   .use(pm2Routes)
   .use(tagRoutes)
+  .use(searchRoutes)
   .use(terminalRoutes)
   .use(staticPlugin);
 

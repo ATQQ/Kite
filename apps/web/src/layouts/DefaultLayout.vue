@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { LayoutDashboard, FolderArchive, TerminalSquare, ScrollText, Database, HardDrive, Settings, LogOut, Sun, Moon, Monitor, Menu, X, Terminal as TerminalIcon, Languages, Github, Scale, Star } from 'lucide-vue-next'
+import { LayoutDashboard, FolderArchive, TerminalSquare, ScrollText, Database, HardDrive, Settings, LogOut, Sun, Moon, Monitor, Menu, X, Terminal as TerminalIcon, Languages, Github, Scale, Star, Search } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { useProjectStore } from '../store/project'
 import { useThemeStore, type ThemeMode } from '../store/theme'
 import { useLocaleStore } from '../store/locale'
+import { usePaletteStore } from '../store/palette'
 import { APP_VERSION, GITHUB_URL, LICENSE_NAME } from '../constants'
 import { useGithubStars, formatStars } from '../composables/useGithubStars'
 import LogoSvg from '../assets/logo.svg'
@@ -16,6 +17,7 @@ const router = useRouter()
 const projectStore = useProjectStore()
 const themeStore = useThemeStore()
 const localeStore = useLocaleStore()
+const palette = usePaletteStore()
 
 const menus = computed(() => [
   { name: t('nav.dashboard'), path: '/', icon: LayoutDashboard },
@@ -100,7 +102,20 @@ onBeforeUnmount(() => {
           <component :is="themeIcon" class="w-4 h-4" />
         </button>
       </div>
-      
+
+      <div class="px-3 pt-3">
+        <button
+          @click="palette.open()"
+          :title="t('search.shortcutHint')"
+          :aria-label="t('search.triggerLabel')"
+          class="w-full flex items-center gap-2 px-3 py-2 rounded-md border border-border bg-base text-textMuted hover:text-textMain hover:border-primary/40 transition-colors text-sm"
+        >
+          <Search class="w-4 h-4" />
+          <span class="flex-1 text-left truncate">{{ t('search.triggerLabel') }}…</span>
+          <kbd class="text-[10px] px-1.5 py-0.5 rounded border border-border bg-panel">⌘K</kbd>
+        </button>
+      </div>
+
       <nav class="flex-1 py-6 px-3 space-y-1">
         <router-link
           v-for="menu in menus"
@@ -277,10 +292,18 @@ onBeforeUnmount(() => {
           <span class="text-lg font-bold text-textMain">KITE</span>
         </router-link>
         <button
+          @click="palette.open()"
+          :title="t('search.shortcutHint')"
+          :aria-label="t('search.triggerLabel')"
+          class="ml-auto p-1.5 rounded-md text-textMuted hover:text-textMain dark:hover:bg-white/5 hover:bg-black/5 transition-colors"
+        >
+          <Search class="w-4 h-4" />
+        </button>
+        <button
           @click="cycleLocale"
           :title="localeTitle"
           :aria-label="localeTitle"
-          class="ml-auto p-1.5 rounded-md text-textMuted hover:text-textMain dark:hover:bg-white/5 hover:bg-black/5 transition-colors"
+          class="ml-1 p-1.5 rounded-md text-textMuted hover:text-textMain dark:hover:bg-white/5 hover:bg-black/5 transition-colors"
         >
           <Languages class="w-4 h-4" />
         </button>

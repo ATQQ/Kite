@@ -676,6 +676,138 @@ export const db = {
       return { rows, total, limit, offset };
     }
   },
+  search: {
+    async run(q: string, types: Array<'project' | 'deployment' | 'audit' | 'logsource'>, limit: number) {
+      await ensureDbReady();
+      const trimmed = (q || '').trim();
+      const empty = {
+        q: trimmed,
+        groups: [] as Array<{ type: string; total: number; items: any[] }>,
+        truncated: false,
+      };
+      if (trimmed.length < 1 || trimmed.length > 64) return empty;
+      const cap = Math.min(Math.max(limit | 0, 1), 20);
+
+      // Escape SQL LIKE meta chars ( % _ \ ) under ESCAPE '\\'
+      const escaped = trimmed.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+      const like = `%${escaped}%`;
+      const wantedSet = new Set(types);
+      const groups: Array<{ type: string; total: number; items: any[] }> = [];
+      let truncated = false;
+
+      if (wantedSet.has('project')) {
+        const r = await client.execute({
+          sql: `SELECT id, name, description, deploy_path, env, status, updated_at
+                FROM projects
+                WHERE name LIKE ? ESCAPE '\\'
+                   OR IFNULL(description,'') LIKE ? ESCAPE '\\'
+                   OR deploy_path LIKE ? ESCAPE '\\'
+                   OR IFNULL(env,'') LIKE ? ESCAPE '\\'
+                   OR id LIKE ? ESCAPE '\\'
+                ORDER BY updated_at DESC
+                LIMIT ?`,
+          args: [like, like, like, like, like, cap + 1],
+        });
+        const rows = r.rows.slice(0, cap).map(row => ({
+          type: 'project' as const,
+          id: String(row.id),
+          name: String(row.name),
+          description: row.description == null ? null : String(row.description),
+          status: row.status == null ? null : String(row.status),
+          href: `/projects/${String(row.id)}`,
+        }));
+        if (r.rows.length > cap) truncated = true;
+        groups.push({ type: 'project', total: rows.length, items: rows });
+      }
+
+      if (wantedSet.has('deployment')) {
+        const r = await client.execute({
+          sql: `SELECT id, project_id, project_name, status, start_time, output
+                FROM deployments
+                WHERE project_name LIKE ? ESCAPE '\\'
+                   OR IFNULL(output,'') LIKE ? ESCAPE '\\'
+                   OR id LIKE ? ESCAPE '\\'
+                ORDER BY start_time DESC
+                LIMIT ?`,
+          args: [like, like, like, cap + 1],
+        });
+        const rows = r.rows.slice(0, cap).map(row => {
+          const output = row.output == null ? null : String(row.output);
+          let snippet: string | null = null;
+          if (output) {
+            const idx = output.toLowerCase().indexOf(trimmed.toLowerCase());
+            if (idx >= 0) {
+              const start = Math.max(0, idx - 20);
+              snippet = output.slice(start, start + 80).replace(/\s+/g, ' ');
+            } else {
+              snippet = output.slice(0, 80).replace(/\s+/g, ' ');
+            }
+          }
+          return {
+            type: 'deployment' as const,
+            id: String(row.id),
+            projectId: String(row.project_id),
+            projectName: String(row.project_name),
+            status: String(row.status),
+            startTime: String(row.start_time),
+            href: `/projects/${String(row.project_id)}`,
+            snippet,
+          };
+        });
+        if (r.rows.length > cap) truncated = true;
+        groups.push({ type: 'deployment', total: rows.length, items: rows });
+      }
+
+      if (wantedSet.has('audit')) {
+        const r = await client.execute({
+          sql: `SELECT id, action, target_name, target_id, status, summary, created_at
+                FROM audit_logs
+                WHERE action LIKE ? ESCAPE '\\'
+                   OR IFNULL(target_name,'') LIKE ? ESCAPE '\\'
+                   OR IFNULL(target_id,'') LIKE ? ESCAPE '\\'
+                   OR IFNULL(summary,'') LIKE ? ESCAPE '\\'
+                ORDER BY created_at DESC
+                LIMIT ?`,
+          args: [like, like, like, like, cap + 1],
+        });
+        const rows = r.rows.slice(0, cap).map(row => ({
+          type: 'audit' as const,
+          id: String(row.id),
+          action: String(row.action),
+          targetName: row.target_name == null ? null : String(row.target_name),
+          createdAt: String(row.created_at),
+          status: String(row.status),
+          href: `/audit?focus=${encodeURIComponent(String(row.id))}`,
+        }));
+        if (r.rows.length > cap) truncated = true;
+        groups.push({ type: 'audit', total: rows.length, items: rows });
+      }
+
+      if (wantedSet.has('logsource')) {
+        const r = await client.execute({
+          sql: `SELECT id, project_id, label, file_path
+                FROM project_log_sources
+                WHERE label LIKE ? ESCAPE '\\'
+                   OR file_path LIKE ? ESCAPE '\\'
+                ORDER BY updated_at DESC
+                LIMIT ?`,
+          args: [like, like, cap + 1],
+        });
+        const rows = r.rows.slice(0, cap).map(row => ({
+          type: 'logsource' as const,
+          id: String(row.id),
+          projectId: String(row.project_id),
+          label: String(row.label),
+          filePath: String(row.file_path),
+          href: `/projects/${String(row.project_id)}/logs?source=${encodeURIComponent(String(row.id))}`,
+        }));
+        if (r.rows.length > cap) truncated = true;
+        groups.push({ type: 'logsource', total: rows.length, items: rows });
+      }
+
+      return { q: trimmed, groups, truncated };
+    }
+  },
   stats: {
     async heatmap(sinceIso: string) {
       await ensureDbReady();
