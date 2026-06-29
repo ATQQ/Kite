@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onBeforeUnmount, nextTick, watch } from 'vue'
 import { Plus, Tag as TagIcon, X as XIcon, Check } from 'lucide-vue-next'
+import { useI18n } from 'vue-i18n'
 import { useProjectStore, type Tag as TagType } from '../store/project'
 import { chipClass as tagChipClass } from '../utils/color-chip'
 import { useToast } from '../composables/useToast'
@@ -19,15 +20,18 @@ const props = withDefaults(defineProps<Props>(), {
   size: 'sm',
   readOnlySave: false,
   onPersist: undefined,
-  ariaLabel: '编辑标签',
+  ariaLabel: undefined,
 })
 
 const emit = defineEmits<{
   (e: 'update:modelValue', value: string[]): void
 }>()
 
+const { t: tt } = useI18n()
 const projectStore = useProjectStore()
 const toast = useToast()
+
+const resolvedAriaLabel = computed(() => props.ariaLabel ?? tt('project.tagsEditor.ariaLabel'))
 
 const tagMap = computed(() => {
   const m = new Map<string, TagType>()
@@ -115,7 +119,7 @@ async function commit(next: string[]) {
   try {
     await props.onPersist(next)
   } catch (err: any) {
-    toast.error('保存标签失败', err?.message || '请稍后重试')
+    toast.error(tt('project.tagsEditor.saveFailed'), err?.message || tt('project.tagsEditor.retryHint'))
   }
 }
 
@@ -163,7 +167,7 @@ async function createAndAttach() {
         return
       }
     }
-    toast.error('创建标签失败', res.error || '请稍后重试')
+    toast.error(tt('project.tagsEditor.createFailed'), res.error || tt('project.tagsEditor.retryHint'))
   } finally {
     submitting.value = false
   }
@@ -189,7 +193,7 @@ watch(() => props.modelValue, () => {
         <button
           type="button"
           class="ml-1 -mr-0.5 opacity-60 hover:opacity-100 hover:text-danger transition-opacity"
-          :title="`移除标签 ${tagMap.get(tid)?.name}`"
+          :title="tt('project.tagsEditor.removeTitle', { name: tagMap.get(tid)?.name })"
           @click="removeOne(tid, $event)"
         >
           <XIcon class="w-3 h-3" />
@@ -201,12 +205,12 @@ watch(() => props.modelValue, () => {
       type="button"
       class="inline-flex items-center rounded border border-dashed border-border text-textMuted hover:text-primary hover:border-primary/50 transition-colors"
       :class="chipPaddingClass"
-      :aria-label="ariaLabel"
-      :title="ariaLabel"
+      :aria-label="resolvedAriaLabel"
+      :title="resolvedAriaLabel"
       @click="openPicker"
     >
       <Plus class="w-3 h-3 mr-0.5" />
-      <span>标签</span>
+      <span>{{ tt('project.tagsEditor.triggerLabel') }}</span>
     </button>
 
     <Teleport to="body">
@@ -218,8 +222,8 @@ watch(() => props.modelValue, () => {
         @click.stop
       >
         <div class="flex items-center justify-between mb-2">
-          <span class="text-textMuted">勾选已有，或新建：</span>
-          <button type="button" class="text-textMuted hover:text-textMain" @click="closePicker" title="关闭">
+          <span class="text-textMuted">{{ tt('project.tagsEditor.pickHint') }}</span>
+          <button type="button" class="text-textMuted hover:text-textMain" @click="closePicker" :title="tt('project.tagsEditor.closeTitle')">
             <XIcon class="w-3.5 h-3.5" />
           </button>
         </div>
@@ -238,23 +242,23 @@ watch(() => props.modelValue, () => {
               {{ t.name }}
             </button>
           </template>
-          <span v-else class="text-textMuted">还没有任何标签，请在下方输入新建。</span>
+          <span v-else class="text-textMuted">{{ tt('project.tagsEditor.emptyHint') }}</span>
         </div>
         <form class="flex items-center gap-1.5" @submit.prevent="createAndAttach">
           <input
             v-model="newName"
             type="text"
             maxlength="30"
-            placeholder="输入新标签名，回车创建"
+            :placeholder="tt('project.tagsEditor.newPlaceholder')"
             class="flex-1 min-w-0 bg-base border border-border rounded px-2 py-1 text-xs text-textMain placeholder-textMuted/60 focus:outline-none focus:border-primary/60"
           />
           <button
             type="submit"
             class="inline-flex items-center px-2 py-1 rounded bg-primary/15 text-primary border border-primary/40 hover:bg-primary/25 disabled:opacity-50 disabled:cursor-not-allowed"
             :disabled="!newName.trim() || submitting"
-            title="新建并添加"
+            :title="tt('project.tagsEditor.addTitle')"
           >
-            <Plus class="w-3 h-3 mr-0.5" /> 添加
+            <Plus class="w-3 h-3 mr-0.5" /> {{ tt('project.tagsEditor.addBtn') }}
           </button>
         </form>
       </div>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, watch, nextTick, ref } from 'vue'
 import { AlertTriangle, Info, RefreshCw, X } from 'lucide-vue-next'
+import { useI18n } from 'vue-i18n'
 
 type Tone = 'danger' | 'warning' | 'info'
 
@@ -17,16 +18,22 @@ const props = withDefaults(defineProps<{
   requireTextPlaceholder?: string
   requireTextHint?: string
 }>(), {
-  title: '确认操作',
+  title: undefined,
   message: '',
   tone: 'info',
-  confirmText: '确认',
-  cancelText: '取消',
+  confirmText: undefined,
+  cancelText: undefined,
   loading: false,
   requireText: '',
   requireTextPlaceholder: '',
   requireTextHint: '',
 })
+
+const { t } = useI18n()
+
+const resolvedTitle = computed(() => props.title ?? t('dialog.defaultTitle'))
+const resolvedConfirmText = computed(() => props.confirmText ?? t('dialog.defaultConfirm'))
+const resolvedCancelText = computed(() => props.cancelText ?? t('dialog.cancel'))
 
 const emit = defineEmits<{
   (e: 'confirm'): void
@@ -109,7 +116,7 @@ watch(() => props.open, async (v) => {
             <component :is="toneIcon" class="w-5 h-5" :class="toneClasses.iconText" />
           </div>
           <div class="flex-1 min-w-0">
-            <h3 class="text-base font-semibold text-textMain">{{ title }}</h3>
+            <h3 class="text-base font-semibold text-textMain">{{ resolvedTitle }}</h3>
             <p v-if="message" class="text-sm text-textMuted mt-1 whitespace-pre-line">{{ message }}</p>
             <slot />
           </div>
@@ -140,7 +147,7 @@ watch(() => props.open, async (v) => {
             @click="onCancel"
             :disabled="loading"
             class="px-4 py-2 text-sm font-medium text-textMuted hover:text-textMain dark:hover:bg-white/5 hover:bg-black/5 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >{{ cancelText }}</button>
+          >{{ resolvedCancelText }}</button>
           <button
             @click="onConfirm"
             :disabled="!canConfirm"
@@ -148,7 +155,7 @@ watch(() => props.open, async (v) => {
             :class="toneClasses.confirmBtn"
           >
             <RefreshCw v-if="loading" class="w-4 h-4 mr-2 animate-spin" />
-            {{ loading ? '处理中...' : confirmText }}
+            {{ loading ? t('dialog.processing') : resolvedConfirmText }}
           </button>
         </div>
       </div>

@@ -1,42 +1,48 @@
 <script setup lang="ts">
 import { computed, ref, watch, onBeforeUnmount } from 'vue'
-import { LayoutDashboard, FolderArchive, TerminalSquare, ScrollText, Database, HardDrive, Settings, LogOut, Sun, Moon, Monitor, Menu, X, Terminal as TerminalIcon } from 'lucide-vue-next'
+import { useI18n } from 'vue-i18n'
+import { LayoutDashboard, FolderArchive, TerminalSquare, ScrollText, Database, HardDrive, Settings, LogOut, Sun, Moon, Monitor, Menu, X, Terminal as TerminalIcon, Languages } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { useProjectStore } from '../store/project'
 import { useThemeStore, type ThemeMode } from '../store/theme'
+import { useLocaleStore } from '../store/locale'
 import { APP_VERSION } from '../constants'
 import LogoSvg from '../assets/logo.svg'
 
+const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const projectStore = useProjectStore()
 const themeStore = useThemeStore()
+const localeStore = useLocaleStore()
 
-const menus = [
-  { name: '概览', path: '/', icon: LayoutDashboard },
-  { name: '项目管理', path: '/projects', icon: FolderArchive },
-  { name: '部署日志', path: '/logs', icon: TerminalSquare },
-  { name: '终端', path: '/terminal', icon: TerminalIcon },
-  { name: '操作日志', path: '/audit', icon: ScrollText },
-  { name: '存储', path: '/storage', icon: HardDrive },
-  { name: '数据迁移', path: '/migration', icon: Database },
-]
+const menus = computed(() => [
+  { name: t('nav.dashboard'), path: '/', icon: LayoutDashboard },
+  { name: t('nav.projects'), path: '/projects', icon: FolderArchive },
+  { name: t('nav.deployLogs'), path: '/logs', icon: TerminalSquare },
+  { name: t('nav.terminal'), path: '/terminal', icon: TerminalIcon },
+  { name: t('nav.auditLog'), path: '/audit', icon: ScrollText },
+  { name: t('nav.storage'), path: '/storage', icon: HardDrive },
+  { name: t('nav.migration'), path: '/migration', icon: Database },
+])
 
 const THEME_CYCLE: ThemeMode[] = ['light', 'dark', 'system']
-const THEME_LABEL: Record<ThemeMode, string> = {
-  light: '浅色',
-  dark: '深色',
-  system: '跟随系统',
-}
 const themeIcon = computed(() => {
   if (themeStore.mode === 'system') return Monitor
   return themeStore.mode === 'dark' ? Moon : Sun
 })
-const themeTitle = computed(() => `外观：${THEME_LABEL[themeStore.mode]}（点击切换）`)
+const themeLabel = computed(() => t(`theme.${themeStore.mode}`))
+const themeTitle = computed(() => t('theme.title', { label: themeLabel.value }))
 const cycleTheme = () => {
   const idx = THEME_CYCLE.indexOf(themeStore.mode)
   const next = THEME_CYCLE[(idx + 1) % THEME_CYCLE.length]
   themeStore.setMode(next)
+}
+
+const localeLabel = computed(() => t(`locale.${localeStore.locale}`))
+const localeTitle = computed(() => t('locale.title', { label: localeLabel.value }))
+const cycleLocale = () => {
+  localeStore.toggleLocale()
 }
 
 const handleLogout = () => {
@@ -74,10 +80,18 @@ onBeforeUnmount(() => {
           <span class="ml-2 text-xs bg-primary/20 text-primary px-2 py-0.5 rounded-full">v{{ APP_VERSION }}</span>
         </router-link>
         <button
+          @click="cycleLocale"
+          :title="localeTitle"
+          :aria-label="localeTitle"
+          class="ml-auto p-1.5 rounded-md text-textMuted hover:text-textMain dark:hover:bg-white/5 hover:bg-black/5 transition-colors"
+        >
+          <Languages class="w-4 h-4" />
+        </button>
+        <button
           @click="cycleTheme"
           :title="themeTitle"
           :aria-label="themeTitle"
-          class="ml-auto p-1.5 rounded-md text-textMuted hover:text-textMain dark:hover:bg-white/5 hover:bg-black/5 transition-colors"
+          class="ml-1 p-1.5 rounded-md text-textMuted hover:text-textMain dark:hover:bg-white/5 hover:bg-black/5 transition-colors"
         >
           <component :is="themeIcon" class="w-4 h-4" />
         </button>
@@ -109,11 +123,11 @@ onBeforeUnmount(() => {
             : 'text-textMuted hover:text-textMain dark:hover:bg-white/5 hover:bg-black/5'"
         >
           <Settings class="w-5 h-5 mr-3" :class="route.path === '/settings' ? 'text-primary' : 'text-textMuted'" />
-          系统设置
+          {{ t('nav.settings') }}
         </router-link>
         <button @click="handleLogout" class="flex items-center w-full px-3 py-2 text-sm text-danger hover:bg-danger/10 rounded-md transition-colors">
           <LogOut class="w-5 h-5 mr-3" />
-          退出登录
+          {{ t('nav.logout') }}
         </button>
       </div>
     </aside>
@@ -131,7 +145,7 @@ onBeforeUnmount(() => {
     <aside
       class="fixed inset-y-0 left-0 z-50 w-64 border-r border-border bg-panel flex flex-col transform transition-transform duration-200 md:hidden"
       :class="mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'"
-      aria-label="移动端导航"
+      :aria-label="t('nav.mobileMenu')"
     >
       <div class="h-16 flex items-center px-4 border-b border-border">
         <router-link to="/" class="flex items-center min-w-0 hover:opacity-90 transition-opacity" @click="closeMobileMenu">
@@ -141,7 +155,7 @@ onBeforeUnmount(() => {
         </router-link>
         <button
           @click="closeMobileMenu"
-          aria-label="关闭菜单"
+          :aria-label="t('nav.closeMenu')"
           class="ml-auto p-1.5 rounded-md text-textMuted hover:text-textMain dark:hover:bg-white/5 hover:bg-black/5 transition-colors"
         >
           <X class="w-4 h-4" />
@@ -174,11 +188,11 @@ onBeforeUnmount(() => {
             : 'text-textMuted hover:text-textMain dark:hover:bg-white/5 hover:bg-black/5'"
         >
           <Settings class="w-5 h-5 mr-3" :class="route.path === '/settings' ? 'text-primary' : 'text-textMuted'" />
-          系统设置
+          {{ t('nav.settings') }}
         </router-link>
         <button @click="handleLogout" class="flex items-center w-full px-3 py-2 text-sm text-danger hover:bg-danger/10 rounded-md transition-colors">
           <LogOut class="w-5 h-5 mr-3" />
-          退出登录
+          {{ t('nav.logout') }}
         </button>
       </div>
     </aside>
@@ -189,7 +203,7 @@ onBeforeUnmount(() => {
       <header class="h-16 border-b border-border bg-panel flex items-center px-4 md:hidden">
         <button
           @click="openMobileMenu"
-          aria-label="打开菜单"
+          :aria-label="t('nav.openMenu')"
           class="p-1.5 mr-2 rounded-md text-textMuted hover:text-textMain dark:hover:bg-white/5 hover:bg-black/5 transition-colors"
         >
           <Menu class="w-5 h-5" />
@@ -199,10 +213,18 @@ onBeforeUnmount(() => {
           <span class="text-lg font-bold text-textMain">KITE</span>
         </router-link>
         <button
+          @click="cycleLocale"
+          :title="localeTitle"
+          :aria-label="localeTitle"
+          class="ml-auto p-1.5 rounded-md text-textMuted hover:text-textMain dark:hover:bg-white/5 hover:bg-black/5 transition-colors"
+        >
+          <Languages class="w-4 h-4" />
+        </button>
+        <button
           @click="cycleTheme"
           :title="themeTitle"
           :aria-label="themeTitle"
-          class="ml-auto p-1.5 rounded-md text-textMuted hover:text-textMain dark:hover:bg-white/5 hover:bg-black/5 transition-colors"
+          class="ml-1 p-1.5 rounded-md text-textMuted hover:text-textMain dark:hover:bg-white/5 hover:bg-black/5 transition-colors"
         >
           <component :is="themeIcon" class="w-4 h-4" />
         </button>

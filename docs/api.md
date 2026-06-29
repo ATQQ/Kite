@@ -317,6 +317,69 @@ Authorization: Bearer <YOUR_ADMIN_TOKEN>
   }
   ```
 
+### 5.5 测试 Webhook
+* **URL**: `/api/settings/webhook-test`
+* **Method**: `POST`
+* **Body**: 无（读取当前已保存的 `webhook_url`）
+* **行为**: 使用当前 `webhook_url` 同步发送一次测试消息，按 host 自动选择 payload 形态（飞书 / 钉钉 / 通用 JSON），5 秒超时 + 至多 1 次重试，等待结果后返回。
+* **Response**:
+  ```json
+  {
+    "success": true,
+    "statusCode": 200,
+    "durationMs": 234,
+    "attempts": 1
+  }
+  ```
+* **URL 未配置**: `400`，`{ "success": false, "error": "webhook_url 未配置，..." }`
+
+### 5.6 出站 Webhook 通知（通知形态参考）
+
+`kite serve` 内置在 6 个时机向用户配置的 `webhook_url` 发送 POST 通知，**fire-and-forget**，不阻塞部署主流程；失败/超时会写入 `audit_logs`（`action=webhook.send`），URL 仅以 host 形式记录。
+
+**触发时机**
+
+| trigger | event | 说明 |
+|---|---|---|
+| `cli` | `deploy_success` | 普通部署（含 `kite push` 与 Web 端上传）成功 |
+| `cli` | `deploy_failure` | 普通部署失败（含 `postDeploy` 同步异常） |
+| `async_post_deploy` | `deploy_failure` | 异步 `postDeploy` 子进程非 0 退出 |
+| `rollback` | `deploy_success` | 回滚成功（`deployment.rollbackOf` 指向被回滚的部署 id） |
+| `rollback` | `deploy_failure` | 回滚失败 |
+| `manual` | `deploy_success` / `deploy_failure` | 在 Web 端「标记为成功 / 失败」手动修正状态 |
+
+只有事件 key 命中 `webhook_events`（默认 `deploy_success,deploy_failure`）才会发送。
+
+**Payload 形态（按 URL host 自动判定）**
+
+* **飞书** (`*.feishu.cn` / `*.larksuite.com`)：`msg_type=post` 富文本，标题/正文均含 "Kite"。
+* **钉钉** (`*.dingtalk.com`)：`msgtype=markdown`，`title` 与 `text` 均强制带 "Kite" 关键词，便于配置「自定义关键词 Kite」放行。
+* **其它 URL**：通用 JSON，示例：
+
+```json
+{
+  "event": "deploy_success",
+  "trigger": "cli",
+  "timestamp": "2026-06-27T09:00:00.000Z",
+  "project": { "id": "proj_demo", "name": "demo-app", "deployPath": "/srv/demo" },
+  "deployment": {
+    "id": "deploy-1",
+    "status": "success",
+    "duration": "1.5s",
+    "startTime": "2026-06-27T08:59:58.500Z",
+    "endTime": "2026-06-27T09:00:00.000Z",
+    "rollbackOf": null
+  },
+  "errorMessage": null
+}
+```
+
+**投递策略**
+
+* 超时：单次请求 5 秒（基于 `AbortSignal`）。
+* 重试：服务端 5xx / 网络错误 / 超时 → 重试 1 次（共 2 次尝试）；4xx（除 408/429）不重试。
+* 安全：日志与 `audit_logs` 中 URL 仅保留 host，**不输出 token / query**。
+
 ## 6. 健康检查接口
 
 ### 6.1 公开健康探针

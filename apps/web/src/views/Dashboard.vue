@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, computed, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useProjectStore } from '../store/project'
 import { Activity, Server, Clock, AlertCircle, AlertTriangle, Cpu, MemoryStick, HardDrive } from 'lucide-vue-next'
@@ -8,6 +9,7 @@ import DeployHeatmap from '../components/DeployHeatmap.vue'
 import SuccessRateChart from '../components/SuccessRateChart.vue'
 import { useIntervalRaf } from '../composables/useIntervalRaf'
 
+const { t } = useI18n()
 const projectStore = useProjectStore()
 const router = useRouter()
 
@@ -100,10 +102,10 @@ const avgDurationText = computed(() => {
 })
 
 const stats = computed(() => [
-  { label: '总计项目数', value: projectStore.projects.length, icon: Server, color: 'text-primary' },
-  { label: '成功部署', value: projectStore.logs.filter(l => l.status === 'success').length, icon: Activity, color: 'text-success' },
-  { label: '失败任务', value: projectStore.logs.filter(l => l.status === 'failed').length, icon: AlertCircle, color: 'text-danger' },
-  { label: '平均耗时', value: avgDurationText.value, icon: Clock, color: 'text-blue-400' },
+  { label: t('dashboard.statTotalProjects'), value: projectStore.projects.length, icon: Server, color: 'text-primary' },
+  { label: t('dashboard.statSuccess'), value: projectStore.logs.filter(l => l.status === 'success').length, icon: Activity, color: 'text-success' },
+  { label: t('dashboard.statFailed'), value: projectStore.logs.filter(l => l.status === 'failed').length, icon: AlertCircle, color: 'text-danger' },
+  { label: t('dashboard.statAvgDuration'), value: avgDurationText.value, icon: Clock, color: 'text-blue-400' },
 ])
 
 function goToLog(id: string) {
@@ -122,9 +124,9 @@ function pctText(n: number): string {
 <template>
   <div class="space-y-6 max-w-7xl mx-auto">
     <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-8">
-      <h1 class="text-2xl font-bold text-textMain tracking-tight">Kite 概览</h1>
+      <h1 class="text-2xl font-bold text-textMain tracking-tight">{{ t('dashboard.pageTitle') }}</h1>
       <div class="text-sm text-textMuted bg-panel px-3 py-1 rounded-full border border-border self-start sm:self-auto">
-        当前版本：v{{ APP_VERSION }}
+        {{ t('dashboard.currentVersion', { version: APP_VERSION }) }}
       </div>
     </div>
 
@@ -151,80 +153,80 @@ function pctText(n: number): string {
         <div>
           <h3 class="text-base font-semibold text-textMain flex items-center gap-2">
             <Server class="w-4 h-4 text-primary" />
-            服务器资源
+            {{ t('dashboard.serverResources') }}
           </h3>
           <p class="text-xs text-textMuted mt-1">
-            每 5 秒刷新 · 切到后台自动暂停
+            {{ t('dashboard.serverResourcesHint') }}
             <span v-if="sysRes" class="ml-2 font-mono">
-              {{ sysRes.host.hostname }} · {{ sysRes.host.platform }}/{{ sysRes.host.arch }} · {{ sysRes.host.cpuCount }} 核
+              {{ sysRes.host.hostname }} · {{ sysRes.host.platform }}/{{ sysRes.host.arch }} · {{ t('dashboard.serverResourcesCores', { count: sysRes.host.cpuCount }) }}
             </span>
           </p>
         </div>
         <div v-if="sysRes" class="text-xs text-textMuted font-mono">
-          采集于 {{ new Date(sysRes.collectedAt).toLocaleTimeString() }}
+          {{ t('dashboard.collectedAt', { time: new Date(sysRes.collectedAt).toLocaleTimeString() }) }}
         </div>
       </div>
-      <div v-if="!sysRes" class="text-sm text-textMuted py-6 text-center">加载中…</div>
+      <div v-if="!sysRes" class="text-sm text-textMuted py-6 text-center">{{ t('dashboard.loading') }}</div>
       <div v-else class="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
         <!-- 整机 CPU -->
         <div class="bg-base border border-border rounded-lg p-3">
           <div class="flex items-center justify-between text-xs text-textMuted">
-            <span class="flex items-center gap-1.5"><Cpu class="w-3.5 h-3.5" />整机 CPU</span>
+            <span class="flex items-center gap-1.5"><Cpu class="w-3.5 h-3.5" />{{ t('dashboard.cpuTotal') }}</span>
             <span class="font-mono text-textMain">{{ fmtPct(sysRes.cpu.percent) }}</span>
           </div>
           <div class="mt-2 h-1.5 bg-border rounded-full overflow-hidden">
             <div class="h-full rounded-full transition-all" :class="barColor(sysRes.cpu.percent)" :style="{ width: `${Math.min(100, sysRes.cpu.percent ?? 0)}%` }"></div>
           </div>
-          <p class="mt-2 text-[11px] text-textMuted font-mono">负载: {{ sysRes.host.loadAvg.map(n => n.toFixed(2)).join(' / ') }}</p>
+          <p class="mt-2 text-[11px] text-textMuted font-mono">{{ t('dashboard.load', { value: sysRes.host.loadAvg.map(n => n.toFixed(2)).join(' / ') }) }}</p>
         </div>
         <!-- 整机内存 -->
         <div class="bg-base border border-border rounded-lg p-3">
           <div class="flex items-center justify-between text-xs text-textMuted">
-            <span class="flex items-center gap-1.5"><MemoryStick class="w-3.5 h-3.5" />整机内存</span>
+            <span class="flex items-center gap-1.5"><MemoryStick class="w-3.5 h-3.5" />{{ t('dashboard.memoryTotal') }}</span>
             <span class="font-mono text-textMain">{{ fmtPct(sysRes.memory.percentUsed) }}</span>
           </div>
           <div class="mt-2 h-1.5 bg-border rounded-full overflow-hidden">
             <div class="h-full rounded-full transition-all" :class="barColor(sysRes.memory.percentUsed)" :style="{ width: `${sysRes.memory.percentUsed}%` }"></div>
           </div>
-          <p class="mt-2 text-[11px] text-textMuted font-mono">已用 {{ fmtBytes(sysRes.memory.usedBytes) }} · 可用 {{ fmtBytes(sysRes.memory.availableBytes) }} / 总 {{ fmtBytes(sysRes.memory.totalBytes) }}</p>
+          <p class="mt-2 text-[11px] text-textMuted font-mono">{{ t('dashboard.memUsage', { used: fmtBytes(sysRes.memory.usedBytes), avail: fmtBytes(sysRes.memory.availableBytes), total: fmtBytes(sysRes.memory.totalBytes) }) }}</p>
         </div>
         <!-- 整机磁盘 -->
         <div class="bg-base border border-border rounded-lg p-3">
           <div class="flex items-center justify-between text-xs text-textMuted">
-            <span class="flex items-center gap-1.5"><HardDrive class="w-3.5 h-3.5" />磁盘（KITE_HOME）</span>
+            <span class="flex items-center gap-1.5"><HardDrive class="w-3.5 h-3.5" />{{ t('dashboard.diskTotal') }}</span>
             <span class="font-mono text-textMain">{{ fmtPct(sysRes.disk.percentUsed) }}</span>
           </div>
           <div class="mt-2 h-1.5 bg-border rounded-full overflow-hidden">
             <div class="h-full rounded-full transition-all" :class="barColor(sysRes.disk.percentUsed)" :style="{ width: `${sysRes.disk.percentUsed ?? 0}%` }"></div>
           </div>
-          <p class="mt-2 text-[11px] text-textMuted font-mono">空闲 {{ fmtBytes(sysRes.disk.freeBytes) }} / 总 {{ fmtBytes(sysRes.disk.totalBytes) }}</p>
+          <p class="mt-2 text-[11px] text-textMuted font-mono">{{ t('dashboard.diskUsage', { free: fmtBytes(sysRes.disk.freeBytes), total: fmtBytes(sysRes.disk.totalBytes) }) }}</p>
         </div>
         <!-- Kite 进程 CPU -->
         <div class="bg-base border border-border rounded-lg p-3">
           <div class="flex items-center justify-between text-xs text-textMuted">
-            <span class="flex items-center gap-1.5"><Cpu class="w-3.5 h-3.5" />Kite 进程 CPU</span>
+            <span class="flex items-center gap-1.5"><Cpu class="w-3.5 h-3.5" />{{ t('dashboard.cpuProcess') }}</span>
             <span class="font-mono text-textMain">{{ fmtPct(sysRes.process.cpuPercent) }}</span>
           </div>
           <div class="mt-2 h-1.5 bg-border rounded-full overflow-hidden">
             <div class="h-full rounded-full transition-all" :class="barColor(sysRes.process.cpuPercent)" :style="{ width: `${Math.min(100, sysRes.process.cpuPercent ?? 0)}%` }"></div>
           </div>
-          <p class="mt-2 text-[11px] text-textMuted font-mono">PID {{ sysRes.process.pid }} · {{ sysRes.process.runtime }} {{ sysRes.process.runtimeVersion }}</p>
+          <p class="mt-2 text-[11px] text-textMuted font-mono">{{ t('dashboard.processInfo', { pid: sysRes.process.pid, runtime: sysRes.process.runtime, version: sysRes.process.runtimeVersion }) }}</p>
         </div>
         <!-- Kite 进程内存 -->
         <div class="bg-base border border-border rounded-lg p-3">
           <div class="flex items-center justify-between text-xs text-textMuted">
-            <span class="flex items-center gap-1.5"><MemoryStick class="w-3.5 h-3.5" />Kite 进程内存</span>
+            <span class="flex items-center gap-1.5"><MemoryStick class="w-3.5 h-3.5" />{{ t('dashboard.memoryProcess') }}</span>
             <span class="font-mono text-textMain">{{ fmtBytes(sysRes.process.memoryRssBytes) }}</span>
           </div>
-          <p class="mt-2 text-[11px] text-textMuted font-mono">Heap {{ fmtBytes(sysRes.process.memoryHeapUsedBytes) }}</p>
+          <p class="mt-2 text-[11px] text-textMuted font-mono">{{ t('dashboard.heap', { value: fmtBytes(sysRes.process.memoryHeapUsedBytes) }) }}</p>
         </div>
         <!-- 运行时长 -->
         <div class="bg-base border border-border rounded-lg p-3">
           <div class="flex items-center justify-between text-xs text-textMuted">
-            <span class="flex items-center gap-1.5"><Clock class="w-3.5 h-3.5" />运行时长</span>
+            <span class="flex items-center gap-1.5"><Clock class="w-3.5 h-3.5" />{{ t('dashboard.uptime') }}</span>
           </div>
-          <p class="mt-2 text-sm font-mono text-textMain">进程 {{ fmtUptime(sysRes.process.uptimeSec) }}</p>
-          <p class="mt-1 text-[11px] text-textMuted font-mono">主机 {{ fmtUptime(sysRes.host.uptimeSec) }}</p>
+          <p class="mt-2 text-sm font-mono text-textMain">{{ t('dashboard.procUptime', { value: fmtUptime(sysRes.process.uptimeSec) }) }}</p>
+          <p class="mt-1 text-[11px] text-textMuted font-mono">{{ t('dashboard.hostUptime', { value: fmtUptime(sysRes.host.uptimeSec) }) }}</p>
         </div>
       </div>
     </div>
@@ -242,12 +244,12 @@ function pctText(n: number): string {
           <div>
             <h3 class="text-base font-semibold text-textMain flex items-center gap-2">
               <AlertTriangle class="w-4 h-4 text-danger" />
-              失败率 TopN
+              {{ t('dashboard.failureTopN') }}
             </h3>
-            <p class="text-xs text-textMuted mt-1">近 30 天 · 至少 3 次部署</p>
+            <p class="text-xs text-textMuted mt-1">{{ t('dashboard.failureTopNHint') }}</p>
           </div>
         </div>
-        <div v-if="statsLoading" class="text-sm text-textMuted py-6 text-center">加载中…</div>
+        <div v-if="statsLoading" class="text-sm text-textMuted py-6 text-center">{{ t('dashboard.loading') }}</div>
         <ul v-else-if="failureItems.length" class="space-y-2">
           <li
             v-for="item in failureItems"
@@ -257,7 +259,7 @@ function pctText(n: number): string {
           >
             <div class="min-w-0">
               <p class="text-sm font-medium text-textMain truncate">{{ item.projectName }}</p>
-              <p class="text-xs text-textMuted font-mono mt-0.5">{{ item.failed }} / {{ item.total }} 失败</p>
+              <p class="text-xs text-textMuted font-mono mt-0.5">{{ t('dashboard.failureSubtext', { failed: item.failed, total: item.total }) }}</p>
             </div>
             <span
               class="font-mono text-sm shrink-0 ml-3"
@@ -265,22 +267,22 @@ function pctText(n: number): string {
             >{{ pctText(item.rate) }}</span>
           </li>
         </ul>
-        <div v-else class="text-sm text-textMuted py-6 text-center">暂无符合条件的项目</div>
+        <div v-else class="text-sm text-textMuted py-6 text-center">{{ t('dashboard.failureEmpty') }}</div>
       </div>
     </div>
 
     <!-- Recent Activity -->
     <div class="mt-8">
-      <h2 class="text-lg font-semibold text-textMain mb-4">最近部署活动</h2>
+      <h2 class="text-lg font-semibold text-textMain mb-4">{{ t('dashboard.recentDeployActivity') }}</h2>
       <div class="bg-panel border border-border rounded-xl overflow-hidden shadow-sm">
         <ul class="divide-y divide-border">
-          <li v-if="recentLogs.length === 0" class="px-6 py-8 text-center text-textMuted">暂无部署活动</li>
+          <li v-if="recentLogs.length === 0" class="px-6 py-8 text-center text-textMuted">{{ t('dashboard.noActivity') }}</li>
           <li v-for="log in recentLogs" :key="log.id" @click="goToLog(log.id)" class="px-4 sm:px-6 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 dark:hover:bg-white/5 hover:bg-black/5 transition-colors cursor-pointer">
             <div class="flex items-center space-x-4 min-w-0">
               <div class="w-2 h-2 rounded-full shadow-[0_0_8px_currentColor] shrink-0" :class="log.status === 'success' ? 'bg-success text-success' : log.status === 'failed' ? 'bg-danger text-danger' : 'bg-primary text-primary'"></div>
               <div class="min-w-0">
-                <p class="text-sm font-medium text-textMain truncate">部署{{ log.status === 'success' ? '完成' : log.status === 'failed' ? '失败' : '中' }}: <span class="font-mono text-primary ml-1">{{ log.projectName }}</span></p>
-                <p class="text-xs text-textMuted mt-1 truncate">触发源: {{ log.triggerSource }}</p>
+                <p class="text-sm font-medium text-textMain truncate">{{ t('dashboard.deployStatusLabel', { label: log.status === 'success' ? t('dashboard.deployDone') : log.status === 'failed' ? t('dashboard.deployFailedShort') : t('dashboard.deployRunning') }) }}<span class="font-mono text-primary ml-1">{{ log.projectName }}</span></p>
+                <p class="text-xs text-textMuted mt-1 truncate">{{ t('dashboard.triggerSource', { source: log.triggerSource }) }}</p>
               </div>
             </div>
             <div class="text-left sm:text-right pl-6 sm:pl-0 shrink-0">

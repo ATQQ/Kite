@@ -382,6 +382,18 @@ export const useProjectStore = defineStore('project', () => {
     }
   }
 
+  async function testWebhook() {
+    try {
+      return await apiFetch('/settings/webhook-test', {
+        method: 'POST',
+        body: JSON.stringify({}),
+      })
+    } catch (e: any) {
+      console.error('Failed to test webhook', e)
+      return { success: false, error: e?.message || String(e) }
+    }
+  }
+
   async function changeAdminToken(oldToken: string, newToken: string) {
     try {
       const data = await apiFetch('/settings/token', {
@@ -795,6 +807,7 @@ export const useProjectStore = defineStore('project', () => {
     generateToken,
     fetchSettings,
     updateSettings,
+    testWebhook,
     changeAdminToken,
     fetchSystemStatus,
     fetchHealthDetail,

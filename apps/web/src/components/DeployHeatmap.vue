@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 interface Cell { date: string; count: number }
 
@@ -8,7 +9,9 @@ const props = defineProps<{
   loading?: boolean
 }>()
 
-const WEEK_LABELS = ['日', '一', '二', '三', '四', '五', '六']
+const { t, tm } = useI18n()
+
+const WEEK_LABELS = computed(() => tm('heatmap.weekdayShort') as string[])
 
 const grid = computed(() => {
   if (!props.cells.length) return { columns: [] as Array<Array<Cell | null>>, max: 0 }
@@ -39,7 +42,7 @@ function levelClass(count: number, max: number): string {
 
 function tooltip(cell: Cell | null): string {
   if (!cell) return ''
-  return `${cell.date} · ${cell.count} 次部署`
+  return t('heatmap.cellTooltip', { date: cell.date, count: cell.count })
 }
 
 const totalCount = computed(() => props.cells.reduce((s, c) => s + c.count, 0))
@@ -49,22 +52,22 @@ const totalCount = computed(() => props.cells.reduce((s, c) => s + c.count, 0))
   <div class="bg-panel border border-border rounded-xl p-4 sm:p-6 shadow-sm">
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
       <div>
-        <h3 class="text-base font-semibold text-textMain">部署频次热力图</h3>
-        <p class="text-xs text-textMuted mt-1">最近 {{ cells.length }} 天 · 共 {{ totalCount }} 次</p>
+        <h3 class="text-base font-semibold text-textMain">{{ t('heatmap.subtitle') }}</h3>
+        <p class="text-xs text-textMuted mt-1">{{ t('heatmap.subtitleDetail', { days: cells.length, count: totalCount }) }}</p>
       </div>
       <div class="flex items-center gap-1 text-xs text-textMuted">
-        <span class="mr-1">少</span>
+        <span class="mr-1">{{ t('heatmap.less') }}</span>
         <span class="w-3 h-3 rounded-sm bg-border/40"></span>
         <span class="w-3 h-3 rounded-sm bg-emerald-700/60"></span>
         <span class="w-3 h-3 rounded-sm bg-emerald-600/70"></span>
         <span class="w-3 h-3 rounded-sm bg-emerald-500/80"></span>
         <span class="w-3 h-3 rounded-sm bg-emerald-400"></span>
-        <span class="ml-1">多</span>
+        <span class="ml-1">{{ t('heatmap.more') }}</span>
       </div>
     </div>
 
-    <div v-if="loading" class="text-sm text-textMuted py-8 text-center">加载中…</div>
-    <div v-else-if="!cells.length" class="text-sm text-textMuted py-8 text-center">暂无数据</div>
+    <div v-if="loading" class="text-sm text-textMuted py-8 text-center">{{ t('heatmap.loading') }}</div>
+    <div v-else-if="!cells.length" class="text-sm text-textMuted py-8 text-center">{{ t('heatmap.empty') }}</div>
     <div v-else class="flex gap-3 overflow-x-auto">
       <div class="flex flex-col justify-around text-[10px] text-textMuted pt-1 pb-1 select-none">
         <span v-for="label in WEEK_LABELS" :key="label" class="h-3 leading-3">{{ label }}</span>
@@ -79,7 +82,7 @@ const totalCount = computed(() => props.cells.reduce((s, c) => s + c.count, 0))
               cell ? levelClass(cell.count, grid.max) : 'bg-transparent'
             ]"
             :title="tooltip(cell)"
-            :aria-label="tooltip(cell) || '无数据'"
+            :aria-label="tooltip(cell) || t('heatmap.ariaNoData')"
           />
         </div>
       </div>

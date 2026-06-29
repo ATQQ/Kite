@@ -3,6 +3,9 @@ import {
   ChevronRight, Folder, FolderOpen, FileText, FileCode, FileImage,
   FileJson, FileCog, Loader2
 } from 'lucide-vue-next'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
 
 interface TreeNode {
   name: string
@@ -65,7 +68,7 @@ function getIcon(name: string, isDir: boolean, expanded?: boolean) {
     <div v-if="node.isDir && node.expanded">
       <div v-if="node.loading" class="py-1 text-textMuted text-xs flex items-center" :style="{ paddingLeft: (depth * 16 + 28) + 'px' }">
         <Loader2 class="w-3 h-3 animate-spin mr-1" />
-        加载中...
+        {{ t('files.tree.loading') }}
       </div>
       <template v-else-if="node.children">
         <FileTreeNode
