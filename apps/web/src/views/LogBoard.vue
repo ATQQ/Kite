@@ -4,9 +4,11 @@ import { useRoute, useRouter } from 'vue-router'
 import { useProjectStore } from '../store/project'
 import { ansiToHtml } from '../utils/ansi'
 import { useDeployStream } from '../composables/useDeployStream'
-import { Terminal, CheckCircle2, XCircle, Clock, RefreshCw, AlertCircle, RotateCcw, Archive, ArchiveX, Copy, CheckCheck, Wrench } from 'lucide-vue-next'
+import { Terminal, CheckCircle2, XCircle, Clock, RefreshCw, AlertCircle, RotateCcw, Archive, ArchiveX, Copy, CheckCheck, Wrench, GitBranch, ListTree, FileText } from 'lucide-vue-next'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
+import DeploymentTimeline from '../components/DeploymentTimeline.vue'
 import { useToast } from '../composables/useToast'
+import { parseDeploymentEvents, splitTimestamp } from '../utils/deployment-timeline'
 
 const projectStore = useProjectStore()
 const route = useRoute()
@@ -141,6 +143,106 @@ const displayLines = computed(() => {
   return selectedLog.value?.output?.split('\n') || []
 })
 
+const displayLineRows = computed(() => {
+  return displayLines.value.map((line: string) => {
+    const split = splitTimestamp(line)
+    return {
+      raw: line,
+      time: formatLineTime(split.timestamp),
+      html: ansiToHtml(split.timestamp !== null ? split.rest : line),
+    }
+  })
+})
+
+// === Timeline Tab (F22) ===
+type TabView = 'timeline' | 'raw'
+const activeView = ref<TabView>('timeline')
+
+function syncViewToQuery(v: TabView) {
+  const current = typeof route.query.view === 'string' ? route.query.view : ''
+  if (current === v) return
+  const nextQuery = { ...route.query }
+  if (v === 'timeline') delete nextQuery.view
+  else nextQuery.view = v
+  router.replace({ query: nextQuery })
+}
+
+watch(() => route.query.view, (raw) => {
+  const v = raw === 'raw' ? 'raw' : 'timeline'
+  if (v !== activeView.value) activeView.value = v
+}, { immediate: true })
+
+function setView(v: TabView) {
+  activeView.value = v
+  syncViewToQuery(v)
+}
+
+const timelineEvents = computed(() => {
+  const log: any = selectedLog.value
+  if (!log) return []
+  const output = (isRunning.value && streamLines.value.length > 0)
+    ? streamLines.value.join('\n')
+    : (log.output || '')
+  return parseDeploymentEvents({
+    output,
+    startTimeIso: log.startTime,
+    endTimeIso: log.endTime ?? null,
+    status: log.status,
+    triggerSource: log.triggerSource,
+  })
+})
+
+const rollbackSourceLog = computed(() => {
+  const log: any = selectedLog.value
+  if (!log?.rollbackOf) return null
+  return projectStore.logs.find(l => l.id === log.rollbackOf) || null
+})
+
+const rollbackTargets = computed(() => {
+  const log: any = selectedLog.value
+  if (!log) return [] as any[]
+  return projectStore.logs.filter((l: any) => l.rollbackOf === log.id)
+})
+
+const rawLogContainer = ref<HTMLElement | null>(null)
+const highlightedLineIndex = ref<number | null>(null)
+let highlightTimer: number | null = null
+
+async function jumpToRawLine(rawLineIndex: number) {
+  setView('raw')
+  highlightedLineIndex.value = rawLineIndex
+  if (highlightTimer !== null) {
+    clearTimeout(highlightTimer)
+    highlightTimer = null
+  }
+  await nextTick()
+  const container = rawLogContainer.value
+  if (container) {
+    const target = container.querySelector(`[data-line-index="${rawLineIndex}"]`) as HTMLElement | null
+    if (target && typeof target.scrollIntoView === 'function') {
+      target.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    }
+  }
+  highlightTimer = window.setTimeout(() => {
+    highlightedLineIndex.value = null
+    highlightTimer = null
+  }, 1500)
+}
+
+function jumpToDeployment(id: string) {
+  const nextQuery = { ...route.query, id }
+  router.replace({ query: nextQuery })
+  selectById(id)
+  setView('timeline')
+}
+
+onBeforeUnmount(() => {
+  if (highlightTimer !== null) {
+    clearTimeout(highlightTimer)
+    highlightTimer = null
+  }
+})
+
 const selectLog = (log: any) => {
   selectedLog.value = log
 }
@@ -152,8 +254,14 @@ const refreshLogs = async () => {
   }
 }
 
-function renderLine(line: string): string {
-  return ansiToHtml(line)
+function formatLineTime(ms: number | null): string {
+  if (ms === null) return ''
+  const d = new Date(ms)
+  const hh = String(d.getHours()).padStart(2, '0')
+  const mm = String(d.getMinutes()).padStart(2, '0')
+  const ss = String(d.getSeconds()).padStart(2, '0')
+  const mmm = String(d.getMilliseconds()).padStart(3, '0')
+  return `${hh}:${mm}:${ss}.${mmm}`
 }
 
 const canRollback = computed(() => {
@@ -161,6 +269,7 @@ const canRollback = computed(() => {
   if (!log) return false
   if (log.status === 'running') return false
   if (log.triggerSource === 'rollback') return false
+  if (isCurrentVersion(log)) return false
   return !!log.artifactPath
 })
 
@@ -169,6 +278,7 @@ const rollbackDisabledReason = computed(() => {
   if (!log) return ''
   if (log.status === 'running') return '部署进行中，无法回滚'
   if (log.triggerSource === 'rollback') return '回滚记录不可再被回滚'
+  if (isCurrentVersion(log)) return ''
   if (!log.artifactPath) return '该版本归档已被清理或过早，无法回滚'
   return ''
 })
@@ -501,23 +611,110 @@ async function confirmMark() {
           </div>
         </div>
 
-        <!-- Terminal Content -->
-        <div class="flex-1 p-4 overflow-y-auto bg-[#09090b] text-[#f4f4f5] leading-relaxed selection:bg-primary/30">
-          <div v-if="selectedLog" class="space-y-1 whitespace-pre-wrap break-all">
-            <template v-for="(line, index) in displayLines" :key="index">
-              <div class="flex dark:hover:bg-white/5 hover:bg-black/5 px-2 -mx-2 rounded transition-colors group">
-                <span class="w-8 text-right mr-4 text-textMuted/30 select-none group-hover:text-textMuted/50 transition-colors">{{ Number(index) + 1 }}</span>
-                <span v-html="renderLine(line)"></span>
-              </div>
-            </template>
-            <div v-if="selectedLog.status === 'running'" class="flex px-2 -mx-2 mt-2">
-              <span class="w-8 text-right mr-4 text-textMuted/30 select-none">{{ displayLines.length + 1 }}</span>
-              <span class="w-2 h-4 bg-textMain animate-pulse inline-block align-middle"></span>
+        <!-- Tab bar (F22: Timeline / Raw Log) -->
+        <div v-if="selectedLog" class="border-b border-border bg-panel/60 flex items-center gap-1 px-3 shrink-0 font-sans">
+          <button
+            type="button"
+            class="flex items-center gap-1.5 px-3 py-2 text-xs font-medium border-b-2 transition-colors"
+            :class="activeView === 'timeline' ? 'border-primary text-primary' : 'border-transparent text-textMuted hover:text-textMain'"
+            @click="setView('timeline')"
+          >
+            <ListTree class="w-3.5 h-3.5" />
+            时间线
+          </button>
+          <button
+            type="button"
+            class="flex items-center gap-1.5 px-3 py-2 text-xs font-medium border-b-2 transition-colors"
+            :class="activeView === 'raw' ? 'border-primary text-primary' : 'border-transparent text-textMuted hover:text-textMain'"
+            @click="setView('raw')"
+          >
+            <FileText class="w-3.5 h-3.5" />
+            原始日志
+            <span class="text-[10px] text-textMuted/70 font-mono">({{ displayLines.length }})</span>
+          </button>
+        </div>
+
+        <!-- Rollback ChainBar (F22) -->
+        <div
+          v-if="selectedLog && (rollbackSourceLog || rollbackTargets.length > 0)"
+          class="px-4 py-2 border-b border-border bg-panel/40 text-xs text-textMuted font-sans flex flex-wrap items-center gap-x-3 gap-y-1 shrink-0"
+        >
+          <template v-if="rollbackSourceLog">
+            <GitBranch class="w-3.5 h-3.5 text-yellow-400" />
+            <span>回滚自</span>
+            <button
+              type="button"
+              class="inline-flex items-center px-1.5 py-0.5 rounded bg-base border border-border font-mono text-[10px] text-yellow-400 hover:border-yellow-400/60 transition-colors"
+              :title="`跳转到部署 ${rollbackSourceLog.id}`"
+              @click="jumpToDeployment(rollbackSourceLog.id)"
+            >#{{ shortId(rollbackSourceLog.id) }} ↗</button>
+            <span class="text-textMuted/60">({{ rollbackSourceLog.projectName }})</span>
+          </template>
+          <template v-if="rollbackTargets.length > 0">
+            <span v-if="rollbackSourceLog" class="text-textMuted/30">·</span>
+            <RotateCcw class="w-3.5 h-3.5 text-yellow-400" />
+            <span>被</span>
+            <button
+              v-for="t in rollbackTargets"
+              :key="t.id"
+              type="button"
+              class="inline-flex items-center px-1.5 py-0.5 rounded bg-base border border-border font-mono text-[10px] text-yellow-400 hover:border-yellow-400/60 transition-colors"
+              :title="`跳转到部署 ${t.id}`"
+              @click="jumpToDeployment(t.id)"
+            >#{{ shortId(t.id) }} ↗</button>
+            <span>回滚</span>
+            <span class="text-textMuted/40 italic" title="反扫范围仅限当前已加载的部署列表">·仅在已加载列表内反扫</span>
+          </template>
+        </div>
+
+        <!-- Tab Content -->
+        <div class="flex-1 min-h-0 relative">
+          <!-- Timeline view -->
+          <div
+            v-show="activeView === 'timeline'"
+            class="absolute inset-0 overflow-y-auto p-4 bg-[#09090b]"
+          >
+            <DeploymentTimeline
+              v-if="selectedLog"
+              :events="timelineEvents"
+              @jump="jumpToRawLine"
+            />
+            <div v-else class="h-full flex flex-col items-center justify-center text-textMuted font-sans">
+              <AlertCircle class="w-12 h-12 mb-4 opacity-50" />
+              <p>请选择左侧部署记录以查看时间线</p>
             </div>
           </div>
-          <div v-else class="h-full flex flex-col items-center justify-center text-textMuted font-sans">
-            <AlertCircle class="w-12 h-12 mb-4 opacity-50" />
-            <p>请选择左侧部署记录以查看详细终端输出</p>
+
+          <!-- Raw log view (kept mounted with v-show to preserve scroll) -->
+          <div
+            v-show="activeView === 'raw'"
+            ref="rawLogContainer"
+            class="absolute inset-0 p-4 overflow-y-auto bg-[#09090b] text-[#f4f4f5] leading-relaxed selection:bg-primary/30"
+          >
+            <div v-if="selectedLog" class="space-y-1 whitespace-pre-wrap break-all">
+              <template v-for="(row, index) in displayLineRows" :key="index">
+                <div
+                  class="flex dark:hover:bg-white/5 hover:bg-black/5 px-2 -mx-2 rounded transition-colors group"
+                  :class="highlightedLineIndex === index ? 'bg-primary/20 ring-1 ring-primary/40' : ''"
+                  :data-line-index="index"
+                >
+                  <span class="w-8 text-right mr-4 text-textMuted/30 select-none group-hover:text-textMuted/50 transition-colors">{{ Number(index) + 1 }}</span>
+                  <span
+                    v-if="row.time"
+                    class="text-textMuted/40 select-none mr-3 shrink-0 font-mono"
+                  >{{ row.time }}</span>
+                  <span v-html="row.html"></span>
+                </div>
+              </template>
+              <div v-if="selectedLog.status === 'running'" class="flex px-2 -mx-2 mt-2">
+                <span class="w-8 text-right mr-4 text-textMuted/30 select-none">{{ displayLines.length + 1 }}</span>
+                <span class="w-2 h-4 bg-textMain animate-pulse inline-block align-middle"></span>
+              </div>
+            </div>
+            <div v-else class="h-full flex flex-col items-center justify-center text-textMuted font-sans">
+              <AlertCircle class="w-12 h-12 mb-4 opacity-50" />
+              <p>请选择左侧部署记录以查看详细终端输出</p>
+            </div>
           </div>
         </div>
       </div>

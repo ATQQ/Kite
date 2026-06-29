@@ -740,9 +740,10 @@ export const deployRoutes = new Elysia()
 
       let fullOutput = '';
       const appendLog = async (text: string) => {
-        fullOutput += text + '\n';
+        const line = `${new Date().toISOString()} ${text}`;
+        fullOutput += line + '\n';
         await db.deployments.update(deploymentRow.id, { output: fullOutput });
-        broadcastToSubscribers(deploymentRow.id, 'log', text);
+        broadcastToSubscribers(deploymentRow.id, 'log', line);
       };
 
       // Stream NDJSON response to CLI
@@ -1183,7 +1184,7 @@ export const deployRoutes = new Elysia()
       ? ((endMs - startMs) / 1000).toFixed(1) + 's'
       : (deployment.duration || '0s');
 
-    const markLine = `[Kite] Manually marked as ${nextStatus} by admin at ${endTimeIso}`;
+    const markLine = `${endTimeIso} [Kite] Manually marked as ${nextStatus} by admin at ${endTimeIso}`;
     const nextOutput = deployment.output ? `${deployment.output}\n${markLine}` : markLine;
 
     await db.deployments.update(deployment.id, {
@@ -1296,9 +1297,10 @@ export const deployRoutes = new Elysia()
 
     let fullOutput = '';
     const appendLog = async (text: string) => {
-      fullOutput += text + '\n';
+      const line = `${new Date().toISOString()} ${text}`;
+      fullOutput += line + '\n';
       await db.deployments.update(newDeployId, { output: fullOutput });
-      broadcastToSubscribers(newDeployId, 'log', text);
+      broadcastToSubscribers(newDeployId, 'log', line);
     };
 
     const startTime = Date.now();
