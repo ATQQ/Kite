@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { LayoutDashboard, FolderArchive, TerminalSquare, ScrollText, Database, HardDrive, Settings, LogOut, Sun, Moon, Monitor, Menu, X, Terminal as TerminalIcon, Languages, Github, Scale, Star, Search } from 'lucide-vue-next'
+import { LayoutDashboard, FolderArchive, TerminalSquare, ScrollText, Database, HardDrive, Settings, LogOut, Sun, Moon, Monitor, Menu, X, Terminal as TerminalIcon, Languages, Github, Scale, Star, Search, BarChart3 } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { useProjectStore } from '../store/project'
 import { useThemeStore, type ThemeMode } from '../store/theme'
@@ -148,7 +148,7 @@ onBeforeUnmount(() => {
           <LogOut class="w-5 h-5 mr-3" />
           {{ t('nav.logout') }}
         </button>
-        <div class="mt-3 pt-3 border-t border-border flex items-center justify-between text-[11px] text-textMuted">
+        <div class="mt-3 pt-3 border-t border-border flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-textMuted">
           <a
             :href="GITHUB_URL"
             target="_blank"
@@ -176,6 +176,16 @@ onBeforeUnmount(() => {
           >
             <Scale class="w-3.5 h-3.5" />
             <span>{{ t('oss.license', { name: LICENSE_NAME }) }}</span>
+          </a>
+          <a
+            href="https://docs.kite.sugarat.top/stats"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="flex items-center gap-1 hover:text-textMain transition-colors"
+            :title="t('oss.statsTitle')"
+          >
+            <BarChart3 class="w-3.5 h-3.5" />
+            <span>{{ t('oss.stats') }}</span>
           </a>
         </div>
       </div>
@@ -243,7 +253,7 @@ onBeforeUnmount(() => {
           <LogOut class="w-5 h-5 mr-3" />
           {{ t('nav.logout') }}
         </button>
-        <div class="mt-3 pt-3 border-t border-border flex items-center justify-between text-[11px] text-textMuted">
+        <div class="mt-3 pt-3 border-t border-border flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-textMuted">
           <a
             :href="GITHUB_URL"
             target="_blank"
@@ -271,6 +281,16 @@ onBeforeUnmount(() => {
           >
             <Scale class="w-3.5 h-3.5" />
             <span>{{ t('oss.license', { name: LICENSE_NAME }) }}</span>
+          </a>
+          <a
+            href="https://docs.kite.sugarat.top/stats"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="flex items-center gap-1 hover:text-textMain transition-colors"
+            :title="t('oss.statsTitle')"
+          >
+            <BarChart3 class="w-3.5 h-3.5" />
+            <span>{{ t('oss.stats') }}</span>
           </a>
         </div>
       </div>

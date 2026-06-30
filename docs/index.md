@@ -19,6 +19,8 @@ features:
     details: 内置服务使用标准 HTTP/FS/Child Process 能力，并提供 --runtime 参数标记 node 或 bun。
 ---
 
+<HomeStats />
+
 ## 适合什么场景
 
 Kite 适合个人服务器、内网环境、小团队项目和测试环境的快速部署。它不要求你在每个项目里维护复杂 SSH 脚本，也不要求先分别部署前端和后端服务。

@@ -144,6 +144,8 @@ export default {
     starsTitle: '{count} Stars',
     license: '{name} 协议',
     licenseTitle: '查看开源协议',
+    stats: '使用统计',
+    statsTitle: '查看 Kite 匿名使用统计面板（公开透明，不含任何敏感数据）',
   },
   dashboard: {
     title: '概览',

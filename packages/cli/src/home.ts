@@ -7,6 +7,8 @@ export interface KiteGlobalConfig {
   serverUrl?: string;
   token?: string;
   projectToken?: Record<string, string>;
+  telemetry?: boolean;
+  telemetryInstanceId?: string;
 }
 
 export interface KiteLocalEnv {

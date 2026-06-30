@@ -144,6 +144,8 @@ export default {
     starsTitle: '{count} Stars',
     license: '{name} License',
     licenseTitle: 'View open source license',
+    stats: 'Public stats',
+    statsTitle: 'View Kite anonymous usage stats (fully public, no sensitive fields)',
   },
   dashboard: {
     title: 'Dashboard',

@@ -16,9 +16,18 @@ import { runImport } from './import.js';
 import { runVerify } from './verify.js';
 import { runDoctor } from './doctor.js';
 import { runList, runStatus, runLogs, runRollback } from './ops.js';
+import { getTelemetryStatus, setTelemetryEnabled, reportPushStart } from './telemetry.js';
 
 // @ts-ignore
 const cli = cac('kite');
+
+const CLI_PKG_VERSION: string = (() => {
+  try {
+    return JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf-8')).version || '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
+})();
 
 // ==========================
 // Config commands
@@ -602,6 +611,7 @@ cli.command('push', 'Push and deploy project')
   .option('--no-ignore-builtin', 'Disable built-in ignore patterns (node_modules, .git, .env*, etc.)')
   .action(async (options: any) => {
     const pushStartedAt = new Date().toISOString();
+    void reportPushStart(CLI_PKG_VERSION);
     try {
       // 1. 解析环境配置
       const allEnvs = listProjectEnvs();
@@ -913,6 +923,41 @@ cli.command('rollback [projectId]', 'Rollback a project to a previous successful
       console.error(chalk.red(`\nRollback failed: ${error.message}`));
       process.exit(1);
     }
+  });
+
+// ==========================
+// Telemetry commands (opt-in, default off)
+// Field list governed by plan/2026-06-30-f27-telemetry.md §2.
+// ==========================
+const TELEMETRY_DOCS = 'https://docs.kite.sugarat.top/guide/telemetry';
+
+cli.command('telemetry on', 'Enable anonymous usage ping (opt-in)')
+  .action(() => {
+    const { instanceId } = setTelemetryEnabled(true);
+    console.log(chalk.green('Telemetry enabled.'));
+    console.log(chalk.gray(`  Anonymous instance: ${instanceId.slice(0, 8)}…`));
+    console.log(chalk.gray(`  Docs: ${TELEMETRY_DOCS}`));
+    console.log(chalk.gray('  Disable anytime via: kite telemetry off'));
+  });
+
+cli.command('telemetry off', 'Disable anonymous usage ping')
+  .action(() => {
+    setTelemetryEnabled(false);
+    console.log(chalk.green('Telemetry disabled.'));
+    console.log(chalk.gray('  No further data will be sent.'));
+    console.log(chalk.gray(`  Docs: ${TELEMETRY_DOCS}`));
+  });
+
+cli.command('telemetry status', 'Show current telemetry switch and anonymous instance id')
+  .action(() => {
+    const status = getTelemetryStatus();
+    console.log(chalk.gray(`  Status: ${status.enabled ? chalk.green('enabled') : chalk.yellow('disabled')}`));
+    if (status.instanceId) {
+      console.log(chalk.gray(`  Anonymous instance: ${status.instanceId.slice(0, 8)}…`));
+    } else {
+      console.log(chalk.gray('  Anonymous instance: (not generated yet)'));
+    }
+    console.log(chalk.gray(`  Docs: ${TELEMETRY_DOCS}`));
   });
 
 cli.help();
