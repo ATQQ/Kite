@@ -1,42 +1,33 @@
 # 更新日志
 
-## v1.4.0...feature/v1.5
+## v1.5.0 (2026/07/04)
 
-[compare changes](https://github.com/ATQQ/Kite/compare/v1.4.0...feature/v1.5)
+### Feature
 
-### 🚀 Enhancements
+- Web 端新增 GitHub 仓库链接、star 统计与开源协议信息展示
+- 新增全栈搜索 ⌘K 命令面板，支持跨模块快速跳转
+- 新增项目与日志源的批量操作能力
+- 新增部署时间线视图，优化日志时间戳处理
+- 新增匿名遥测能力与公共统计面板
+- 新增日志排序支持与 PM2 日志自动导入
 
-- **web:** 添加GitHub仓库链接、star统计与开源协议信息 ([f12a97f](https://github.com/ATQQ/Kite/commit/f12a97f))
-- **search:** F20 全栈搜索 ⌘K 命令面板 ([da254cc](https://github.com/ATQQ/Kite/commit/da254cc))
-- 新增批量操作功能，支持项目和日志源的批量管理 ([f2721f2](https://github.com/ATQQ/Kite/commit/f2721f2))
-- Add deployment timeline view and improve log timestamp handling ([6343e26](https://github.com/ATQQ/Kite/commit/6343e26))
-- Add anonymous telemetry feature and public stats panel ([85b4450](https://github.com/ATQQ/Kite/commit/85b4450))
-- Add anonymous telemetry collection feature ([4165c9c](https://github.com/ATQQ/Kite/commit/4165c9c))
-- **log, pm2:** Add sort order support and auto-pm2 log import ([1f6c7ec](https://github.com/ATQQ/Kite/commit/1f6c7ec))
+### Bugfix
 
-### 🩹 Fixes
+- 修复反向代理场景下鉴权速率限制的相关配置参数
+- 限制回滚按钮仅在当前部署日志可用时启用
 
-- **auth:** 调整速率限制相关配置参数 ([604412b](https://github.com/ATQQ/Kite/commit/604412b))
-- **ProjectDetail:** 限制回滚按钮仅在当前部署日志可用时启用 ([a8f8949](https://github.com/ATQQ/Kite/commit/a8f8949))
+### Refactor
 
-### 💅 Refactors
+- 优化部署时间线组件的样式与布局结构
+- 重构国际化语言存储与切换逻辑
+- 重构服务端子进程环境变量构建逻辑
+- 调整匿名统计默认行为为开启并优化上报逻辑
 
-- **DeploymentTimeline:** 优化时间线组件样式与布局结构 ([f43609d](https://github.com/ATQQ/Kite/commit/f43609d))
-- **locale:** 重构国际化语言存储与切换逻辑 ([8d15797](https://github.com/ATQQ/Kite/commit/8d15797))
-- **server/runtime:** 重构子进程环境变量构建逻辑 ([903ea7f](https://github.com/ATQQ/Kite/commit/903ea7f))
+### Docs
 
-### 📖 Documentation
+- 完善统计相关文档与前端展示说明
+- 修正 CLI telemetry 命令的格式说明
 
-- 更新v1.4.0版本更新日志与站点导航 ([5c48bf0](https://github.com/ATQQ/Kite/commit/5c48bf0))
-- 更新统计相关文档与前端展示逻辑 ([16205c8](https://github.com/ATQQ/Kite/commit/16205c8))
-
-### 🏡 Chore
-
-- Release v1.4.0, add webhook and i18n support ([2b0f2b8](https://github.com/ATQQ/Kite/commit/2b0f2b8))
-
-### ❤️ Contributors
-
-- Sugar ([@ATQQ](https://github.com/ATQQ))
 
 ## v1.4.0 (2026/06/28)
 
