@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { createClient } from '@libsql/client';
 import { drizzle } from 'drizzle-orm/libsql';
 import * as schema from './schema.js';
-import { eq, desc, asc, and, gte, lte } from 'drizzle-orm';
+import { eq, desc, asc, and, gte, lte, inArray } from 'drizzle-orm';
 import path from 'node:path';
 
 // Initialize libSQL client (using local file for now, can be swapped to Turso URL)
@@ -207,6 +207,23 @@ const initDb = async () => {
   await client.execute(`CREATE INDEX IF NOT EXISTS idx_project_log_sources_project_id ON project_log_sources(project_id);`);
   await client.execute(`CREATE INDEX IF NOT EXISTS idx_project_log_sources_sort_order ON project_log_sources(sort_order);`);
 
+  // CLI 匿名遥测事件（供 kite.sugarat.top 面板消费；老库启动会自动补建）
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS telemetry_events (
+      id TEXT PRIMARY KEY,
+      event TEXT NOT NULL,
+      ts INTEGER NOT NULL,
+      received_at TEXT NOT NULL,
+      kite_version TEXT NOT NULL,
+      instance_id TEXT NOT NULL,
+      os TEXT NOT NULL,
+      arch TEXT NOT NULL
+    );
+  `);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_telemetry_events_received_at ON telemetry_events(received_at);`);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_telemetry_events_event ON telemetry_events(event);`);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_telemetry_events_instance_id ON telemetry_events(instance_id);`);
+
   // Seed a demo project on first run (no existing projects)
   if (process.env.KITE_SEED_DEMO_PROJECT !== 'false') {
     const existing = await client.execute('SELECT COUNT(*) as count FROM projects');
@@ -307,6 +324,11 @@ export const db = {
       const result = await ormDb.select().from(schema.projects).where(eq(schema.projects.id, id)).limit(1);
       return result[0] || null;
     },
+    async findManyByIds(ids: string[]) {
+      await ensureDbReady();
+      if (ids.length === 0) return [];
+      return await ormDb.select().from(schema.projects).where(inArray(schema.projects.id, ids));
+    },
     async create(data: any) {
       await ensureDbReady();
       const now = new Date().toISOString();
@@ -385,6 +407,12 @@ export const db = {
       if (!existing) return false;
       await ormDb.delete(schema.projectLogSources).where(eq(schema.projectLogSources.id, id));
       return true;
+    },
+    async findManyByIds(ids: string[]) {
+      await ensureDbReady();
+      if (ids.length === 0) return [];
+      return await ormDb.select().from(schema.projectLogSources)
+        .where(inArray(schema.projectLogSources.id, ids));
     },
   },
   categories: {
@@ -543,6 +571,21 @@ export const db = {
       await ensureDbReady();
       await ormDb.delete(schema.projectTags).where(eq(schema.projectTags.projectId, projectId));
     },
+    async addPair(projectId: string, tagId: string) {
+      await ensureDbReady();
+      const now = new Date().toISOString();
+      try {
+        await ormDb.insert(schema.projectTags).values({ projectId, tagId, createdAt: now });
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    async removePair(projectId: string, tagId: string) {
+      await ensureDbReady();
+      await ormDb.delete(schema.projectTags)
+        .where(and(eq(schema.projectTags.projectId, projectId), eq(schema.projectTags.tagId, tagId)));
+    },
   },
   deployments: {
     async insert(data: any) {
@@ -594,7 +637,7 @@ export const db = {
       await ormDb.update(schema.deployments)
         .set({ artifactPath: null, artifactSize: null })
         .where(eq(schema.deployments.id, id));
-    }
+    },
   },
   auditLogs: {
     async create(data: {
@@ -676,6 +719,138 @@ export const db = {
       return { rows, total, limit, offset };
     }
   },
+  search: {
+    async run(q: string, types: Array<'project' | 'deployment' | 'audit' | 'logsource'>, limit: number) {
+      await ensureDbReady();
+      const trimmed = (q || '').trim();
+      const empty = {
+        q: trimmed,
+        groups: [] as Array<{ type: string; total: number; items: any[] }>,
+        truncated: false,
+      };
+      if (trimmed.length < 1 || trimmed.length > 64) return empty;
+      const cap = Math.min(Math.max(limit | 0, 1), 20);
+
+      // Escape SQL LIKE meta chars ( % _ \ ) under ESCAPE '\\'
+      const escaped = trimmed.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+      const like = `%${escaped}%`;
+      const wantedSet = new Set(types);
+      const groups: Array<{ type: string; total: number; items: any[] }> = [];
+      let truncated = false;
+
+      if (wantedSet.has('project')) {
+        const r = await client.execute({
+          sql: `SELECT id, name, description, deploy_path, env, status, updated_at
+                FROM projects
+                WHERE name LIKE ? ESCAPE '\\'
+                   OR IFNULL(description,'') LIKE ? ESCAPE '\\'
+                   OR deploy_path LIKE ? ESCAPE '\\'
+                   OR IFNULL(env,'') LIKE ? ESCAPE '\\'
+                   OR id LIKE ? ESCAPE '\\'
+                ORDER BY updated_at DESC
+                LIMIT ?`,
+          args: [like, like, like, like, like, cap + 1],
+        });
+        const rows = r.rows.slice(0, cap).map(row => ({
+          type: 'project' as const,
+          id: String(row.id),
+          name: String(row.name),
+          description: row.description == null ? null : String(row.description),
+          status: row.status == null ? null : String(row.status),
+          href: `/projects/${String(row.id)}`,
+        }));
+        if (r.rows.length > cap) truncated = true;
+        groups.push({ type: 'project', total: rows.length, items: rows });
+      }
+
+      if (wantedSet.has('deployment')) {
+        const r = await client.execute({
+          sql: `SELECT id, project_id, project_name, status, start_time, output
+                FROM deployments
+                WHERE project_name LIKE ? ESCAPE '\\'
+                   OR IFNULL(output,'') LIKE ? ESCAPE '\\'
+                   OR id LIKE ? ESCAPE '\\'
+                ORDER BY start_time DESC
+                LIMIT ?`,
+          args: [like, like, like, cap + 1],
+        });
+        const rows = r.rows.slice(0, cap).map(row => {
+          const output = row.output == null ? null : String(row.output);
+          let snippet: string | null = null;
+          if (output) {
+            const idx = output.toLowerCase().indexOf(trimmed.toLowerCase());
+            if (idx >= 0) {
+              const start = Math.max(0, idx - 20);
+              snippet = output.slice(start, start + 80).replace(/\s+/g, ' ');
+            } else {
+              snippet = output.slice(0, 80).replace(/\s+/g, ' ');
+            }
+          }
+          return {
+            type: 'deployment' as const,
+            id: String(row.id),
+            projectId: String(row.project_id),
+            projectName: String(row.project_name),
+            status: String(row.status),
+            startTime: String(row.start_time),
+            href: `/projects/${String(row.project_id)}`,
+            snippet,
+          };
+        });
+        if (r.rows.length > cap) truncated = true;
+        groups.push({ type: 'deployment', total: rows.length, items: rows });
+      }
+
+      if (wantedSet.has('audit')) {
+        const r = await client.execute({
+          sql: `SELECT id, action, target_name, target_id, status, summary, created_at
+                FROM audit_logs
+                WHERE action LIKE ? ESCAPE '\\'
+                   OR IFNULL(target_name,'') LIKE ? ESCAPE '\\'
+                   OR IFNULL(target_id,'') LIKE ? ESCAPE '\\'
+                   OR IFNULL(summary,'') LIKE ? ESCAPE '\\'
+                ORDER BY created_at DESC
+                LIMIT ?`,
+          args: [like, like, like, like, cap + 1],
+        });
+        const rows = r.rows.slice(0, cap).map(row => ({
+          type: 'audit' as const,
+          id: String(row.id),
+          action: String(row.action),
+          targetName: row.target_name == null ? null : String(row.target_name),
+          createdAt: String(row.created_at),
+          status: String(row.status),
+          href: `/audit?focus=${encodeURIComponent(String(row.id))}`,
+        }));
+        if (r.rows.length > cap) truncated = true;
+        groups.push({ type: 'audit', total: rows.length, items: rows });
+      }
+
+      if (wantedSet.has('logsource')) {
+        const r = await client.execute({
+          sql: `SELECT id, project_id, label, file_path
+                FROM project_log_sources
+                WHERE label LIKE ? ESCAPE '\\'
+                   OR file_path LIKE ? ESCAPE '\\'
+                ORDER BY updated_at DESC
+                LIMIT ?`,
+          args: [like, like, cap + 1],
+        });
+        const rows = r.rows.slice(0, cap).map(row => ({
+          type: 'logsource' as const,
+          id: String(row.id),
+          projectId: String(row.project_id),
+          label: String(row.label),
+          filePath: String(row.file_path),
+          href: `/projects/${String(row.project_id)}/logs?source=${encodeURIComponent(String(row.id))}`,
+        }));
+        if (r.rows.length > cap) truncated = true;
+        groups.push({ type: 'logsource', total: rows.length, items: rows });
+      }
+
+      return { q: trimmed, groups, truncated };
+    }
+  },
   stats: {
     async heatmap(sinceIso: string) {
       await ensureDbReady();
@@ -732,6 +907,82 @@ export const db = {
           rate: total > 0 ? Math.round((failed / total) * 10000) / 10000 : 0,
         };
       });
+    },
+  },
+  telemetry: {
+    async insertEvent(data: {
+      event: string;
+      ts: number;
+      kiteVersion: string;
+      instanceId: string;
+      os: string;
+      arch: string;
+    }) {
+      await ensureDbReady();
+      const row = {
+        id: randomUUID(),
+        event: data.event,
+        ts: data.ts,
+        receivedAt: new Date().toISOString(),
+        kiteVersion: data.kiteVersion,
+        instanceId: data.instanceId,
+        os: data.os,
+        arch: data.arch,
+      };
+      await ormDb.insert(schema.telemetryEvents).values(row);
+      return row;
+    },
+    async totals(sinceIso: string) {
+      await ensureDbReady();
+      const res = await client.execute({
+        sql: `SELECT
+                COUNT(*) AS events,
+                SUM(CASE WHEN event='kite.serve.startup' THEN 1 ELSE 0 END) AS serve_startup,
+                SUM(CASE WHEN event='kite.push.start' THEN 1 ELSE 0 END) AS push_start,
+                COUNT(DISTINCT instance_id) AS unique_instances
+              FROM telemetry_events
+              WHERE received_at >= ?`,
+        args: [sinceIso],
+      });
+      const r = res.rows[0] || {};
+      return {
+        events: Number(r.events ?? 0),
+        serveStartup: Number(r.serve_startup ?? 0),
+        pushStart: Number(r.push_start ?? 0),
+        uniqueInstances: Number(r.unique_instances ?? 0),
+      };
+    },
+    async daily(sinceIso: string) {
+      await ensureDbReady();
+      const res = await client.execute({
+        sql: `SELECT substr(received_at, 1, 10) AS d,
+                     SUM(CASE WHEN event='kite.serve.startup' THEN 1 ELSE 0 END) AS serve_startup,
+                     SUM(CASE WHEN event='kite.push.start' THEN 1 ELSE 0 END) AS push_start,
+                     COUNT(DISTINCT instance_id) AS active_instances
+              FROM telemetry_events
+              WHERE received_at >= ?
+              GROUP BY d`,
+        args: [sinceIso],
+      });
+      return res.rows.map(r => ({
+        date: String(r.d),
+        serveStartup: Number(r.serve_startup ?? 0),
+        pushStart: Number(r.push_start ?? 0),
+        activeInstances: Number(r.active_instances ?? 0),
+      }));
+    },
+    async groupBy(field: 'kite_version' | 'os' | 'arch', sinceIso: string, limit: number) {
+      await ensureDbReady();
+      const res = await client.execute({
+        sql: `SELECT ${field} AS k, COUNT(*) AS c
+              FROM telemetry_events
+              WHERE received_at >= ?
+              GROUP BY ${field}
+              ORDER BY c DESC
+              LIMIT ?`,
+        args: [sinceIso, limit],
+      });
+      return res.rows.map(r => ({ key: String(r.k), events: Number(r.c) }));
     },
   },
 };

@@ -63,13 +63,17 @@ interface Bucket {
   lockUntil: number;
 }
 
+// 登录失败限流（按 IP 维度的滑动窗口 + 锁定）
+// 触发路由：/api/auth/login、/api/settings/admin-token
+// 行为：同一 IP 在 WINDOW_MS 内累计 LOCK_AFTER 次失败 → 锁 LOCK_MS；
+//      每次失败按指数退避延迟下一次响应（BASE_DELAY_MS × 2^n，封顶 MAX_DELAY_MS）。
 const buckets = new Map<string, Bucket>();
-const MAX_BUCKETS = 4096;
-const WINDOW_MS = 10 * 60_000;
-const BASE_DELAY_MS = 250;
-const MAX_DELAY_MS = 8000;
-const LOCK_AFTER = 8;
-const LOCK_MS = 5 * 60_000;
+const MAX_BUCKETS = 4096;          // 内存桶上限，超过会强制 GC，防止恶意 IP 喷洒导致 OOM
+const WINDOW_MS = 5 * 60_000;      // 失败计数滑动窗口：5 分钟
+const BASE_DELAY_MS = 250;         // 退避基础值：第 1 次失败后延迟 250ms
+const MAX_DELAY_MS = 8000;         // 单次退避上限：8s（避免请求被挂太久）
+const LOCK_AFTER = 5;              // 窗口内累计失败 5 次即触发锁定
+const LOCK_MS = 15 * 60_000;       // 锁定时长：15 分钟，期间返回 429 + Retry-After
 
 function gcBuckets(now: number) {
   if (buckets.size <= MAX_BUCKETS) {

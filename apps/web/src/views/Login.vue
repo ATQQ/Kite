@@ -2,8 +2,10 @@
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
-import { Rocket, LogIn } from 'lucide-vue-next'
+import { Rocket, LogIn, Github, Scale, Star } from 'lucide-vue-next'
 import { useProjectStore } from '../store/project'
+import { GITHUB_URL, LICENSE_NAME } from '../constants'
+import { useGithubStars, formatStars } from '../composables/useGithubStars'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -11,6 +13,8 @@ const projectStore = useProjectStore()
 const token = ref('')
 const isLoading = ref(false)
 const errorMsg = ref('')
+const { stars } = useGithubStars()
+const licenseUrl = `${GITHUB_URL}/blob/main/LICENSE`
 
 onMounted(() => {
   if (projectStore.adminToken) {
@@ -90,6 +94,38 @@ const handleLogin = async () => {
             {{ t('auth.hint') }}
           </p>
         </div>
+      </div>
+
+      <div class="mt-6 flex items-center justify-center gap-4 text-xs text-textMuted">
+        <a
+          :href="GITHUB_URL"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="flex items-center gap-1.5 hover:text-textMain transition-colors"
+          :title="t('oss.githubTitle')"
+        >
+          <Github class="w-3.5 h-3.5" />
+          <span>{{ t('oss.github') }}</span>
+          <span
+            v-if="stars !== null"
+            class="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-panel border border-border text-[10px] tabular-nums"
+            :title="t('oss.starsTitle', { count: stars })"
+          >
+            <Star class="w-2.5 h-2.5" />
+            {{ formatStars(stars) }}
+          </span>
+        </a>
+        <span class="text-textMuted/40">·</span>
+        <a
+          :href="licenseUrl"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="flex items-center gap-1 hover:text-textMain transition-colors"
+          :title="t('oss.licenseTitle')"
+        >
+          <Scale class="w-3.5 h-3.5" />
+          <span>{{ t('oss.license', { name: LICENSE_NAME }) }}</span>
+        </a>
       </div>
     </div>
   </div>

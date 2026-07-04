@@ -81,6 +81,19 @@ export const projectTags = sqliteTable('project_tags', {
   createdAt: text('created_at').notNull(),
 });
 
+// CLI 匿名遥测事件（来自 packages/cli/src/telemetry.ts 上报）
+// 只允许上报 packages/cli/src/telemetry.ts 中 buildPayload 定义的字段。
+export const telemetryEvents = sqliteTable('telemetry_events', {
+  id: text('id').primaryKey(),
+  event: text('event').notNull(),               // 'kite.serve.startup' | 'kite.push.start'
+  ts: integer('ts').notNull(),                  // 客户端上报时间戳（毫秒）
+  receivedAt: text('received_at').notNull(),    // 服务端接收 ISO 时间，聚合以此为准
+  kiteVersion: text('kite_version').notNull(),
+  instanceId: text('instance_id').notNull(),
+  os: text('os').notNull(),
+  arch: text('arch').notNull(),
+});
+
 // 操作日志（运维审计）表
 export const auditLogs = sqliteTable('audit_logs', {
   id: text('id').primaryKey(),

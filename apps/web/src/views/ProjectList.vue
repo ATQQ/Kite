@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, onBeforeRouteLeave } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useProjectStore } from '../store/project'
 import type { Category, Tag as TagType } from '../store/project'
-import { Plus, MoreVertical, Server, Clock, ScrollText, FolderPlus, Trash2, RefreshCw, XCircle, AlertTriangle, Pencil, FolderOpen, LayoutGrid, List as ListIcon, Tag, FolderTree, ChevronRight, Tags as TagsIcon, X as XIcon, Activity } from 'lucide-vue-next'
+import { Plus, MoreVertical, Server, Clock, ScrollText, FolderPlus, Trash2, RefreshCw, XCircle, AlertTriangle, Pencil, FolderOpen, LayoutGrid, List as ListIcon, Tag, FolderTree, ChevronRight, Tags as TagsIcon, X as XIcon, Activity, CheckSquare, Square, MinusSquare } from 'lucide-vue-next'
 import { useToast } from '../composables/useToast'
 import FolderPickerDialog from '../components/FolderPickerDialog.vue'
 import ProjectTagsEditor from '../components/ProjectTagsEditor.vue'
+import BulkActionBar from '../components/BulkActionBar.vue'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
+import { useBulkSelection } from '../composables/useBulkSelection'
 import { CHIP_COLOR_PALETTE, chipClass as tagChipClass, pickFreeColor as pickFreeChipColor } from '../utils/color-chip'
 
 const projectStore = useProjectStore()
@@ -734,6 +737,192 @@ async function deleteTagAction(tag: TagType) {
     deletingTagId.value = null
   }
 }
+
+// ---------- Bulk selection ----------
+const BULK_MAX = 200
+const bulk = useBulkSelection(filteredProjects)
+const isBulkSubmitting = ref(false)
+const showBulkDelete = ref(false)
+const bulkCategoryPanelOpen = ref(false)
+const bulkTagPanelOpen = ref<null | 'add' | 'remove'>(null)
+const bulkPendingTagIds = ref<string[]>([])
+
+onBeforeRouteLeave(() => {
+  bulk.clear()
+})
+
+function toggleRowSelection(e: Event, id: string) {
+  e.stopPropagation()
+  bulk.toggle(id)
+}
+
+function toggleAllSelection() {
+  if (bulk.isAllSelected.value) {
+    bulk.clear()
+  } else {
+    if (filteredProjects.value.length > BULK_MAX) {
+      toast.error(
+        t('project.list.bulkLimitExceededTitle'),
+        t('project.list.bulkLimitExceededDetail', { max: BULK_MAX })
+      )
+      return
+    }
+    bulk.selectAll()
+  }
+}
+
+function closeBulkPanels() {
+  bulkCategoryPanelOpen.value = false
+  bulkTagPanelOpen.value = null
+}
+
+function openBulkCategoryPanel() {
+  bulkTagPanelOpen.value = null
+  bulkCategoryPanelOpen.value = !bulkCategoryPanelOpen.value
+}
+
+function openBulkTagPanel(mode: 'add' | 'remove') {
+  bulkCategoryPanelOpen.value = false
+  if (bulkTagPanelOpen.value === mode) {
+    bulkTagPanelOpen.value = null
+    return
+  }
+  bulkPendingTagIds.value = []
+  bulkTagPanelOpen.value = mode
+}
+
+function toggleBulkPendingTag(id: string) {
+  const idx = bulkPendingTagIds.value.indexOf(id)
+  if (idx === -1) bulkPendingTagIds.value = [...bulkPendingTagIds.value, id]
+  else bulkPendingTagIds.value = bulkPendingTagIds.value.filter((x) => x !== id)
+}
+
+async function callBulkProjectsApi(payload: Record<string, unknown>): Promise<{ ok: boolean; data?: any; error?: string }> {
+  try {
+    const res = await fetch('/api/projects/bulk', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${projectStore.adminToken}`,
+      },
+      body: JSON.stringify(payload),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) return { ok: false, error: data?.error || `HTTP ${res.status}` }
+    return { ok: true, data }
+  } catch (err: any) {
+    return { ok: false, error: err?.message || 'network error' }
+  }
+}
+
+function summarizeBulkResult(data: any): { success: number; failed: number } {
+  return {
+    success: Number(data?.success || 0),
+    failed: Array.isArray(data?.failed) ? data.failed.length : 0,
+  }
+}
+
+function ensureWithinBulkLimit(): boolean {
+  if (bulk.selectedCount.value > BULK_MAX) {
+    toast.error(
+      t('project.list.bulkLimitExceededTitle'),
+      t('project.list.bulkLimitExceededDetail', { max: BULK_MAX })
+    )
+    return false
+  }
+  return true
+}
+
+async function bulkSetCategory(categoryId: string | null) {
+  if (isBulkSubmitting.value) return
+  if (bulk.selectedCount.value === 0) return
+  if (!ensureWithinBulkLimit()) return
+  isBulkSubmitting.value = true
+  const ids = Array.from(bulk.selectedIds.value)
+  const result = await callBulkProjectsApi({ ids, action: 'setCategory', categoryId })
+  isBulkSubmitting.value = false
+  if (!result.ok) {
+    toast.error(t('project.list.bulkSetCategoryFailed'), result.error)
+    return
+  }
+  const { success, failed } = summarizeBulkResult(result.data)
+  const name = categoryId ? (categoryMap.value.get(categoryId)?.name ?? t('project.list.moveCategoryDefault')) : t('project.list.moveCategoryDefault')
+  if (failed === 0) {
+    toast.success(t('project.list.bulkSetCategorySuccess', { n: success, name }))
+  } else {
+    toast.error(t('project.list.bulkPartial'), t('project.list.bulkPartialDetail', { ok: success, fail: failed }))
+  }
+  closeBulkPanels()
+  bulk.clear()
+  await projectStore.fetchProjects()
+}
+
+async function bulkApplyTags(mode: 'add' | 'remove') {
+  if (isBulkSubmitting.value) return
+  if (bulk.selectedCount.value === 0) return
+  if (bulkPendingTagIds.value.length === 0) return
+  if (!ensureWithinBulkLimit()) return
+  isBulkSubmitting.value = true
+  const ids = Array.from(bulk.selectedIds.value)
+  const result = await callBulkProjectsApi({
+    ids,
+    action: mode === 'add' ? 'addTags' : 'removeTags',
+    tagIds: bulkPendingTagIds.value,
+  })
+  isBulkSubmitting.value = false
+  if (!result.ok) {
+    toast.error(
+      mode === 'add' ? t('project.list.bulkAddTagsFailed') : t('project.list.bulkRemoveTagsFailed'),
+      result.error
+    )
+    return
+  }
+  const { success, failed } = summarizeBulkResult(result.data)
+  if (failed === 0) {
+    toast.success(
+      mode === 'add'
+        ? t('project.list.bulkAddTagsSuccess', { n: success })
+        : t('project.list.bulkRemoveTagsSuccess', { n: success })
+    )
+  } else {
+    toast.error(t('project.list.bulkPartial'), t('project.list.bulkPartialDetail', { ok: success, fail: failed }))
+  }
+  closeBulkPanels()
+  bulk.clear()
+  await Promise.all([projectStore.fetchProjects(), projectStore.fetchTags()])
+}
+
+const bulkDeleteRequireText = computed(() => `delete ${bulk.selectedCount.value} projects`)
+
+function openBulkDelete() {
+  if (bulk.selectedCount.value === 0) return
+  if (!ensureWithinBulkLimit()) return
+  closeBulkPanels()
+  showBulkDelete.value = true
+}
+
+async function confirmBulkDelete() {
+  if (isBulkSubmitting.value) return
+  const count = bulk.selectedCount.value
+  if (count === 0) return
+  isBulkSubmitting.value = true
+  const ids = Array.from(bulk.selectedIds.value)
+  const result = await callBulkProjectsApi({ ids, action: 'delete' })
+  isBulkSubmitting.value = false
+  if (!result.ok) {
+    toast.error(t('project.list.bulkDeleteFailed'), result.error)
+    return
+  }
+  const { success, failed } = summarizeBulkResult(result.data)
+  if (failed === 0) {
+    toast.success(t('project.list.bulkDeleteSuccess', { n: success }))
+  } else {
+    toast.error(t('project.list.bulkPartial'), t('project.list.bulkPartialDetail', { ok: success, fail: failed }))
+  }
+  showBulkDelete.value = false
+  bulk.clear()
+  await projectStore.fetchProjects()
+}
 </script>
 
 <template>
@@ -890,10 +1079,22 @@ async function deleteTagAction(tag: TagType) {
       <div
         v-for="project in filteredProjects"
         :key="project.id"
-        class="group bg-panel border border-border rounded-xl p-5 hover:border-primary/50 transition-all shadow-sm cursor-pointer relative overflow-hidden"
+        class="group bg-panel border rounded-xl p-5 transition-all shadow-sm cursor-pointer relative overflow-hidden"
+        :class="bulk.isSelected(project.id) ? 'border-primary/60 ring-1 ring-primary/40' : 'border-border hover:border-primary/50'"
         @click="goToDetail(project.id)"
       >
         <div class="absolute top-0 left-0 w-1 h-full" :class="project.status === 'success' ? 'bg-success' : project.status === 'failed' ? 'bg-danger' : 'bg-primary'"></div>
+
+        <button
+          type="button"
+          class="absolute top-3 left-3 p-1 rounded-md transition-all"
+          :class="bulk.isSelected(project.id) ? 'opacity-100 text-primary' : 'opacity-0 group-hover:opacity-100 text-textMuted hover:text-textMain'"
+          :title="bulk.isSelected(project.id) ? t('project.list.bulkDeselectTitle') : t('project.list.bulkSelectTitle')"
+          @click.stop="toggleRowSelection($event, project.id)"
+        >
+          <CheckSquare v-if="bulk.isSelected(project.id)" class="w-4 h-4" />
+          <Square v-else class="w-4 h-4" />
+        </button>
 
         <div class="flex justify-between items-start mb-4">
           <div class="flex items-center space-x-3">
@@ -905,10 +1106,20 @@ async function deleteTagAction(tag: TagType) {
               <p class="text-xs text-textMuted font-mono mt-0.5">{{ project.id }}</p>
             </div>
           </div>
-          <div class="relative">
-            <button class="p-1 dark:hover:bg-white/10 hover:bg-black/10 rounded-md transition-colors text-textMuted hover:text-textMain" @click.stop="toggleDropdown(project.id, $event)">
-              <MoreVertical class="w-4 h-4" />
-            </button>
+          <div class="flex items-center space-x-2">
+            <span
+              v-if="project.env"
+              class="inline-flex items-center px-2.5 py-1 rounded-md text-xs border font-mono font-medium"
+              :class="envChipClass(project.env)"
+              :title="project.env"
+            >
+              {{ project.env }}
+            </span>
+            <div class="relative">
+              <button class="p-1 dark:hover:bg-white/10 hover:bg-black/10 rounded-md transition-colors text-textMuted hover:text-textMain" @click.stop="toggleDropdown(project.id, $event)">
+                <MoreVertical class="w-4 h-4" />
+              </button>
+            </div>
           </div>
         </div>
 
@@ -921,7 +1132,6 @@ async function deleteTagAction(tag: TagType) {
             <Tag class="w-3 h-3 mr-1" />
             {{ categoryNameOf(project.categoryId) }}
           </span>
-          <span v-if="project.env" class="inline-flex items-center px-2 py-0.5 rounded text-[10px] border font-mono" :class="envChipClass(project.env)">{{ project.env }}</span>
           <ProjectTagsEditor
             :model-value="project.tagIds || []"
             size="sm"
@@ -970,10 +1180,22 @@ async function deleteTagAction(tag: TagType) {
       <table class="w-full text-sm min-w-[720px]">
         <thead class="text-xs text-textMuted bg-base/40">
           <tr>
+            <th class="text-left font-medium px-3 py-3 w-10">
+              <button
+                type="button"
+                class="p-1 rounded text-textMuted hover:text-textMain transition-colors"
+                :title="bulk.isAllSelected.value ? t('project.list.bulkDeselectAllTitle') : t('project.list.bulkSelectAllTitle')"
+                @click.stop="toggleAllSelection"
+              >
+                <CheckSquare v-if="bulk.isAllSelected.value" class="w-4 h-4 text-primary" />
+                <MinusSquare v-else-if="bulk.isIndeterminate.value" class="w-4 h-4 text-primary" />
+                <Square v-else class="w-4 h-4" />
+              </button>
+            </th>
+            <th class="text-left font-medium px-4 py-3 w-24">{{ t('project.list.colEnv') }}</th>
             <th class="text-left font-medium px-4 py-3">{{ t('project.list.colName') }}</th>
             <th class="text-left font-medium px-4 py-3">{{ t('project.list.colDestPath') }}</th>
             <th class="text-left font-medium px-4 py-3 w-28">{{ t('project.list.colCategory') }}</th>
-            <th class="text-left font-medium px-4 py-3 w-24">{{ t('project.list.colEnv') }}</th>
             <th class="text-left font-medium px-4 py-3 w-36">{{ t('project.list.colLastDeploy') }}</th>
             <th class="text-left font-medium px-4 py-3 w-20">{{ t('project.list.colStatus') }}</th>
             <th class="text-right font-medium px-4 py-3 w-12"></th>
@@ -983,9 +1205,26 @@ async function deleteTagAction(tag: TagType) {
           <tr
             v-for="project in filteredProjects"
             :key="project.id"
-            class="border-t border-border hover:bg-white/5 cursor-pointer"
+            class="border-t border-border cursor-pointer"
+            :class="bulk.isSelected(project.id) ? 'bg-primary/5 hover:bg-primary/10' : 'hover:bg-white/5'"
             @click="goToDetail(project.id)"
           >
+            <td class="px-3 py-3 w-10">
+              <button
+                type="button"
+                class="p-1 rounded transition-colors"
+                :class="bulk.isSelected(project.id) ? 'text-primary' : 'text-textMuted hover:text-textMain'"
+                :title="bulk.isSelected(project.id) ? t('project.list.bulkDeselectTitle') : t('project.list.bulkSelectTitle')"
+                @click.stop="toggleRowSelection($event, project.id)"
+              >
+                <CheckSquare v-if="bulk.isSelected(project.id)" class="w-4 h-4" />
+                <Square v-else class="w-4 h-4" />
+              </button>
+            </td>
+            <td class="px-4 py-3">
+              <span v-if="project.env" class="inline-flex items-center px-2 py-0.5 rounded text-[10px] border font-mono" :class="envChipClass(project.env)">{{ project.env }}</span>
+              <span v-else class="text-textMuted text-xs">—</span>
+            </td>
             <td class="px-4 py-3">
               <div class="flex items-center space-x-2">
                 <Server class="w-4 h-4 text-textMuted" />
@@ -1010,10 +1249,6 @@ async function deleteTagAction(tag: TagType) {
                 />
               </div>
             </td>
-            <td class="px-4 py-3">
-              <span v-if="project.env" class="inline-flex items-center px-2 py-0.5 rounded text-[10px] border font-mono" :class="envChipClass(project.env)">{{ project.env }}</span>
-              <span v-else class="text-textMuted text-xs">—</span>
-            </td>
             <td class="px-4 py-3 text-textMuted text-xs" :title="project.lastDeployAt ? new Date(project.lastDeployAt).toLocaleString() : t('project.list.noDeploy')">
               {{ formatRelativeTime(project.lastDeployAt) }}
             </td>
@@ -1030,7 +1265,7 @@ async function deleteTagAction(tag: TagType) {
             </td>
           </tr>
           <tr v-if="filteredProjects.length === 0">
-            <td colspan="7" class="px-4 py-12 text-center text-textMuted text-sm">{{ t('project.list.emptyUnderCategory') }}</td>
+            <td colspan="8" class="px-4 py-12 text-center text-textMuted text-sm">{{ t('project.list.emptyUnderCategory') }}</td>
           </tr>
         </tbody>
       </table>
@@ -1712,6 +1947,168 @@ async function deleteTagAction(tag: TagType) {
         </div>
       </div>
     </div>
+
+    <!-- Bulk Action Bar -->
+    <BulkActionBar :count="bulk.selectedCount.value" :total="filteredProjects.length" @clear="bulk.clear">
+      <template #actions>
+        <div class="relative">
+          <button
+            type="button"
+            :disabled="isBulkSubmitting"
+            class="flex items-center px-2.5 py-1.5 text-xs rounded-md border border-border hover:border-primary/50 text-textMain transition-colors disabled:opacity-50"
+            @click="openBulkCategoryPanel"
+          >
+            <FolderTree class="w-3.5 h-3.5 mr-1.5" />
+            {{ t('project.list.bulkSetCategory') }}
+          </button>
+          <div
+            v-if="bulkCategoryPanelOpen"
+            class="absolute bottom-full left-0 mb-2 bg-panel border border-border rounded-lg shadow-xl py-1 min-w-[180px] max-h-64 overflow-auto"
+            style="z-index: 70"
+            @click.stop
+          >
+            <button
+              type="button"
+              class="flex items-center w-full px-3 py-2 text-sm text-textMain hover:bg-white/5 transition-colors"
+              :disabled="isBulkSubmitting"
+              @click="bulkSetCategory(null)"
+            >
+              <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] border bg-base text-textMuted border-border">{{ t('project.list.moveDefaultChip') }}</span>
+            </button>
+            <button
+              v-for="c in projectStore.categories"
+              :key="c.id"
+              type="button"
+              class="flex items-center w-full px-3 py-2 text-sm text-textMain hover:bg-white/5 transition-colors"
+              :disabled="isBulkSubmitting"
+              @click="bulkSetCategory(c.id)"
+            >
+              <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] border" :class="categoryChipClass(c.color)">
+                <Tag class="w-3 h-3 mr-1" />{{ c.name }}
+              </span>
+            </button>
+            <div v-if="projectStore.categories.length === 0" class="px-3 py-2 text-xs text-textMuted">
+              {{ t('project.list.noCategoriesHint') }}
+            </div>
+          </div>
+        </div>
+
+        <div class="relative">
+          <button
+            type="button"
+            :disabled="isBulkSubmitting"
+            class="flex items-center px-2.5 py-1.5 text-xs rounded-md border border-border hover:border-primary/50 text-textMain transition-colors disabled:opacity-50"
+            @click="openBulkTagPanel('add')"
+          >
+            <TagsIcon class="w-3.5 h-3.5 mr-1.5" />
+            {{ t('project.list.bulkAddTags') }}
+          </button>
+          <div
+            v-if="bulkTagPanelOpen === 'add'"
+            class="absolute bottom-full left-0 mb-2 bg-panel border border-border rounded-lg shadow-xl p-3 min-w-[240px] max-w-[320px]"
+            style="z-index: 70"
+            @click.stop
+          >
+            <p class="text-xs text-textMuted mb-2">{{ t('project.list.bulkTagPickHint') }}</p>
+            <div v-if="projectStore.tags.length === 0" class="text-xs text-textMuted py-2">{{ t('project.list.bulkNoTagsHint') }}</div>
+            <div v-else class="flex flex-wrap gap-1.5 mb-3 max-h-40 overflow-auto">
+              <button
+                v-for="tg in projectStore.tags"
+                :key="tg.id"
+                type="button"
+                class="inline-flex items-center px-2 py-0.5 rounded text-[10px] border transition-colors"
+                :class="bulkPendingTagIds.includes(tg.id) ? `${tagChipClass(tg.color)} ring-1 ring-primary/40` : 'bg-base text-textMuted border-border hover:text-textMain'"
+                @click="toggleBulkPendingTag(tg.id)"
+              >
+                <Tag class="w-3 h-3 mr-1" />{{ tg.name }}
+              </button>
+            </div>
+            <div class="flex justify-end gap-2">
+              <button
+                type="button"
+                class="px-2.5 py-1 text-xs text-textMuted hover:text-textMain transition-colors"
+                @click="bulkTagPanelOpen = null"
+              >{{ t('common.cancel') }}</button>
+              <button
+                type="button"
+                :disabled="isBulkSubmitting || bulkPendingTagIds.length === 0"
+                class="px-2.5 py-1 text-xs bg-primary text-white rounded-md hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                @click="bulkApplyTags('add')"
+              >{{ t('project.list.bulkApplyAdd') }}</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="relative">
+          <button
+            type="button"
+            :disabled="isBulkSubmitting"
+            class="flex items-center px-2.5 py-1.5 text-xs rounded-md border border-border hover:border-primary/50 text-textMain transition-colors disabled:opacity-50"
+            @click="openBulkTagPanel('remove')"
+          >
+            <XIcon class="w-3.5 h-3.5 mr-1.5" />
+            {{ t('project.list.bulkRemoveTags') }}
+          </button>
+          <div
+            v-if="bulkTagPanelOpen === 'remove'"
+            class="absolute bottom-full left-0 mb-2 bg-panel border border-border rounded-lg shadow-xl p-3 min-w-[240px] max-w-[320px]"
+            style="z-index: 70"
+            @click.stop
+          >
+            <p class="text-xs text-textMuted mb-2">{{ t('project.list.bulkTagPickHint') }}</p>
+            <div v-if="projectStore.tags.length === 0" class="text-xs text-textMuted py-2">{{ t('project.list.bulkNoTagsHint') }}</div>
+            <div v-else class="flex flex-wrap gap-1.5 mb-3 max-h-40 overflow-auto">
+              <button
+                v-for="tg in projectStore.tags"
+                :key="tg.id"
+                type="button"
+                class="inline-flex items-center px-2 py-0.5 rounded text-[10px] border transition-colors"
+                :class="bulkPendingTagIds.includes(tg.id) ? `${tagChipClass(tg.color)} ring-1 ring-primary/40` : 'bg-base text-textMuted border-border hover:text-textMain'"
+                @click="toggleBulkPendingTag(tg.id)"
+              >
+                <Tag class="w-3 h-3 mr-1" />{{ tg.name }}
+              </button>
+            </div>
+            <div class="flex justify-end gap-2">
+              <button
+                type="button"
+                class="px-2.5 py-1 text-xs text-textMuted hover:text-textMain transition-colors"
+                @click="bulkTagPanelOpen = null"
+              >{{ t('common.cancel') }}</button>
+              <button
+                type="button"
+                :disabled="isBulkSubmitting || bulkPendingTagIds.length === 0"
+                class="px-2.5 py-1 text-xs bg-danger text-white rounded-md hover:bg-danger/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                @click="bulkApplyTags('remove')"
+              >{{ t('project.list.bulkApplyRemove') }}</button>
+            </div>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          :disabled="isBulkSubmitting"
+          class="flex items-center px-2.5 py-1.5 text-xs rounded-md border border-danger/40 text-danger hover:bg-danger/10 transition-colors disabled:opacity-50"
+          @click="openBulkDelete"
+        >
+          <Trash2 class="w-3.5 h-3.5 mr-1.5" />
+          {{ t('project.list.bulkDeleteAction') }}
+        </button>
+      </template>
+    </BulkActionBar>
+
+    <ConfirmDialog
+      v-model:open="showBulkDelete"
+      tone="danger"
+      :title="t('project.list.bulkDeleteTitle')"
+      :message="t('project.list.bulkDeleteMessage', { n: bulk.selectedCount.value })"
+      :confirm-text="t('project.list.bulkDeleteConfirm')"
+      :cancel-text="t('common.cancel')"
+      :require-text="bulkDeleteRequireText"
+      :require-text-hint="t('project.list.bulkDeleteHint', { expected: bulkDeleteRequireText })"
+      :loading="isBulkSubmitting"
+      @confirm="confirmBulkDelete"
+    />
   </div>
 </template>
 

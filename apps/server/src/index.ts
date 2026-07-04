@@ -6,12 +6,14 @@ import { auditRoutes } from "./routes/audit.js";
 import { healthRoutes } from "./routes/health.js";
 import { diskRoutes } from "./routes/disk.js";
 import { statsRoutes } from "./routes/stats.js";
+import { telemetryRoutes } from "./routes/telemetry.js";
 import { fsRoutes } from "./routes/fs.js";
 import { categoryRoutes } from "./routes/categories.js";
 import { logSourceRoutes } from "./routes/log-sources.js";
 import { systemRoutes } from "./routes/system.js";
 import { pm2Routes } from "./routes/pm2.js";
 import { tagRoutes } from "./routes/tags.js";
+import { searchRoutes } from "./routes/search.js";
 import {
   terminalRoutes,
   decideTerminalUpgrade,
@@ -129,12 +131,14 @@ const app = new Elysia({ adapter })
   .use(healthRoutes)
   .use(diskRoutes)
   .use(statsRoutes)
+  .use(telemetryRoutes)
   .use(fsRoutes)
   .use(categoryRoutes)
   .use(logSourceRoutes)
   .use(systemRoutes)
   .use(pm2Routes)
   .use(tagRoutes)
+  .use(searchRoutes)
   .use(terminalRoutes)
   .use(staticPlugin);
 

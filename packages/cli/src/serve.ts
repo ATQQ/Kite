@@ -3,6 +3,15 @@ import fs from 'fs';
 import path from 'path';
 import chalk from 'chalk';
 import { randomToken, readLocalEnv, writeLocalEnvValue, ensureKiteHome, getKiteHome } from './home.js';
+import { getTelemetryStatus, reportServeStartup } from './telemetry.js';
+
+const TELEMETRY_DOCS_URL = 'https://docs.kite.sugarat.top/guide/telemetry';
+
+function printTelemetryBanner(): void {
+  if (!getTelemetryStatus().enabled) return;
+  console.log(chalk.gray(`  Telemetry: enabled (anonymous usage ping; docs: ${TELEMETRY_DOCS_URL})`));
+  console.log(chalk.gray('  Disable via: kite telemetry:off'));
+}
 
 interface ServeOptions {
   host: string;
@@ -123,6 +132,7 @@ function startForeground(options: ServeOptions, env: Record<string, string>, run
   console.log(chalk.gray(`  Web Dir: ${env.KITE_WEB_DIR}`));
   console.log(chalk.gray(`  DB Dir: ${env.KITE_DB_DIR}`));
   console.log(chalk.yellow(`  Admin Token: ${env.ADMIN_TOKEN}`));
+  printTelemetryBanner();
   console.log();
   warnRemoteHost(options.host);
 
@@ -235,6 +245,7 @@ function startPm2(options: ServeOptions, env: Record<string, string>, runtime: {
   console.log(chalk.gray(`  Web Dir: ${env.KITE_WEB_DIR}`));
   console.log(chalk.gray(`  DB Dir: ${env.KITE_DB_DIR}`));
   console.log(chalk.yellow(`  Admin Token: ${env.ADMIN_TOKEN}`));
+  printTelemetryBanner();
   console.log();
   console.log(chalk.gray('Commands:'));
   console.log(chalk.gray('  pm2 logs kite-server    # View logs'));
@@ -263,6 +274,10 @@ export async function startServe(options: ServeOptions): Promise<void> {
 
   const adminToken = ensureAdminToken();
   const env = buildServerEnv(options, adminToken);
+
+  // Fire-and-forget anonymous telemetry (opt-in; no-op when disabled).
+  // Field list governed by plan/2026-06-30-f27-telemetry.md §2.
+  void reportServeStartup(env.KITE_SERVER_VERSION);
 
   if (options.pm2) {
     startPm2(options, env, runtime);

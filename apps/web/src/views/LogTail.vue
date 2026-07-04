@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, Plus, RefreshCw, Trash2, FileText, Play, Pause, ChevronDown, ChevronUp, Search, X, AlertTriangle, Loader2, Activity, History as HistoryIcon, Pencil, Zap } from 'lucide-vue-next'
+import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
+import { ArrowLeft, Plus, RefreshCw, Trash2, FileText, Play, Pause, ChevronDown, ChevronUp, Search, X, AlertTriangle, Loader2, Activity, History as HistoryIcon, Pencil, Zap, CheckSquare, Square, MinusSquare } from 'lucide-vue-next'
 import { useProjectStore, type Pm2AppStatus } from '../store/project'
 import { useToast } from '../composables/useToast'
 import FolderPickerDialog from '../components/FolderPickerDialog.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
+import BulkActionBar from '../components/BulkActionBar.vue'
+import { useBulkSelection } from '../composables/useBulkSelection'
 import { useLogTailStream } from '../composables/useLogTailStream'
 import { useLogSearchStream, type SearchHit } from '../composables/useLogSearchStream'
 
@@ -38,14 +40,35 @@ const activeSource = computed(() => sources.value.find((s) => s.id === activeSou
 const pm2Status = ref<Pm2AppStatus | null>(null)
 const pm2Loading = ref(false)
 const pm2Importing = ref(false)
+const pm2AutoLinked = ref(false)
 const pm2AppName = computed(() => (project.value as any)?.pm2AppName?.trim() || '')
 
-const pm2LogPaths = computed<Array<{ path: string; kind: 'stdout' | 'stderr' }>>(() => {
+type Pm2LogPathItem = {
+  path: string
+  kind: 'stdout' | 'stderr'
+  instanceId?: number
+}
+
+const pm2LogPaths = computed<Pm2LogPathItem[]>(() => {
   const s = pm2Status.value
   if (!s || s.found === false) return []
-  const list: Array<{ path: string; kind: 'stdout' | 'stderr' }> = []
-  if (s.outLogPath) list.push({ path: s.outLogPath, kind: 'stdout' })
-  if (s.errorLogPath) list.push({ path: s.errorLogPath, kind: 'stderr' })
+  const list: Pm2LogPathItem[] = []
+  const seen = new Set<string>()
+  const pushUnique = (item: Pm2LogPathItem) => {
+    if (!item.path) return
+    if (seen.has(item.path)) return
+    seen.add(item.path)
+    list.push(item)
+  }
+  // 优先使用每个实例的日志路径（cluster 模式下可能有多组 -0/-1/…）
+  const perInstance = Array.isArray(s.instancesLogPaths) ? s.instancesLogPaths : []
+  for (const inst of perInstance) {
+    if (inst?.outLogPath) pushUnique({ path: inst.outLogPath, kind: 'stdout', instanceId: inst.instanceId })
+    if (inst?.errorLogPath) pushUnique({ path: inst.errorLogPath, kind: 'stderr', instanceId: inst.instanceId })
+  }
+  // 兜底：老版本 server 只返回 outLogPath / errorLogPath
+  if (s.outLogPath) pushUnique({ path: s.outLogPath, kind: 'stdout' })
+  if (s.errorLogPath) pushUnique({ path: s.errorLogPath, kind: 'stderr' })
   return list
 })
 
@@ -56,6 +79,14 @@ const pm2MissingPaths = computed(() => {
 })
 
 const canImportFromPm2 = computed(() => pm2AppName.value && pm2Status.value?.found === true && pm2LogPaths.value.length > 0)
+
+function buildPm2SourceLabel(name: string, item: Pm2LogPathItem): string {
+  const parts = [name, item.kind]
+  if (typeof item.instanceId === 'number' && Number.isFinite(item.instanceId)) {
+    parts.push(`#${item.instanceId}`)
+  }
+  return parts.join(' · ')
+}
 
 const pickerOpen = ref(false)
 const confirmDeleteOpen = ref(false)
@@ -133,10 +164,13 @@ async function importPm2Sources() {
     return
   }
   const name = pm2AppName.value || 'pm2'
-  const items = missing.map((m) => ({
+  const minSort = sources.value.reduce((acc, s) => Math.min(acc, s.sortOrder ?? 0), 0)
+  const baseSort = minSort - missing.length
+  const items = missing.map((m, idx) => ({
     filePath: m.path,
-    label: `${name} · ${m.kind}`,
+    label: buildPm2SourceLabel(name, m),
     kind: 'pm2',
+    sortOrder: baseSort + idx,
   }))
   pm2Importing.value = true
   try {
@@ -152,6 +186,45 @@ async function importPm2Sources() {
   } finally {
     pm2Importing.value = false
   }
+}
+
+// 静默自动关联：进入日志页时如发现 PM2 有未导入的日志文件，自动补齐并置顶排序。
+async function autoLinkPm2Sources() {
+  if (pm2AutoLinked.value) return
+  if (!pm2AppName.value) return
+  if (pm2Status.value?.found !== true) return
+  const missing = pm2MissingPaths.value
+  if (missing.length === 0) {
+    pm2AutoLinked.value = true
+    return
+  }
+  const name = pm2AppName.value || 'pm2'
+  const minSort = sources.value.reduce((acc, s) => Math.min(acc, s.sortOrder ?? 0), 0)
+  const baseSort = minSort - missing.length
+  const items = missing.map((m, idx) => ({
+    filePath: m.path,
+    label: buildPm2SourceLabel(name, m),
+    kind: 'pm2',
+    sortOrder: baseSort + idx,
+  }))
+  try {
+    const data = await store.createLogSources(projectId.value, items)
+    const created = Array.isArray(data?.created) ? data.created : []
+    if (created.length > 0) {
+      await loadSources()
+      if (!activeSourceId.value) pickSource(created[0].id)
+    }
+    pm2AutoLinked.value = true
+  } catch {
+    // ignore, 用户仍可手动点"从 PM2 导入"
+  }
+}
+
+async function refreshAll() {
+  pm2AutoLinked.value = false
+  await loadSources()
+  await loadPm2Status()
+  await autoLinkPm2Sources()
 }
 
 async function onPickerConfirm(paths: string[]) {
@@ -188,9 +261,95 @@ async function confirmDelete() {
       searchHits.value = []
     }
     await loadSources()
+    pm2AutoLinked.value = false
+    await autoLinkPm2Sources()
     toast.success('已删除')
   } catch (e: any) {
     toast.error(e?.message || '删除失败')
+  }
+}
+
+// ---------- Bulk selection: log sources ----------
+const BULK_LOG_SRC_MAX = 200
+const sourceBulk = useBulkSelection(sources)
+const isBulkDeletingSources = ref(false)
+const showBulkDeleteSources = ref(false)
+
+onBeforeRouteLeave(() => {
+  sourceBulk.clear()
+})
+
+const bulkDeleteSourcesRequireText = computed(() => `delete ${sourceBulk.selectedCount.value} log sources`)
+
+function toggleSourceSelection(e: Event, id: string) {
+  e.stopPropagation()
+  sourceBulk.toggle(id)
+}
+
+function toggleAllSources() {
+  if (sourceBulk.isAllSelected.value) {
+    sourceBulk.clear()
+    return
+  }
+  if (sources.value.length > BULK_LOG_SRC_MAX) {
+    toast.error('已超出单次上限', `单次最多操作 ${BULK_LOG_SRC_MAX} 条`)
+    return
+  }
+  sourceBulk.selectAll()
+}
+
+function openBulkDeleteSources() {
+  if (sourceBulk.selectedCount.value === 0) return
+  if (sourceBulk.selectedCount.value > BULK_LOG_SRC_MAX) {
+    toast.error('已超出单次上限', `单次最多操作 ${BULK_LOG_SRC_MAX} 条`)
+    return
+  }
+  showBulkDeleteSources.value = true
+}
+
+async function confirmBulkDeleteSources() {
+  if (isBulkDeletingSources.value) return
+  const ids = Array.from(sourceBulk.selectedIds.value)
+  if (ids.length === 0) return
+  isBulkDeletingSources.value = true
+  try {
+    const res = await fetch('/api/log-sources/bulk', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${store.adminToken}`,
+      },
+      body: JSON.stringify({ ids, action: 'delete' }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      toast.error('批量删除失败', data?.error || `HTTP ${res.status}`)
+      return
+    }
+    const success = Number(data?.success || 0)
+    const failed = Array.isArray(data?.failed) ? data.failed.length : 0
+    if (failed === 0) {
+      toast.success(`已删除 ${success} 个日志源`)
+    } else {
+      toast.error('部分成功', `成功 ${success} 条，失败 ${failed} 条`)
+    }
+    if (activeSourceId.value && ids.includes(activeSourceId.value)) {
+      tail.disconnect()
+      search.abort()
+      activeSourceId.value = ''
+      liveLines.value = []
+      historyLines.value = []
+      searchHits.value = []
+    }
+    showBulkDeleteSources.value = false
+    sourceBulk.clear()
+    await loadSources()
+    pm2AutoLinked.value = false
+    await autoLinkPm2Sources()
+  } catch (err: any) {
+    toast.error('批量删除失败', err?.message || 'network error')
+  } finally {
+    isBulkDeletingSources.value = false
   }
 }
 
@@ -414,11 +573,21 @@ onMounted(async () => {
   }
   await loadSources()
   await loadPm2Status()
+  await autoLinkPm2Sources()
 })
 
 // 项目数据/PM2 绑定可能在挂载后异步到达：变化时重新拉取
-watch(pm2AppName, () => {
-  loadPm2Status()
+watch(pm2AppName, async () => {
+  pm2AutoLinked.value = false
+  await loadPm2Status()
+  await autoLinkPm2Sources()
+})
+
+watch(() => pm2Status.value?.found === true ? pm2LogPaths.value.map((p) => p.path).join('|') : '', (val, prev) => {
+  if (val && val !== prev) {
+    pm2AutoLinked.value = false
+    autoLinkPm2Sources()
+  }
 })
 
 onUnmounted(() => {
@@ -441,7 +610,7 @@ onUnmounted(() => {
       </div>
       <div class="flex items-center space-x-2">
         <button
-          @click="loadSources"
+          @click="refreshAll"
           class="inline-flex items-center px-3 py-1.5 text-xs font-medium bg-base border border-border hover:border-primary/50 hover:text-primary text-textMuted rounded-md transition-all"
         >
           <RefreshCw class="w-3.5 h-3.5 mr-1.5" :class="{ 'animate-spin': loadingSources }" />
@@ -478,7 +647,21 @@ onUnmounted(() => {
       <!-- Source list -->
       <aside class="col-span-12 lg:col-span-3 bg-panel border border-border rounded-lg p-3">
         <div class="text-xs text-textMuted mb-2 px-1 flex items-center justify-between">
-          <span>日志源</span>
+          <span class="flex items-center gap-1.5">
+            <button
+              v-if="sources.length > 0"
+              type="button"
+              class="p-0.5 rounded hover:text-textMain transition-colors"
+              :class="sourceBulk.isAllSelected.value || sourceBulk.isIndeterminate.value ? 'text-primary' : 'text-textMuted'"
+              :title="sourceBulk.isAllSelected.value ? '清空选中' : '全选'"
+              @click="toggleAllSources"
+            >
+              <CheckSquare v-if="sourceBulk.isAllSelected.value" class="w-3.5 h-3.5" />
+              <MinusSquare v-else-if="sourceBulk.isIndeterminate.value" class="w-3.5 h-3.5" />
+              <Square v-else class="w-3.5 h-3.5" />
+            </button>
+            <span>日志源</span>
+          </span>
           <span>{{ sources.length }}</span>
         </div>
         <div v-if="loadingSources" class="text-xs text-textMuted py-6 text-center">
@@ -494,9 +677,19 @@ onUnmounted(() => {
             v-for="s in sources"
             :key="s.id"
             class="group rounded-md border transition-all"
-            :class="activeSourceId === s.id ? 'border-primary/60 bg-primary/5' : 'border-transparent hover:bg-white/5'"
+            :class="sourceBulk.isSelected(s.id) ? 'border-primary/60 bg-primary/10' : (activeSourceId === s.id ? 'border-primary/60 bg-primary/5' : 'border-transparent hover:bg-white/5')"
           >
             <div class="flex items-start p-2">
+              <button
+                type="button"
+                class="p-1 mr-1 rounded transition-colors shrink-0"
+                :class="sourceBulk.isSelected(s.id) ? 'text-primary' : 'text-textMuted opacity-0 group-hover:opacity-100 hover:text-textMain'"
+                :title="sourceBulk.isSelected(s.id) ? '取消选中' : '选中此日志源'"
+                @click.stop="toggleSourceSelection($event, s.id)"
+              >
+                <CheckSquare v-if="sourceBulk.isSelected(s.id)" class="w-3.5 h-3.5" />
+                <Square v-else class="w-3.5 h-3.5" />
+              </button>
               <button
                 @click="pickSource(s.id)"
                 class="flex-1 text-left min-w-0"
@@ -727,6 +920,37 @@ onUnmounted(() => {
       tone="danger"
       @update:open="confirmDeleteOpen = $event"
       @confirm="confirmDelete"
+    />
+
+    <BulkActionBar
+      :count="sourceBulk.selectedCount.value"
+      :total="sources.length"
+      @clear="sourceBulk.clear"
+    >
+      <template #actions>
+        <button
+          type="button"
+          :disabled="isBulkDeletingSources"
+          class="flex items-center px-2.5 py-1.5 text-xs rounded-md border border-danger/40 text-danger hover:bg-danger/10 transition-colors disabled:opacity-50"
+          @click="openBulkDeleteSources"
+        >
+          <Trash2 class="w-3.5 h-3.5 mr-1.5" />
+          删除选中
+        </button>
+      </template>
+    </BulkActionBar>
+
+    <ConfirmDialog
+      v-model:open="showBulkDeleteSources"
+      tone="danger"
+      title="批量移除日志源？"
+      :message="`将移除 ${sourceBulk.selectedCount.value} 个日志源。日志文件本身不会被删除。`"
+      confirm-text="确认删除"
+      cancel-text="取消"
+      :require-text="bulkDeleteSourcesRequireText"
+      :require-text-hint="`请输入 ${bulkDeleteSourcesRequireText} 以确认`"
+      :loading="isBulkDeletingSources"
+      @confirm="confirmBulkDeleteSources"
     />
   </div>
 </template>

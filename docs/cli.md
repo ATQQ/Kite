@@ -608,3 +608,18 @@ kite rollback proj_abcdef --to 1f2a3b4c-... --yes
 
 > `rollback` 走 server 端 `POST /api/deployments/:id/rollback` 接口，自动复用源部署的归档 zip（Web 管理端「存储」页面的引用计数会保护这些 zip 不被误删）。失败会保留新的 `triggerSource=rollback` 部署记录，可用 `kite logs <newDeployId>` 排查。
 
+## 十五、匿名使用统计 (kite telemetry)
+
+匿名使用统计，**默认开启**，可通过 `kite telemetry:off` 关闭。设计与字段细节见[使用统计说明](https://docs.kite.sugarat.top/guide/telemetry)。
+
+| 命令 | 说明 |
+|------|------|
+| `kite telemetry:on` | 显式开启匿名使用统计（首次运行时会在 `~/.kite/config.json` 自动生成匿名 `telemetryInstanceId`；此命令仅用于之前主动关闭过后重新开启）。 |
+| `kite telemetry:off` | 关闭匿名使用统计；之后 `kite serve` / `kite push` 不再发出任何 telemetry 请求。 |
+| `kite telemetry:status` | 查看当前开关状态、匿名 ID 前 8 位，以及当前生效的上报地址与来源（env / config / default）。 |
+| `kite telemetry:endpoint <url>` | 覆盖上报地址，写入 `~/.kite/config.json` 的 `telemetryEndpoint` 字段；传 `default` / `reset` 可恢复为内置默认地址。也可用环境变量 `KITE_TELEMETRY_ENDPOINT` 在单次运行时覆盖（优先级最高）。 |
+
+开启后仅在两个时刻各上报一次（`kite.serve.startup` / `kite.push.start`），字段包含 `event` / `ts` / `kiteVersion` / `instanceId` / `os` / `arch`，**不包含**项目名、路径、Token、push 结果、耗时等任何敏感或运行期信息。请求 3 秒超时，失败完全静默，不影响 CLI 正常执行。
+
+公开聚合面板：[/stats](/stats)；聚合 JSON API：`GET /api/public/telemetry/overview?days=30`（无鉴权 + CORS，可直接跨域消费）。
+

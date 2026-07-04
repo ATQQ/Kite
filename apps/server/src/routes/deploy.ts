@@ -374,6 +374,225 @@ export const deployRoutes = new Elysia()
 
     return { success: true, message: 'Project deleted successfully' };
   })
+  .post('/api/projects/bulk', async ({ headers, body, set }) => {
+    if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
+    const b = body as any;
+    const rawIds: unknown = b?.ids;
+    const action: unknown = b?.action;
+    if (!Array.isArray(rawIds) || rawIds.length === 0) {
+      set.status = 400;
+      return { error: 'ids is required (non-empty array)' };
+    }
+    if (rawIds.length > 200) {
+      set.status = 400;
+      return { error: 'too many ids in one request (max 200)' };
+    }
+    const ids = Array.from(new Set(rawIds.filter((v) => typeof v === 'string' && v.length > 0))) as string[];
+    if (ids.length === 0) {
+      set.status = 400;
+      return { error: 'ids must contain at least one non-empty string' };
+    }
+
+    const projects = await db.projects.findManyByIds(ids);
+    const projectMap = new Map(projects.map(p => [p.id, p] as const));
+    const missing = ids.filter(id => !projectMap.has(id));
+
+    if (action === 'delete') {
+      const succeeded: Array<{ id: string; name: string }> = [];
+      const failed: Array<{ id: string; error: string }> = [];
+      for (const id of missing) failed.push({ id, error: 'Project not found' });
+      for (const id of ids) {
+        const p = projectMap.get(id);
+        if (!p) continue;
+        try {
+          const ok = await db.projects.remove(id);
+          if (!ok) { failed.push({ id, error: 'Project not found' }); continue; }
+          succeeded.push({ id: p.id, name: p.name });
+        } catch (err: any) {
+          failed.push({ id, error: err?.message || 'delete failed' });
+        }
+      }
+      await writeAudit({ headers }, {
+        action: 'project.bulk.delete',
+        targetType: 'project',
+        targetId: null,
+        targetName: null,
+        before: succeeded.map(s => ({ id: s.id, name: s.name })),
+        after: null,
+        summary: `批量删除 ${succeeded.length} 个项目${failed.length ? `（失败 ${failed.length}）` : ''}`,
+        status: succeeded.length > 0 ? 'success' : 'failed',
+      });
+      return { success: succeeded.length, failed };
+    }
+
+    if (action === 'setCategory') {
+      let categoryId: string | null = null;
+      const raw = b?.categoryId;
+      if (raw !== null && raw !== undefined && raw !== '') {
+        if (typeof raw !== 'string') { set.status = 400; return { error: 'categoryId must be string or null' }; }
+        const cat = await db.categories.findById(raw);
+        if (!cat) { set.status = 404; return { error: 'Category not found' }; }
+        categoryId = cat.id;
+      }
+      const succeeded: Array<{ id: string; name: string; from: string | null; to: string | null }> = [];
+      const failed: Array<{ id: string; error: string }> = [];
+      for (const id of missing) failed.push({ id, error: 'Project not found' });
+      for (const id of ids) {
+        const p = projectMap.get(id);
+        if (!p) continue;
+        try {
+          const from = (p as any).categoryId ?? null;
+          if (from === categoryId) {
+            succeeded.push({ id: p.id, name: p.name, from, to: categoryId });
+            continue;
+          }
+          await db.projects.update(id, { categoryId });
+          succeeded.push({ id: p.id, name: p.name, from, to: categoryId });
+        } catch (err: any) {
+          failed.push({ id, error: err?.message || 'update failed' });
+        }
+      }
+      await writeAudit({ headers }, {
+        action: 'project.bulk.setCategory',
+        targetType: 'project',
+        targetId: null,
+        targetName: null,
+        before: succeeded.map(s => ({ id: s.id, categoryId: s.from })),
+        after: succeeded.map(s => ({ id: s.id, categoryId: s.to })),
+        summary: `批量修改 ${succeeded.length} 个项目分类${failed.length ? `（失败 ${failed.length}）` : ''}`,
+        status: succeeded.length > 0 ? 'success' : 'failed',
+      });
+      return { success: succeeded.length, failed };
+    }
+
+    if (action === 'addTags' || action === 'removeTags') {
+      const rawTagIds: unknown = b?.tagIds;
+      if (!Array.isArray(rawTagIds) || rawTagIds.length === 0) {
+        set.status = 400;
+        return { error: 'tagIds is required (non-empty array)' };
+      }
+      const tagIds = Array.from(new Set(rawTagIds.filter((v) => typeof v === 'string' && v.length > 0))) as string[];
+      if (tagIds.length === 0) {
+        set.status = 400;
+        return { error: 'tagIds must contain at least one non-empty string' };
+      }
+      const validTags: Array<{ id: string; name: string }> = [];
+      for (const tid of tagIds) {
+        const tag = await db.tags.findById(tid);
+        if (tag) validTags.push({ id: tag.id, name: tag.name });
+      }
+      if (validTags.length === 0) {
+        set.status = 404;
+        return { error: 'No valid tags found in tagIds' };
+      }
+      const succeeded: Array<{ id: string; name: string }> = [];
+      const failed: Array<{ id: string; error: string }> = [];
+      let changedCount = 0;
+      for (const id of missing) failed.push({ id, error: 'Project not found' });
+      for (const id of ids) {
+        const p = projectMap.get(id);
+        if (!p) continue;
+        try {
+          for (const tag of validTags) {
+            if (action === 'addTags') {
+              const added = await db.projectTags.addPair(id, tag.id);
+              if (added) changedCount += 1;
+            } else {
+              await db.projectTags.removePair(id, tag.id);
+              changedCount += 1;
+            }
+          }
+          succeeded.push({ id: p.id, name: p.name });
+        } catch (err: any) {
+          failed.push({ id, error: err?.message || 'tag update failed' });
+        }
+      }
+      const verb = action === 'addTags' ? '添加' : '移除';
+      await writeAudit({ headers }, {
+        action: action === 'addTags' ? 'project.bulk.addTags' : 'project.bulk.removeTags',
+        targetType: 'project',
+        targetId: null,
+        targetName: null,
+        before: null,
+        after: {
+          projects: succeeded,
+          tags: validTags,
+          changedPairs: changedCount,
+        },
+        summary: `批量${verb}标签：${succeeded.length} 个项目 × ${validTags.length} 个标签`,
+        status: succeeded.length > 0 ? 'success' : 'failed',
+      });
+      return { success: succeeded.length, failed };
+    }
+
+    set.status = 400;
+    return { error: 'action must be one of: delete, setCategory, addTags, removeTags' };
+  }, {
+    body: t.Object({
+      ids: t.Array(t.String()),
+      action: t.String(),
+      categoryId: t.Optional(t.Union([t.String(), t.Null()])),
+      tagIds: t.Optional(t.Array(t.String())),
+    }),
+  })
+  .post('/api/log-sources/bulk', async ({ headers, body, set }) => {
+    if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
+    const b = body as any;
+    const rawIds: unknown = b?.ids;
+    const action: unknown = b?.action;
+    if (action !== 'delete') {
+      set.status = 400;
+      return { error: 'action must be: delete' };
+    }
+    if (!Array.isArray(rawIds) || rawIds.length === 0) {
+      set.status = 400;
+      return { error: 'ids is required (non-empty array)' };
+    }
+    if (rawIds.length > 200) {
+      set.status = 400;
+      return { error: 'too many ids in one request (max 200)' };
+    }
+    const ids = Array.from(new Set(rawIds.filter((v) => typeof v === 'string' && v.length > 0))) as string[];
+    if (ids.length === 0) {
+      set.status = 400;
+      return { error: 'ids must contain at least one non-empty string' };
+    }
+
+    const rows = await db.logSources.findManyByIds(ids);
+    const rowMap = new Map(rows.map(r => [r.id, r] as const));
+    const succeeded: Array<{ id: string; projectId: string; label: string }> = [];
+    const failed: Array<{ id: string; error: string }> = [];
+
+    for (const id of ids) {
+      const row = rowMap.get(id);
+      if (!row) { failed.push({ id, error: 'Log source not found' }); continue; }
+      try {
+        const ok = await db.logSources.remove(row.id);
+        if (!ok) { failed.push({ id, error: 'Log source not found' }); continue; }
+        succeeded.push({ id: row.id, projectId: row.projectId, label: row.label });
+      } catch (err: any) {
+        failed.push({ id, error: err?.message || 'delete failed' });
+      }
+    }
+
+    await writeAudit({ headers }, {
+      action: 'log_source.bulk.delete',
+      targetType: 'log_source',
+      targetId: null,
+      targetName: null,
+      before: succeeded,
+      after: null,
+      summary: `批量删除 ${succeeded.length} 个日志源${failed.length ? `（失败 ${failed.length}）` : ''}`,
+      status: succeeded.length > 0 ? 'success' : 'failed',
+    });
+
+    return { success: succeeded.length, failed };
+  }, {
+    body: t.Object({
+      ids: t.Array(t.String()),
+      action: t.String(),
+    }),
+  })
   .post('/api/projects/:id/token', async ({ headers, params, set }) => {
     if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
     const project = await db.projects.update(params.id, { token: 'kt_' + randomUUID().replace(/-/g, '') });
@@ -521,9 +740,10 @@ export const deployRoutes = new Elysia()
 
       let fullOutput = '';
       const appendLog = async (text: string) => {
-        fullOutput += text + '\n';
+        const line = `${new Date().toISOString()} ${text}`;
+        fullOutput += line + '\n';
         await db.deployments.update(deploymentRow.id, { output: fullOutput });
-        broadcastToSubscribers(deploymentRow.id, 'log', text);
+        broadcastToSubscribers(deploymentRow.id, 'log', line);
       };
 
       // Stream NDJSON response to CLI
@@ -964,7 +1184,7 @@ export const deployRoutes = new Elysia()
       ? ((endMs - startMs) / 1000).toFixed(1) + 's'
       : (deployment.duration || '0s');
 
-    const markLine = `[Kite] Manually marked as ${nextStatus} by admin at ${endTimeIso}`;
+    const markLine = `${endTimeIso} [Kite] Manually marked as ${nextStatus} by admin at ${endTimeIso}`;
     const nextOutput = deployment.output ? `${deployment.output}\n${markLine}` : markLine;
 
     await db.deployments.update(deployment.id, {
@@ -1077,9 +1297,10 @@ export const deployRoutes = new Elysia()
 
     let fullOutput = '';
     const appendLog = async (text: string) => {
-      fullOutput += text + '\n';
+      const line = `${new Date().toISOString()} ${text}`;
+      fullOutput += line + '\n';
       await db.deployments.update(newDeployId, { output: fullOutput });
-      broadcastToSubscribers(newDeployId, 'log', text);
+      broadcastToSubscribers(newDeployId, 'log', line);
     };
 
     const startTime = Date.now();

@@ -68,6 +68,13 @@ export interface SystemResources {
   }
 }
 
+export interface Pm2InstanceLogPaths {
+  pmId: number
+  instanceId?: number
+  outLogPath?: string
+  errorLogPath?: string
+}
+
 export interface Pm2AppStatus {
   bound: boolean
   found?: boolean
@@ -84,6 +91,7 @@ export interface Pm2AppStatus {
   instances?: number
   errorLogPath?: string
   outLogPath?: string
+  instancesLogPaths?: Pm2InstanceLogPaths[]
   createdAt?: number
   message?: string
 }
@@ -521,7 +529,7 @@ export const useProjectStore = defineStore('project', () => {
     }
   }
 
-  async function createLogSources(projectId: string, items: Array<{ label?: string; filePath: string; kind?: string }>) {
+  async function createLogSources(projectId: string, items: Array<{ label?: string; filePath: string; kind?: string; sortOrder?: number }>) {
     return await apiFetch(`/projects/${projectId}/log-sources`, {
       method: 'POST',
       body: JSON.stringify({ items }),

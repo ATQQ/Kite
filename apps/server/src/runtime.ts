@@ -34,8 +34,30 @@ export interface SpawnResult {
   exited: Promise<number>;
 }
 
+const KITE_INTERNAL_ENV_KEYS = [
+  'PORT',
+  'HOST',
+  'ADMIN_TOKEN',
+  'KITE_WEB_DIR',
+  'KITE_DB_DIR',
+  'KITE_HOME',
+  'KITE_SERVER_VERSION',
+  'KITE_SEED_DEMO_PROJECT',
+  'KITE_ARTIFACT_KEEP_N',
+] as const;
+
+function buildChildEnv(overrides?: Record<string, string>): Record<string, string> {
+  const base: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (v === undefined) continue;
+    if ((KITE_INTERNAL_ENV_KEYS as readonly string[]).includes(k)) continue;
+    base[k] = v;
+  }
+  return overrides ? { ...base, ...overrides } : base;
+}
+
 export async function spawn(cmd: string, args: string[], options: { cwd?: string; env?: Record<string, string> }): Promise<SpawnResult> {
-  const mergedEnv = options.env ? { ...process.env, ...options.env } : undefined;
+  const mergedEnv = buildChildEnv(options.env);
 
   if (isBun) {
     const proc = Bun.spawn([cmd, ...args], {

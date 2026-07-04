@@ -11,21 +11,43 @@ const applyDocumentLang = (locale: SupportedLocale) => {
   }
 }
 
+const isSupportedLocale = (v: unknown): v is SupportedLocale =>
+  typeof v === 'string' && (SUPPORTED_LOCALES as readonly string[]).includes(v)
+
 export const useLocaleStore = defineStore('locale', () => {
   const locale = ref<SupportedLocale>(detectLocale())
 
-  const setLocale = (next: SupportedLocale) => {
-    if (!(SUPPORTED_LOCALES as readonly string[]).includes(next)) return
+  const applyLocale = (next: SupportedLocale, persist: boolean) => {
+    if (!isSupportedLocale(next)) return
     locale.value = next
-    localStorage.setItem(LOCALE_STORAGE_KEY, next)
+    if (persist) {
+      try {
+        localStorage.setItem(LOCALE_STORAGE_KEY, next)
+      } catch {
+        /* noop */
+      }
+    }
     i18n.global.locale.value = next
     applyDocumentLang(next)
+  }
+
+  const setLocale = (next: SupportedLocale) => {
+    applyLocale(next, true)
   }
 
   const toggleLocale = () => {
     const idx = SUPPORTED_LOCALES.indexOf(locale.value)
     const nextIdx = (idx + 1) % SUPPORTED_LOCALES.length
     setLocale(SUPPORTED_LOCALES[nextIdx])
+  }
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener('storage', (event) => {
+      if (event.key !== LOCALE_STORAGE_KEY) return
+      if (!event.newValue || !isSupportedLocale(event.newValue)) return
+      if (event.newValue === locale.value) return
+      applyLocale(event.newValue, false)
+    })
   }
 
   i18n.global.locale.value = locale.value
