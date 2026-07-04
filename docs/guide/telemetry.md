@@ -101,7 +101,3 @@ KITE_TELEMETRY_ENDPOINT=http://127.0.0.1:5430/api/telemetry kite serve
 
 - 在 CI 或离线环境建议显式关闭：`kite telemetry:off`；或通过环境变量 `KITE_TELEMETRY_ENDPOINT=` 指向一个不可达地址（fire-and-forget，本身也不会影响命令结果）
 - 即便 telemetry 处于开启状态，请求失败也会被静默忽略，**不会**让 `kite serve` 或 `kite push` 失败或变慢
-
-## 九、字段约束
-
-字段清单受 [plan/2026-06-30-f27-telemetry.md](https://github.com/ATQQ/Kite/blob/main/plan/2026-06-30-f27-telemetry.md) 第 §2 节治理。**新增字段必须先更新该计划文档**，并通过开源仓库 PR 公开评审。
