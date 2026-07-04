@@ -1,21 +1,13 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from 'vue'
-
-interface StatsPayload {
-  schema: number
-  totals: { instances: number; startups: number; pushes?: number }
-  activeInstances30d: number
-  startupsLast30d: number
-}
+import { fetchStatsPayload, type StatsPayload } from '../utils/stats'
 
 const data = ref<StatsPayload | null>(null)
 const ok = ref(false)
 
 onMounted(async () => {
   try {
-    const res = await fetch('/stats.json', { cache: 'no-store' })
-    if (!res.ok) return
-    data.value = await res.json()
+    data.value = await fetchStatsPayload(30)
     ok.value = true
   } catch {
     ok.value = false
@@ -25,7 +17,7 @@ onMounted(async () => {
 const showPushCard = computed(() => {
   const d = data.value
   if (!d) return false
-  return (d.schema ?? 1) >= 2 && typeof d.totals.pushes === 'number'
+  return typeof d.totals.pushes === 'number'
 })
 </script>
 

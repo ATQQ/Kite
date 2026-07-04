@@ -1,38 +1,16 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from 'vue'
-
-interface StatsTotals {
-  instances: number
-  startups: number
-  pushes?: number
-}
-
-interface StatsPayload {
-  schema: number
-  updatedAt: string
-  totals: StatsTotals
-  activeInstances30d: number
-  startupsLast30d: number
-  pushesLast30d?: number
-  startupsTrend30d: number[]
-  pushTrend30d?: number[]
-  osDistribution: Array<{ os: string; count: number }>
-  topVersions: Array<{ version: string; count: number }>
-}
+import { fetchStatsPayload, type StatsPayload } from '../utils/stats'
 
 const data = ref<StatsPayload | null>(null)
 const error = ref<string | null>(null)
 const loading = ref(true)
 
-const STATS_URL = '/stats.json'
-
-async function fetchStats() {
+async function load() {
   loading.value = true
   error.value = null
   try {
-    const res = await fetch(STATS_URL, { cache: 'no-store' })
-    if (!res.ok) throw new Error('HTTP ' + res.status)
-    data.value = (await res.json()) as StatsPayload
+    data.value = await fetchStatsPayload(30)
   } catch (err: any) {
     error.value = err?.message || String(err)
   } finally {
@@ -40,12 +18,17 @@ async function fetchStats() {
   }
 }
 
-onMounted(() => { fetchStats() })
+onMounted(() => { load() })
 
 const showPushBlock = computed(() => {
   const d = data.value
   if (!d) return false
-  return (d.schema ?? 1) >= 2 && typeof d.pushesLast30d === 'number'
+  return typeof d.totals.pushes === 'number'
+})
+
+const showArchBlock = computed(() => {
+  const d = data.value
+  return !!(d && d.archDistribution && d.archDistribution.length)
 })
 
 function maxOf(arr: number[] | undefined): number {
@@ -55,6 +38,10 @@ function maxOf(arr: number[] | undefined): number {
 
 function formatTime(iso: string): string {
   try { return new Date(iso).toLocaleString() } catch { return iso }
+}
+
+function sourceLabel(source: 'api' | 'static'): string {
+  return source === 'api' ? '实时接口' : '静态兜底'
 }
 </script>
 
@@ -68,6 +55,7 @@ function formatTime(iso: string): string {
         <p class="stats-meta">{{ error }}</p>
         <p class="stats-meta">
           数据更新可能延迟，请稍后再试，或直接访问
+          <a href="https://kite.sugarat.top/api/public/telemetry/overview?days=30" target="_blank" rel="noopener">聚合 API</a> /
           <a href="/stats.json">/stats.json</a> /
           <a href="/stats.csv">/stats.csv</a>。
         </p>
@@ -75,13 +63,13 @@ function formatTime(iso: string): string {
 
       <div v-else-if="data">
         <p class="stats-meta">
-          数据更新时间：{{ formatTime(data.updatedAt) }} · schema v{{ data.schema }}
+          数据更新时间：{{ formatTime(data.updatedAt) }} · schema v{{ data.schema }} · 数据源：{{ sourceLabel(data.source) }}
         </p>
 
         <div class="stats-grid">
           <div class="stats-card">
             <div class="num">{{ data.activeInstances30d.toLocaleString() }}</div>
-            <div class="label">活跃实例</div>
+            <div class="label">近 {{ data.days }} 天活跃匿名实例</div>
             <ul class="sub-list">
               <li><span>累计匿名实例</span><span>{{ data.totals.instances.toLocaleString() }}</span></li>
               <li><span>累计启动次数</span><span>{{ data.totals.startups.toLocaleString() }}</span></li>
@@ -90,10 +78,14 @@ function formatTime(iso: string): string {
           <div v-if="showPushBlock && typeof data.totals.pushes === 'number'" class="stats-card">
             <div class="num">{{ (data.totals.pushes || 0).toLocaleString() }}</div>
             <div class="label">累计 Push 次数</div>
+            <ul class="sub-list">
+              <li><span>近 {{ data.days }} 天 Push</span><span>{{ (data.pushesLast30d || 0).toLocaleString() }}</span></li>
+              <li><span>近 {{ data.days }} 天启动</span><span>{{ data.startupsLast30d.toLocaleString() }}</span></li>
+            </ul>
           </div>
         </div>
 
-        <h2>启动趋势（近 30 天）</h2>
+        <h2>启动趋势（近 {{ data.days }} 天）</h2>
         <div class="stats-bar-wrap">
           <div
             v-for="(v, i) in data.startupsTrend30d"
@@ -106,7 +98,7 @@ function formatTime(iso: string): string {
         </div>
 
         <template v-if="showPushBlock && data.pushTrend30d && data.pushTrend30d.length">
-          <h2>Push 趋势（近 30 天）</h2>
+          <h2>Push 趋势（近 {{ data.days }} 天）</h2>
           <div class="stats-bar-wrap">
             <div
               v-for="(v, i) in data.pushTrend30d"
@@ -127,6 +119,16 @@ function formatTime(iso: string): string {
           </li>
         </ul>
 
+        <template v-if="showArchBlock">
+          <h2>架构分布</h2>
+          <ul class="stats-list">
+            <li v-for="item in data.archDistribution" :key="item.arch">
+              <span>{{ item.arch }}</span>
+              <span>{{ item.count.toLocaleString() }}</span>
+            </li>
+          </ul>
+        </template>
+
         <h2>版本分布（Top）</h2>
         <ul class="stats-list">
           <li v-for="item in data.topVersions" :key="item.version">
@@ -136,7 +138,11 @@ function formatTime(iso: string): string {
         </ul>
 
         <p class="stats-meta">
-          原始数据下载：<a href="/stats.json">/stats.json</a> · <a href="/stats.csv">/stats.csv</a>
+          聚合 JSON API：
+          <a href="https://kite.sugarat.top/api/public/telemetry/overview?days=30" target="_blank" rel="noopener">
+            /api/public/telemetry/overview?days=30
+          </a>
+          · 静态兜底：<a href="/stats.json">/stats.json</a> · <a href="/stats.csv">/stats.csv</a>
         </p>
       </div>
     </div>
