@@ -2,6 +2,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { runCmd } from './health.js';
 
+export interface Pm2InstanceLogPaths {
+  pmId: number;
+  instanceId?: number;         // pm2_env.NODE_APP_INSTANCE, cluster mode 下每个实例的序号
+  outLogPath?: string;
+  errorLogPath?: string;
+}
+
 export interface Pm2AppStatus {
   found: boolean;
   name: string;
@@ -18,6 +25,7 @@ export interface Pm2AppStatus {
   pm2_env_status?: string;
   errorLogPath?: string;
   outLogPath?: string;
+  instancesLogPaths?: Pm2InstanceLogPaths[]; // 全部同名实例的日志文件路径（cluster 模式下每个实例的 -0/-1/...）
   createdAt?: number;
   message?: string;            // error / hint when not found
 }
@@ -97,6 +105,7 @@ export async function getPm2AppStatus(name: string): Promise<Pm2AppStatus> {
   let unstable = 0;
   let uptimeMax = 0;
   let status = 'unknown';
+  const instancesLogPaths: Pm2InstanceLogPaths[] = [];
   for (const m of matched) {
     const monit = m?.monit || {};
     cpuSum += Number(monit.cpu ?? 0);
@@ -109,6 +118,18 @@ export async function getPm2AppStatus(name: string): Promise<Pm2AppStatus> {
       if (up > uptimeMax) uptimeMax = up;
     }
     if (env.status) status = String(env.status);
+    const rawInstanceId = env.NODE_APP_INSTANCE ?? env.pm_id;
+    const instanceId = typeof rawInstanceId === 'number'
+      ? rawInstanceId
+      : (rawInstanceId !== undefined && rawInstanceId !== null && rawInstanceId !== '' && Number.isFinite(Number(rawInstanceId)))
+        ? Number(rawInstanceId)
+        : undefined;
+    instancesLogPaths.push({
+      pmId: Number(m?.pm_id ?? -1),
+      instanceId,
+      outLogPath: env.pm_out_log_path ? String(env.pm_out_log_path) : undefined,
+      errorLogPath: env.pm_err_log_path ? String(env.pm_err_log_path) : undefined,
+    });
   }
   const env = first?.pm2_env || {};
   return {
@@ -127,6 +148,7 @@ export async function getPm2AppStatus(name: string): Promise<Pm2AppStatus> {
     pm2_env_status: env.status ? String(env.status) : undefined,
     errorLogPath: env.pm_err_log_path ? String(env.pm_err_log_path) : undefined,
     outLogPath: env.pm_out_log_path ? String(env.pm_out_log_path) : undefined,
+    instancesLogPaths,
     createdAt: typeof env.created_at === 'number' ? env.created_at : undefined,
   };
 }

@@ -84,11 +84,13 @@ export const logSourceRoutes = new Elysia()
       if (!guard.ok) { errors.push({ index: i, error: guard.error || 'invalid path' }); continue; }
       const label = (typeof item.label === 'string' && item.label.trim()) ? item.label.trim() : basename(filePath);
       const kind = normalizeKind(item.kind);
+      const sortOrder = item.sortOrder !== undefined ? toInt(item.sortOrder, 0) : 0;
       const row = await db.logSources.create({
         projectId: params.id,
         label,
         filePath: guard.resolved || filePath,
         kind,
+        sortOrder,
       });
       created.push(row);
     }

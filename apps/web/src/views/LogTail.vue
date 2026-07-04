@@ -40,14 +40,35 @@ const activeSource = computed(() => sources.value.find((s) => s.id === activeSou
 const pm2Status = ref<Pm2AppStatus | null>(null)
 const pm2Loading = ref(false)
 const pm2Importing = ref(false)
+const pm2AutoLinked = ref(false)
 const pm2AppName = computed(() => (project.value as any)?.pm2AppName?.trim() || '')
 
-const pm2LogPaths = computed<Array<{ path: string; kind: 'stdout' | 'stderr' }>>(() => {
+type Pm2LogPathItem = {
+  path: string
+  kind: 'stdout' | 'stderr'
+  instanceId?: number
+}
+
+const pm2LogPaths = computed<Pm2LogPathItem[]>(() => {
   const s = pm2Status.value
   if (!s || s.found === false) return []
-  const list: Array<{ path: string; kind: 'stdout' | 'stderr' }> = []
-  if (s.outLogPath) list.push({ path: s.outLogPath, kind: 'stdout' })
-  if (s.errorLogPath) list.push({ path: s.errorLogPath, kind: 'stderr' })
+  const list: Pm2LogPathItem[] = []
+  const seen = new Set<string>()
+  const pushUnique = (item: Pm2LogPathItem) => {
+    if (!item.path) return
+    if (seen.has(item.path)) return
+    seen.add(item.path)
+    list.push(item)
+  }
+  // 优先使用每个实例的日志路径（cluster 模式下可能有多组 -0/-1/…）
+  const perInstance = Array.isArray(s.instancesLogPaths) ? s.instancesLogPaths : []
+  for (const inst of perInstance) {
+    if (inst?.outLogPath) pushUnique({ path: inst.outLogPath, kind: 'stdout', instanceId: inst.instanceId })
+    if (inst?.errorLogPath) pushUnique({ path: inst.errorLogPath, kind: 'stderr', instanceId: inst.instanceId })
+  }
+  // 兜底：老版本 server 只返回 outLogPath / errorLogPath
+  if (s.outLogPath) pushUnique({ path: s.outLogPath, kind: 'stdout' })
+  if (s.errorLogPath) pushUnique({ path: s.errorLogPath, kind: 'stderr' })
   return list
 })
 
@@ -58,6 +79,14 @@ const pm2MissingPaths = computed(() => {
 })
 
 const canImportFromPm2 = computed(() => pm2AppName.value && pm2Status.value?.found === true && pm2LogPaths.value.length > 0)
+
+function buildPm2SourceLabel(name: string, item: Pm2LogPathItem): string {
+  const parts = [name, item.kind]
+  if (typeof item.instanceId === 'number' && Number.isFinite(item.instanceId)) {
+    parts.push(`#${item.instanceId}`)
+  }
+  return parts.join(' · ')
+}
 
 const pickerOpen = ref(false)
 const confirmDeleteOpen = ref(false)
@@ -135,10 +164,13 @@ async function importPm2Sources() {
     return
   }
   const name = pm2AppName.value || 'pm2'
-  const items = missing.map((m) => ({
+  const minSort = sources.value.reduce((acc, s) => Math.min(acc, s.sortOrder ?? 0), 0)
+  const baseSort = minSort - missing.length
+  const items = missing.map((m, idx) => ({
     filePath: m.path,
-    label: `${name} · ${m.kind}`,
+    label: buildPm2SourceLabel(name, m),
     kind: 'pm2',
+    sortOrder: baseSort + idx,
   }))
   pm2Importing.value = true
   try {
@@ -154,6 +186,45 @@ async function importPm2Sources() {
   } finally {
     pm2Importing.value = false
   }
+}
+
+// 静默自动关联：进入日志页时如发现 PM2 有未导入的日志文件，自动补齐并置顶排序。
+async function autoLinkPm2Sources() {
+  if (pm2AutoLinked.value) return
+  if (!pm2AppName.value) return
+  if (pm2Status.value?.found !== true) return
+  const missing = pm2MissingPaths.value
+  if (missing.length === 0) {
+    pm2AutoLinked.value = true
+    return
+  }
+  const name = pm2AppName.value || 'pm2'
+  const minSort = sources.value.reduce((acc, s) => Math.min(acc, s.sortOrder ?? 0), 0)
+  const baseSort = minSort - missing.length
+  const items = missing.map((m, idx) => ({
+    filePath: m.path,
+    label: buildPm2SourceLabel(name, m),
+    kind: 'pm2',
+    sortOrder: baseSort + idx,
+  }))
+  try {
+    const data = await store.createLogSources(projectId.value, items)
+    const created = Array.isArray(data?.created) ? data.created : []
+    if (created.length > 0) {
+      await loadSources()
+      if (!activeSourceId.value) pickSource(created[0].id)
+    }
+    pm2AutoLinked.value = true
+  } catch {
+    // ignore, 用户仍可手动点"从 PM2 导入"
+  }
+}
+
+async function refreshAll() {
+  pm2AutoLinked.value = false
+  await loadSources()
+  await loadPm2Status()
+  await autoLinkPm2Sources()
 }
 
 async function onPickerConfirm(paths: string[]) {
@@ -190,6 +261,8 @@ async function confirmDelete() {
       searchHits.value = []
     }
     await loadSources()
+    pm2AutoLinked.value = false
+    await autoLinkPm2Sources()
     toast.success('已删除')
   } catch (e: any) {
     toast.error(e?.message || '删除失败')
@@ -271,6 +344,8 @@ async function confirmBulkDeleteSources() {
     showBulkDeleteSources.value = false
     sourceBulk.clear()
     await loadSources()
+    pm2AutoLinked.value = false
+    await autoLinkPm2Sources()
   } catch (err: any) {
     toast.error('批量删除失败', err?.message || 'network error')
   } finally {
@@ -498,11 +573,21 @@ onMounted(async () => {
   }
   await loadSources()
   await loadPm2Status()
+  await autoLinkPm2Sources()
 })
 
 // 项目数据/PM2 绑定可能在挂载后异步到达：变化时重新拉取
-watch(pm2AppName, () => {
-  loadPm2Status()
+watch(pm2AppName, async () => {
+  pm2AutoLinked.value = false
+  await loadPm2Status()
+  await autoLinkPm2Sources()
+})
+
+watch(() => pm2Status.value?.found === true ? pm2LogPaths.value.map((p) => p.path).join('|') : '', (val, prev) => {
+  if (val && val !== prev) {
+    pm2AutoLinked.value = false
+    autoLinkPm2Sources()
+  }
 })
 
 onUnmounted(() => {
@@ -525,7 +610,7 @@ onUnmounted(() => {
       </div>
       <div class="flex items-center space-x-2">
         <button
-          @click="loadSources"
+          @click="refreshAll"
           class="inline-flex items-center px-3 py-1.5 text-xs font-medium bg-base border border-border hover:border-primary/50 hover:text-primary text-textMuted rounded-md transition-all"
         >
           <RefreshCw class="w-3.5 h-3.5 mr-1.5" :class="{ 'animate-spin': loadingSources }" />
