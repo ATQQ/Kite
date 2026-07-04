@@ -10,7 +10,7 @@ const TELEMETRY_DOCS_URL = 'https://docs.kite.sugarat.top/guide/telemetry';
 function printTelemetryBanner(): void {
   if (!getTelemetryStatus().enabled) return;
   console.log(chalk.gray(`  Telemetry: enabled (anonymous usage ping; docs: ${TELEMETRY_DOCS_URL})`));
-  console.log(chalk.gray('  Disable via: kite telemetry off'));
+  console.log(chalk.gray('  Disable via: kite telemetry:off'));
 }
 
 interface ServeOptions {
