@@ -1,6 +1,6 @@
 # 使用统计（Telemetry）
 
-Kite 提供**可选的匿名使用统计**，用于让维护者了解 CLI 的真实使用规模与基本的运行环境分布。**默认完全关闭**，需要你主动开启。
+Kite 提供**匿名使用统计**，用于让维护者了解 CLI 的真实使用规模与基本的运行环境分布。**默认开启**，可随时通过 `kite telemetry:off` 关闭。
 
 > 设计目标：**单向、匿名、字段最少、随时可关**。不收集任何项目名、路径、Token、源码或部署日志。
 
@@ -18,7 +18,7 @@ Kite 提供**可选的匿名使用统计**，用于让维护者了解 CLI 的真
 | `event` | `kite.serve.startup` / `kite.push.start` | 事件名 |
 | `ts` | `1735574400000` | 上报时间戳（毫秒） |
 | `kiteVersion` | `0.2.3` | CLI 版本号 |
-| `instanceId` | `b6f1c2d3-...` | 本地一次性生成的 UUID v4，**首次开启时**生成并持久化到 `~/.kite/config.json` |
+| `instanceId` | `b6f1c2d3-...` | 本地一次性生成的 UUID v4，**首次运行时**自动生成并持久化到 `~/.kite/config.json` |
 | `os` | `darwin` / `linux` / `win32` | `process.platform` |
 | `arch` | `x64` / `arm64` | `process.arch` |
 
@@ -34,20 +34,20 @@ Kite 提供**可选的匿名使用统计**，用于让维护者了解 CLI 的真
 ## 三、如何开关
 
 ```bash
-# 开启（首次开启会生成匿名 instanceId）
-kite telemetry on
+# 关闭（默认已开启）
+kite telemetry:off
 
-# 关闭
-kite telemetry off
+# 重新开启（如果之前关过；首次运行时会自动生成匿名 instanceId）
+kite telemetry:on
 
 # 查看当前状态与匿名 ID（仅显示前 8 位）、当前生效的上报地址与来源
-kite telemetry status
+kite telemetry:status
 
 # 覆盖上报地址（写入 ~/.kite/config.json 的 telemetryEndpoint）
-kite telemetry endpoint http://127.0.0.1:5430/api/telemetry
+kite telemetry:endpoint http://127.0.0.1:5430/api/telemetry
 
 # 恢复为默认上报地址
-kite telemetry endpoint default
+kite telemetry:endpoint default
 ```
 
 也可以通过环境变量在**单次运行**时覆盖上报地址（优先级最高，不写入配置文件）：
@@ -58,15 +58,15 @@ KITE_TELEMETRY_ENDPOINT=http://127.0.0.1:5430/api/telemetry kite serve
 
 生效顺序：`KITE_TELEMETRY_ENDPOINT` 环境变量 > `~/.kite/config.json` 的 `telemetryEndpoint` > 内置默认地址 `https://kite.sugarat.top/api/telemetry`。
 
-开关状态写在 `~/.kite/config.json` 的 `telemetry` 字段。`kite serve` 启动时若 telemetry 开启，会在 banner 中提示当前状态与本页链接。
+开关状态写在 `~/.kite/config.json` 的 `telemetry` 字段：**未设置或为 `true` 时视为开启**，只有显式写入 `false` 才会关闭。`kite serve` 启动时若 telemetry 开启，会在 banner 中提示当前状态与本页链接。
 
 ## 四、重置匿名 instanceId
 
 匿名 ID 完全是本地随机 UUID，与服务器无任何绑定。如需重置：
 
-1. `kite telemetry off`
+1. `kite telemetry:off`
 2. 编辑 `~/.kite/config.json`，删除 `telemetryInstanceId` 字段
-3. `kite telemetry on`（会生成新的 UUID）
+3. `kite telemetry:on`（会生成新的 UUID）
 
 ## 五、上报端点
 
@@ -74,7 +74,7 @@ KITE_TELEMETRY_ENDPOINT=http://127.0.0.1:5430/api/telemetry kite serve
 - 方法：`POST application/json`
 - 行为：**fire-and-forget**——3 秒超时，失败完全忽略，**不影响**任何 CLI 命令的正常执行
 - 不依赖第三方 SDK；只使用 Node 18+ 自带的 `globalThis.fetch`
-- 可通过 `kite telemetry endpoint <url>` 或 `KITE_TELEMETRY_ENDPOINT` 覆盖（见"三、如何开关"）
+- 可通过 `kite telemetry:endpoint <url>` 或 `KITE_TELEMETRY_ENDPOINT` 覆盖（见"三、如何开关"）
 
 ## 六、公开聚合接口
 
@@ -99,8 +99,8 @@ KITE_TELEMETRY_ENDPOINT=http://127.0.0.1:5430/api/telemetry kite serve
 
 ## 八、对 CI / 离线环境的影响
 
-- CI 环境与离线环境**完全不需要做任何特殊处理**——telemetry 默认就是关的
-- 即便手动开启，请求失败也会被静默忽略，**不会**让 `kite serve` 或 `kite push` 失败或变慢
+- 在 CI 或离线环境建议显式关闭：`kite telemetry:off`；或通过环境变量 `KITE_TELEMETRY_ENDPOINT=` 指向一个不可达地址（fire-and-forget，本身也不会影响命令结果）
+- 即便 telemetry 处于开启状态，请求失败也会被静默忽略，**不会**让 `kite serve` 或 `kite push` 失败或变慢
 
 ## 九、字段约束
 

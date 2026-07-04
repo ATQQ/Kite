@@ -1106,10 +1106,20 @@ async function confirmBulkDelete() {
               <p class="text-xs text-textMuted font-mono mt-0.5">{{ project.id }}</p>
             </div>
           </div>
-          <div class="relative">
-            <button class="p-1 dark:hover:bg-white/10 hover:bg-black/10 rounded-md transition-colors text-textMuted hover:text-textMain" @click.stop="toggleDropdown(project.id, $event)">
-              <MoreVertical class="w-4 h-4" />
-            </button>
+          <div class="flex items-center space-x-2">
+            <span
+              v-if="project.env"
+              class="inline-flex items-center px-2.5 py-1 rounded-md text-xs border font-mono font-medium"
+              :class="envChipClass(project.env)"
+              :title="project.env"
+            >
+              {{ project.env }}
+            </span>
+            <div class="relative">
+              <button class="p-1 dark:hover:bg-white/10 hover:bg-black/10 rounded-md transition-colors text-textMuted hover:text-textMain" @click.stop="toggleDropdown(project.id, $event)">
+                <MoreVertical class="w-4 h-4" />
+              </button>
+            </div>
           </div>
         </div>
 
@@ -1122,7 +1132,6 @@ async function confirmBulkDelete() {
             <Tag class="w-3 h-3 mr-1" />
             {{ categoryNameOf(project.categoryId) }}
           </span>
-          <span v-if="project.env" class="inline-flex items-center px-2 py-0.5 rounded text-[10px] border font-mono" :class="envChipClass(project.env)">{{ project.env }}</span>
           <ProjectTagsEditor
             :model-value="project.tagIds || []"
             size="sm"
@@ -1183,10 +1192,10 @@ async function confirmBulkDelete() {
                 <Square v-else class="w-4 h-4" />
               </button>
             </th>
+            <th class="text-left font-medium px-4 py-3 w-24">{{ t('project.list.colEnv') }}</th>
             <th class="text-left font-medium px-4 py-3">{{ t('project.list.colName') }}</th>
             <th class="text-left font-medium px-4 py-3">{{ t('project.list.colDestPath') }}</th>
             <th class="text-left font-medium px-4 py-3 w-28">{{ t('project.list.colCategory') }}</th>
-            <th class="text-left font-medium px-4 py-3 w-24">{{ t('project.list.colEnv') }}</th>
             <th class="text-left font-medium px-4 py-3 w-36">{{ t('project.list.colLastDeploy') }}</th>
             <th class="text-left font-medium px-4 py-3 w-20">{{ t('project.list.colStatus') }}</th>
             <th class="text-right font-medium px-4 py-3 w-12"></th>
@@ -1213,6 +1222,10 @@ async function confirmBulkDelete() {
               </button>
             </td>
             <td class="px-4 py-3">
+              <span v-if="project.env" class="inline-flex items-center px-2 py-0.5 rounded text-[10px] border font-mono" :class="envChipClass(project.env)">{{ project.env }}</span>
+              <span v-else class="text-textMuted text-xs">—</span>
+            </td>
+            <td class="px-4 py-3">
               <div class="flex items-center space-x-2">
                 <Server class="w-4 h-4 text-textMuted" />
                 <div>
@@ -1235,10 +1248,6 @@ async function confirmBulkDelete() {
                   :aria-label="t('project.list.tagsEditAriaLabel', { name: project.name })"
                 />
               </div>
-            </td>
-            <td class="px-4 py-3">
-              <span v-if="project.env" class="inline-flex items-center px-2 py-0.5 rounded text-[10px] border font-mono" :class="envChipClass(project.env)">{{ project.env }}</span>
-              <span v-else class="text-textMuted text-xs">—</span>
             </td>
             <td class="px-4 py-3 text-textMuted text-xs" :title="project.lastDeployAt ? new Date(project.lastDeployAt).toLocaleString() : t('project.list.noDeploy')">
               {{ formatRelativeTime(project.lastDeployAt) }}

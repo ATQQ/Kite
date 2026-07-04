@@ -23,12 +23,23 @@ function resolveEndpoint(): { endpoint: string; source: TelemetryEndpointSource 
   return { endpoint: DEFAULT_TELEMETRY_ENDPOINT, source: 'default' };
 }
 
+function ensureInstanceId(): string {
+  const config = readGlobalConfig();
+  if (config.telemetryInstanceId) return config.telemetryInstanceId;
+  const id = crypto.randomUUID();
+  config.telemetryInstanceId = id;
+  writeGlobalConfig(config);
+  return id;
+}
+
 export function getTelemetryStatus(): TelemetryStatus {
   const config = readGlobalConfig();
   const { endpoint, source } = resolveEndpoint();
+  const enabled = config.telemetry !== false;
+  const instanceId = enabled ? ensureInstanceId() : config.telemetryInstanceId;
   return {
-    enabled: config.telemetry === true,
-    instanceId: config.telemetryInstanceId,
+    enabled,
+    instanceId,
     endpoint,
     endpointSource: source,
   };

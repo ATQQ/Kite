@@ -926,21 +926,21 @@ cli.command('rollback [projectId]', 'Rollback a project to a previous successful
   });
 
 // ==========================
-// Telemetry commands (opt-in, default off)
+// Telemetry commands (opt-out, default on)
 // Field list governed by plan/2026-06-30-f27-telemetry.md §2.
 // ==========================
 const TELEMETRY_DOCS = 'https://docs.kite.sugarat.top/guide/telemetry';
 
-cli.command('telemetry on', 'Enable anonymous usage ping (opt-in)')
+cli.command('telemetry:on', 'Enable anonymous usage ping')
   .action(() => {
     const { instanceId } = setTelemetryEnabled(true);
     console.log(chalk.green('Telemetry enabled.'));
     console.log(chalk.gray(`  Anonymous instance: ${instanceId.slice(0, 8)}…`));
     console.log(chalk.gray(`  Docs: ${TELEMETRY_DOCS}`));
-    console.log(chalk.gray('  Disable anytime via: kite telemetry off'));
+    console.log(chalk.gray('  Disable anytime via: kite telemetry:off'));
   });
 
-cli.command('telemetry off', 'Disable anonymous usage ping')
+cli.command('telemetry:off', 'Disable anonymous usage ping')
   .action(() => {
     setTelemetryEnabled(false);
     console.log(chalk.green('Telemetry disabled.'));
@@ -948,7 +948,7 @@ cli.command('telemetry off', 'Disable anonymous usage ping')
     console.log(chalk.gray(`  Docs: ${TELEMETRY_DOCS}`));
   });
 
-cli.command('telemetry status', 'Show current telemetry switch and anonymous instance id')
+cli.command('telemetry:status', 'Show current telemetry switch and anonymous instance id')
   .action(() => {
     const status = getTelemetryStatus();
     console.log(chalk.gray(`  Status: ${status.enabled ? chalk.green('enabled') : chalk.yellow('disabled')}`));
@@ -961,11 +961,11 @@ cli.command('telemetry status', 'Show current telemetry switch and anonymous ins
     console.log(chalk.gray(`  Docs: ${TELEMETRY_DOCS}`));
   });
 
-cli.command('telemetry endpoint <url>', 'Override telemetry ingest endpoint (use "default" to reset)')
+cli.command('telemetry:endpoint <url>', 'Override telemetry ingest endpoint (use "default" to reset)')
   .action((url: string) => {
     const value = String(url || '').trim();
     if (!value) {
-      console.log(chalk.red('Missing <url>. Example: kite telemetry endpoint http://127.0.0.1:5430/api/telemetry'));
+      console.log(chalk.red('Missing <url>. Example: kite telemetry:endpoint http://127.0.0.1:5430/api/telemetry'));
       process.exit(1);
     }
     if (value === 'default' || value === '--' || value === 'reset') {
