@@ -16,7 +16,7 @@ import { runImport } from './import.js';
 import { runVerify } from './verify.js';
 import { runDoctor } from './doctor.js';
 import { runList, runStatus, runLogs, runRollback } from './ops.js';
-import { getTelemetryStatus, setTelemetryEnabled, reportPushStart } from './telemetry.js';
+import { getTelemetryStatus, setTelemetryEnabled, setTelemetryEndpoint, getDefaultTelemetryEndpoint, reportPushStart } from './telemetry.js';
 
 // @ts-ignore
 const cli = cac('kite');
@@ -957,7 +957,31 @@ cli.command('telemetry status', 'Show current telemetry switch and anonymous ins
     } else {
       console.log(chalk.gray('  Anonymous instance: (not generated yet)'));
     }
+    console.log(chalk.gray(`  Endpoint: ${status.endpoint} (${status.endpointSource})`));
     console.log(chalk.gray(`  Docs: ${TELEMETRY_DOCS}`));
+  });
+
+cli.command('telemetry endpoint <url>', 'Override telemetry ingest endpoint (use "default" to reset)')
+  .action((url: string) => {
+    const value = String(url || '').trim();
+    if (!value) {
+      console.log(chalk.red('Missing <url>. Example: kite telemetry endpoint http://127.0.0.1:5430/api/telemetry'));
+      process.exit(1);
+    }
+    if (value === 'default' || value === '--' || value === 'reset') {
+      setTelemetryEndpoint(null);
+      console.log(chalk.green('Telemetry endpoint reset to default:'));
+      console.log(chalk.gray(`  ${getDefaultTelemetryEndpoint()}`));
+      return;
+    }
+    if (!/^https?:\/\//i.test(value)) {
+      console.log(chalk.red('Endpoint must start with http:// or https://'));
+      process.exit(1);
+    }
+    setTelemetryEndpoint(value);
+    console.log(chalk.green('Telemetry endpoint updated.'));
+    console.log(chalk.gray(`  ${value}`));
+    console.log(chalk.gray('  Tip: KITE_TELEMETRY_ENDPOINT env var overrides this config value at runtime.'));
   });
 
 cli.help();

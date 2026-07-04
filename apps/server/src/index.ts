@@ -6,6 +6,7 @@ import { auditRoutes } from "./routes/audit.js";
 import { healthRoutes } from "./routes/health.js";
 import { diskRoutes } from "./routes/disk.js";
 import { statsRoutes } from "./routes/stats.js";
+import { telemetryRoutes } from "./routes/telemetry.js";
 import { fsRoutes } from "./routes/fs.js";
 import { categoryRoutes } from "./routes/categories.js";
 import { logSourceRoutes } from "./routes/log-sources.js";
@@ -130,6 +131,7 @@ const app = new Elysia({ adapter })
   .use(healthRoutes)
   .use(diskRoutes)
   .use(statsRoutes)
+  .use(telemetryRoutes)
   .use(fsRoutes)
   .use(categoryRoutes)
   .use(logSourceRoutes)

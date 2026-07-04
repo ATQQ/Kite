@@ -207,6 +207,23 @@ const initDb = async () => {
   await client.execute(`CREATE INDEX IF NOT EXISTS idx_project_log_sources_project_id ON project_log_sources(project_id);`);
   await client.execute(`CREATE INDEX IF NOT EXISTS idx_project_log_sources_sort_order ON project_log_sources(sort_order);`);
 
+  // CLI 匿名遥测事件（供 kite.sugarat.top 面板消费；老库启动会自动补建）
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS telemetry_events (
+      id TEXT PRIMARY KEY,
+      event TEXT NOT NULL,
+      ts INTEGER NOT NULL,
+      received_at TEXT NOT NULL,
+      kite_version TEXT NOT NULL,
+      instance_id TEXT NOT NULL,
+      os TEXT NOT NULL,
+      arch TEXT NOT NULL
+    );
+  `);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_telemetry_events_received_at ON telemetry_events(received_at);`);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_telemetry_events_event ON telemetry_events(event);`);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_telemetry_events_instance_id ON telemetry_events(instance_id);`);
+
   // Seed a demo project on first run (no existing projects)
   if (process.env.KITE_SEED_DEMO_PROJECT !== 'false') {
     const existing = await client.execute('SELECT COUNT(*) as count FROM projects');
@@ -890,6 +907,82 @@ export const db = {
           rate: total > 0 ? Math.round((failed / total) * 10000) / 10000 : 0,
         };
       });
+    },
+  },
+  telemetry: {
+    async insertEvent(data: {
+      event: string;
+      ts: number;
+      kiteVersion: string;
+      instanceId: string;
+      os: string;
+      arch: string;
+    }) {
+      await ensureDbReady();
+      const row = {
+        id: randomUUID(),
+        event: data.event,
+        ts: data.ts,
+        receivedAt: new Date().toISOString(),
+        kiteVersion: data.kiteVersion,
+        instanceId: data.instanceId,
+        os: data.os,
+        arch: data.arch,
+      };
+      await ormDb.insert(schema.telemetryEvents).values(row);
+      return row;
+    },
+    async totals(sinceIso: string) {
+      await ensureDbReady();
+      const res = await client.execute({
+        sql: `SELECT
+                COUNT(*) AS events,
+                SUM(CASE WHEN event='kite.serve.startup' THEN 1 ELSE 0 END) AS serve_startup,
+                SUM(CASE WHEN event='kite.push.start' THEN 1 ELSE 0 END) AS push_start,
+                COUNT(DISTINCT instance_id) AS unique_instances
+              FROM telemetry_events
+              WHERE received_at >= ?`,
+        args: [sinceIso],
+      });
+      const r = res.rows[0] || {};
+      return {
+        events: Number(r.events ?? 0),
+        serveStartup: Number(r.serve_startup ?? 0),
+        pushStart: Number(r.push_start ?? 0),
+        uniqueInstances: Number(r.unique_instances ?? 0),
+      };
+    },
+    async daily(sinceIso: string) {
+      await ensureDbReady();
+      const res = await client.execute({
+        sql: `SELECT substr(received_at, 1, 10) AS d,
+                     SUM(CASE WHEN event='kite.serve.startup' THEN 1 ELSE 0 END) AS serve_startup,
+                     SUM(CASE WHEN event='kite.push.start' THEN 1 ELSE 0 END) AS push_start,
+                     COUNT(DISTINCT instance_id) AS active_instances
+              FROM telemetry_events
+              WHERE received_at >= ?
+              GROUP BY d`,
+        args: [sinceIso],
+      });
+      return res.rows.map(r => ({
+        date: String(r.d),
+        serveStartup: Number(r.serve_startup ?? 0),
+        pushStart: Number(r.push_start ?? 0),
+        activeInstances: Number(r.active_instances ?? 0),
+      }));
+    },
+    async groupBy(field: 'kite_version' | 'os' | 'arch', sinceIso: string, limit: number) {
+      await ensureDbReady();
+      const res = await client.execute({
+        sql: `SELECT ${field} AS k, COUNT(*) AS c
+              FROM telemetry_events
+              WHERE received_at >= ?
+              GROUP BY ${field}
+              ORDER BY c DESC
+              LIMIT ?`,
+        args: [sinceIso, limit],
+      });
+      return res.rows.map(r => ({ key: String(r.k), events: Number(r.c) }));
     },
   },
 };
