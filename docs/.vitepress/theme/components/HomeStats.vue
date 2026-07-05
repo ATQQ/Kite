@@ -2,8 +2,14 @@
 import { onMounted, ref, computed } from 'vue'
 import { fetchStatsPayload, type StatsPayload } from '../utils/stats'
 
+const REPO = 'ATQQ/Kite'
+const REPO_URL = `https://github.com/${REPO}`
+
 const data = ref<StatsPayload | null>(null)
 const ok = ref(false)
+
+const stars = ref<number | null>(null)
+const forks = ref<number | null>(null)
 
 onMounted(async () => {
   try {
@@ -12,6 +18,15 @@ onMounted(async () => {
   } catch {
     ok.value = false
   }
+  try {
+    const res = await fetch(`https://api.github.com/repos/${REPO}`)
+    if (res.ok) {
+      const json = await res.json()
+      if (typeof json.stargazers_count === 'number') stars.value = json.stargazers_count
+      if (typeof json.forks_count === 'number') forks.value = json.forks_count
+    }
+  } catch {
+  }
 })
 
 const showPushCard = computed(() => {
@@ -19,6 +34,9 @@ const showPushCard = computed(() => {
   if (!d) return false
   return typeof d.totals.pushes === 'number'
 })
+
+const starText = computed(() => (stars.value == null ? '—' : stars.value.toLocaleString()))
+const forkText = computed(() => (forks.value == null ? '—' : forks.value.toLocaleString()))
 </script>
 
 <template>
@@ -38,6 +56,22 @@ const showPushCard = computed(() => {
           <div class="num">{{ (data.totals.pushes || 0).toLocaleString() }}</div>
           <div class="label">累计 Push 次数</div>
         </div>
+        <a
+          class="home-stats-card home-stats-card-star"
+          :href="REPO_URL"
+          target="_blank"
+          rel="noopener"
+        >
+          <div class="num">
+            <span class="star-icon" aria-hidden="true">★</span>
+            {{ starText }}
+          </div>
+          <div class="label">GitHub Stars · ATQQ/Kite</div>
+          <ul class="sub-list">
+            <li><span>Forks</span><span>{{ forkText }}</span></li>
+            <li><span>点亮 Star 👍🏻</span><span>→</span></li>
+          </ul>
+        </a>
       </div>
       <p class="home-stats-link">
         <a href="/stats">查看完整面板 →</a>
@@ -45,6 +79,11 @@ const showPushCard = computed(() => {
       </p>
     </div>
     <div v-else class="home-stats-fallback">
+      <a :href="REPO_URL" target="_blank" rel="noopener" class="fallback-star">
+        <span class="star-icon" aria-hidden="true">★</span>
+        <span>{{ starText }}</span>
+        <span class="fallback-star-label">Star on GitHub</span>
+      </a>
       <a href="/stats">查看完整使用统计 →</a>
     </div>
   </section>
@@ -114,8 +153,52 @@ const showPushCard = computed(() => {
 .home-stats-fallback {
   text-align: center;
   font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
 }
 .home-stats-fallback a {
   color: var(--vp-c-brand-1);
+}
+.home-stats-card-star {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 0.2s ease, transform 0.2s ease, background 0.2s ease;
+}
+.home-stats-card-star:hover {
+  border-color: var(--vp-c-brand-1);
+  background: var(--vp-c-bg-elv);
+  transform: translateY(-1px);
+}
+.home-stats-card-star .num {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--vp-c-brand-1);
+}
+.star-icon {
+  color: #f5b301;
+  font-size: 24px;
+  line-height: 1;
+}
+.fallback-star {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 999px;
+  font-weight: 500;
+  color: var(--vp-c-brand-1);
+  text-decoration: none;
+}
+.fallback-star:hover {
+  border-color: var(--vp-c-brand-1);
+}
+.fallback-star-label {
+  color: var(--vp-c-text-2);
+  font-weight: 400;
 }
 </style>

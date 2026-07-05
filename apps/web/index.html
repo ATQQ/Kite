@@ -5,6 +5,14 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Kite Deploy Admin</title>
+    <script>
+      window.__KITE_BASE__ = "%KITE_BASE%";
+      window.__kiteAsset = function (filename) {
+        var b = window.__KITE_BASE__;
+        if (typeof b !== "string" || b.charAt(0) !== "/") b = "";
+        return b + "/" + filename;
+      };
+    </script>
   </head>
   <body>
     <div id="app"></div>

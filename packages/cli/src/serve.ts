@@ -19,6 +19,22 @@ interface ServeOptions {
   runtime?: string;
   pm2?: boolean;
   pm2Action?: 'stop';
+  base?: string;
+}
+
+export function normalizeBase(input?: string): string {
+  if (!input) return '';
+  const trimmed = String(input).trim();
+  if (!trimmed || trimmed === '/' || trimmed === '.') return '';
+  const stripped = trimmed.replace(/^\/+|\/+$/g, '');
+  if (!stripped) return '';
+  if (!/^[A-Za-z0-9._~\-\/]+$/.test(stripped)) {
+    throw new Error(`Invalid --base value: "${input}". Allowed characters: A-Z a-z 0-9 . _ ~ - /`);
+  }
+  if (stripped.includes('//') || stripped.includes('..')) {
+    throw new Error(`Invalid --base value: "${input}". Path segments must be non-empty and cannot be "..".`);
+  }
+  return '/' + stripped;
 }
 
 function getServerBundlePath(): string {
@@ -95,7 +111,7 @@ function ensureAdminToken(): string {
 function buildServerEnv(options: ServeOptions, adminToken: string): Record<string, string> {
   const cliPkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url).pathname, 'utf-8'));
 
-  return {
+  const env: Record<string, string> = {
     ...process.env as Record<string, string>,
     PORT: String(options.port),
     HOST: options.host,
@@ -104,6 +120,12 @@ function buildServerEnv(options: ServeOptions, adminToken: string): Record<strin
     KITE_DB_DIR: getKiteHome(),
     KITE_SERVER_VERSION: cliPkg.version || '1.0.0',
   };
+
+  const normalizedBase = normalizeBase(options.base);
+  if (normalizedBase) env.KITE_BASE = normalizedBase;
+  else delete env.KITE_BASE;
+
+  return env;
 }
 
 function isLocalHost(host: string): boolean {
@@ -129,6 +151,7 @@ function startForeground(options: ServeOptions, env: Record<string, string>, run
   console.log(chalk.gray(`  Runtime: ${runtime.name} ${runtime.version}`));
   console.log(chalk.gray(`  Host: ${options.host}`));
   console.log(chalk.gray(`  Port: ${options.port}`));
+  console.log(chalk.gray(`  Base path: ${env.KITE_BASE || '(root)'}`));
   console.log(chalk.gray(`  Web Dir: ${env.KITE_WEB_DIR}`));
   console.log(chalk.gray(`  DB Dir: ${env.KITE_DB_DIR}`));
   console.log(chalk.yellow(`  Admin Token: ${env.ADMIN_TOKEN}`));
@@ -242,6 +265,7 @@ function startPm2(options: ServeOptions, env: Record<string, string>, runtime: {
   console.log(chalk.gray(`  Runtime: ${runtime.name} ${runtime.version}`));
   console.log(chalk.gray(`  Host: ${options.host}`));
   console.log(chalk.gray(`  Port: ${options.port}`));
+  console.log(chalk.gray(`  Base path: ${env.KITE_BASE || '(root)'}`));
   console.log(chalk.gray(`  Web Dir: ${env.KITE_WEB_DIR}`));
   console.log(chalk.gray(`  DB Dir: ${env.KITE_DB_DIR}`));
   console.log(chalk.yellow(`  Admin Token: ${env.ADMIN_TOKEN}`));

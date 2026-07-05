@@ -16,31 +16,147 @@ bun add -g @kitecd/cli
 
 ## 2. 启动内置服务
 
+`kite serve` 会同时拉起 Web 管理端、Server 后端、并把数据持久化到 `~/.kite/`。首次启动会打印 Admin Token，复制它用于登录 Web 管理端。
+
+![](https://cdn.upyun.sugarat.top/mdImg/sugar/ac32b493e691ba671e62b4ca6ed9d7a5)
+
+页面样子 ↓
+
+![](https://cdn.upyun.sugarat.top/mdImg/sugar/bed7b622ced2ff3d27aef90720e6e968)
+
+### 本地 / 测试环境
+
+只在本机跑一下、验证一下部署链路，直接前台启动即可，不用 pm2：
+
 ```bash
 kite serve
+# 默认监听 http://127.0.0.1:5431，Ctrl+C 结束
 ```
 
-`kite serve` 会同时拉起：
+### 线上 / 服务器部署
 
-- **Web 管理端**：浏览器中创建项目、查看日志
-- **Server 后端**：提供 HTTP API、接收 CLI 上传、执行解压与脚本
-- **持久化存储**：项目、Token、部署日志都落在 `~/.kite/`
-
-默认监听 `http://127.0.0.1:5431`。首次启动会生成 Admin Token 并打印在终端里，复制它登录 Web 管理端。
-
-`kite serve` 支持的常用参数：
+服务器长期运行推荐：**监听 127.0.0.1 + pm2 守护 + Nginx 反代**。默认挂在域名根路径下，简单直接：
 
 ```bash
-kite serve --host 0.0.0.0 --port 5431   # 监听所有网卡
-kite serve --runtime bun                # 显式指定运行时
-kite serve --runtime node               # 强制使用 Node 运行
-kite serve --pm2                        # 由 pm2 守护到后台
-kite serve --pm2 stop                   # 停止 pm2 守护的实例
+# 1. 全局装 pm2（首次）
+npm install -g pm2
+
+# 2. 用 pm2 守护
+kite serve --pm2 --host 127.0.0.1 --port 5431
 ```
 
-> `--pm2` 模式依赖系统里**全局安装的 pm2**（`@kitecd/cli` 不会自动安装）。使用前请执行 `npm install -g pm2`，否则会报错退出。详细说明见 [CLI 文档 - 后台运行 (pm2)](/cli#后台运行-pm2)。
+Nginx 里只需要一段 `location /`，同时代理页面、API、终端 WebSocket：
 
-## 3. 数据目录
+:::details Nginx 反代示例（点击展开）
+```nginx
+server {
+    listen 443 ssl;
+    server_name ops.example.com;
+
+    # ...ssl_certificate 等常规配置...
+
+    location / {
+        proxy_pass         http://127.0.0.1:5431;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+
+        # 让同一个 location 也能代理终端 WebSocket
+        proxy_set_header   Upgrade    $http_upgrade;
+        proxy_set_header   Connection "upgrade";
+        proxy_read_timeout 3600s;
+    }
+}
+```
+:::
+
+访问 `https://ops.example.com/` 即可打开管理端。
+
+::::details 需要挂到存量站点的子路径下（`--base`，可选）
+如果 `ops.example.com` 已经跑着别的服务，想把 Kite 挂在 `https://ops.example.com/kite/` 这种子路径下，可以给 `kite serve` 加 `--base`，页面、API、WebSocket 会全部带上同一个前缀，Nginx 里也只用一段 `location`。
+
+```bash
+kite serve --pm2 --host 127.0.0.1 --port 5431 --base kite
+```
+
+:::details Nginx 子路径反代示例
+```nginx
+location /kite/ {
+    proxy_pass         http://127.0.0.1:5431;
+    proxy_http_version 1.1;
+    proxy_set_header   Host              $host;
+    proxy_set_header   X-Real-IP         $remote_addr;
+    proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header   X-Forwarded-Proto $scheme;
+
+    proxy_set_header   Upgrade    $http_upgrade;
+    proxy_set_header   Connection "upgrade";
+    proxy_read_timeout 3600s;
+}
+```
+:::
+
+访问 `https://ops.example.com/kite/`。项目详情页显示的 `kite init` / `kite push` 命令会自动带上 `--server https://ops.example.com/kite`，复制即用。
+
+**`--base` 取值规则**：CLI 会做规范化——去掉首尾的 `/`，前面统一补一个 `/`。所以下面这些写法结果相同：
+
+| 传入值 | 规范化后（KITE_BASE） |
+| --- | --- |
+| （不传） / `""` / `/` / `.` | `""`（不启用子路径） |
+| `base` / `/base` / `/base/` | `/base` |
+| `base/asd` / `/base/asd/` | `/base/asd` |
+
+未带前缀的路径（例如直连 `http://server:5431/`、`/api/*`）会直接返回 404，避免绕过 Nginx。非法值（含空格、中文、`//` 空段、`..` 段落等）在 `kite serve` 启动时会直接报错退出。
+::::
+
+> - pm2 / Nginx 更多细节见 [CLI 文档](/cli)。
+> - 不启用 pm2 的话，可以用 `nohup kite serve ... &` 或 systemd 等自选方案。
+
+## 3. 在 Web 管理端创建项目
+
+打开管理端并用启动时打印的 Admin Token 登录：
+
+- **本地**：`http://127.0.0.1:5431`
+- **线上**：按实际域名访问，例如 `https://ops.example.com/`（挂子路径时为 `https://ops.example.com/kite/`）
+
+在「项目管理 → 新建项目」中填写 **项目名称** 与 **部署目录**（服务器上的绝对路径）
+
+### 创建
+支持输入创建，或者批量的选择存量目录创建
+
+![](https://cdn.upyun.sugarat.top/mdImg/sugar/5c4c77027643d6a14f6452509d5c584b)
+
+![](https://cdn.upyun.sugarat.top/mdImg/sugar/f8ec689957dad91dfdbe3887f1d98786)
+
+### 项目详情
+
+![](https://cdn.upyun.sugarat.top/mdImg/sugar/ae8edbb0f6c5510e6a099cad41a7cb78)
+
+
+## 4. 初始化并部署
+
+项目详情页会根据当前访问地址实时生成 `kite init` / `kite push` 命令
+
+![](https://cdn.upyun.sugarat.top/mdImg/sugar/7afe3fa86fb3ff41176ef5c99b3027d1)
+
+`kite push` 会读取 `kite.config.json` + `.env.local` + 全局配置，打包 `outputDir`；
+
+上传后依次执行 `preDeploy` → 解压 → `postDeploy`，日志会实时回显并落到 Web 端「部署日志」页。
+
+
+:::tip **默认解压行为**
+覆盖模式: 同名文件会被新包覆盖，但目标目录里**已存在但新 zip 中没有的文件不会被删除**。
+
+也可按需选择 其它清理模式
+
+![](https://cdn.upyun.sugarat.top/mdImg/sugar/d6318580e4e47e0692b75e58796b02ba)
+
+可以使用清理预览功能，来判断参与清理的文件和目录。
+:::
+
+## 5. 数据目录
 
 CLI 与 Server 的所有状态都保存在 `~/.kite`，**升级 CLI 不会覆盖**：
 
@@ -59,73 +175,4 @@ CLI 与 Server 的所有状态都保存在 `~/.kite`，**升级 CLI 不会覆盖
 KITE_HOME=/data/kite kite serve
 ```
 
-## 4. 在 Web 管理端创建项目
-
-1. 浏览器打开 `http://127.0.0.1:5431`，用启动时打印的 Admin Token 登录。
-2. 在「项目管理」页点击「新建项目」，填写：
-   - **项目名称**：仅用于在 Web 端展示
-   - **部署目录**：服务器上的**绝对路径**，Server 会把压缩包解压到这里
-   - **描述 / 环境标识**（可选）
-3. 创建完成后进入项目详情，复制 **项目 ID**（形如 `proj_xxx`）和 **Deploy Token**。
-4. （可选）在项目详情中设置默认的 `preDeploy` / `postDeploy` 脚本。
-
-> Web 端的 pre/post 脚本是**默认值**，本地 `kite.config.json` 或 `kite push --pre/--post` 都可以覆盖它。
-
-## 5. 在待部署项目中初始化
-
-进入你想要部署的前端/后端项目根目录，运行 `kite init` 生成 `kite.config.json`：
-
-```bash
-kite init --project proj_xxx --server http://127.0.0.1:5431
-```
-
-该命令会：
-
-- 创建 `kite.config.json`，写入 `projectId`、`serverUrl`、`outputDir`、`files` 等
-- **不会**把 Deploy Token 写进源码仓库，Deploy Token 单独存到全局配置或 `.env.local`
-
-接着把 Deploy Token 保存到合适的位置（二选一）：
-
-```bash
-# 方式 A：保存到全局配置（推荐）
-kite config:set token <DEPLOY_TOKEN>
-
-# 方式 B：保存到当前项目 .env.local（推荐团队/CI 场景）
-printf "KITE_DEPLOY_TOKEN=<DEPLOY_TOKEN>\n" >> .env.local
-```
-
-## 6. 执行部署
-
-在项目根目录运行：
-
-```bash
-kite push
-```
-
-CLI 会：
-
-1. 读取 `kite.config.json`、`.env.local`、全局 `~/.kite/config.json`，合并出最终配置
-2. 把 `outputDir` 下的文件打包成 zip（自动忽略 `.git` / `node_modules`）
-3. 携带项目 Deploy Token 调用 Server 的 `/api/deploy/upload`
-4. Server 校验 Token 后，在项目部署目录里依次执行 `preDeploy` → 解压 → `postDeploy`
-5. 把终端日志和最终状态写回日志表，CLI 实时回显
-
-部署完成后，在 Web 端「部署日志」页可以查看完整执行流。
-
-> **解压行为**：采用覆盖模式。同名文件会被新包覆盖，但目标目录里**已存在但新 zip 中没有的文件不会被删除**。如果需要保证部署结果与本地完全一致，可以在 `preDeploy` 脚本里清理目标目录内容。
-
-## 7. 常用 CLI 命令一览
-
-| 命令 | 作用 |
-| --- | --- |
-| `kite serve` | 启动内置 Web + Server |
-| `kite init` | 在当前目录生成 `kite.config.json` |
-| `kite push` | 打包并部署当前项目 |
-| `kite build` | 仅打包不上传，用于验证打包结果 |
-| `kite config` | 查看当前生效的合并配置 |
-| `kite config:set <key> <value>` | 写入全局配置 / 项目内 `serverUrl` |
-| `kite config:list` | 查看全局配置 |
-| `kite home` | 打印 Kite 数据目录 |
-| `kite admin reset-password` | 重置 Web 管理端 Admin Token（不需重启服务） |
-
-更详细的命令说明请查看 [CLI 文档](/cli)，部署细节请查看 [部署流程](/guide/deploy-flow)。
+更多命令与参数详见 [CLI 文档](/cli)，部署链路细节见 [部署流程](/guide/deploy-flow)。

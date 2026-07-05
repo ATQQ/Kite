@@ -29,9 +29,25 @@ import http from "node:http";
 
 await ensureDbReady();
 
+function normalizeBase(input?: string): string {
+  if (!input) return '';
+  const trimmed = String(input).trim();
+  if (!trimmed || trimmed === '/' || trimmed === '.') return '';
+  const stripped = trimmed.replace(/^\/+|\/+$/g, '');
+  if (!stripped) return '';
+  if (!/^[A-Za-z0-9._~\-\/]+$/.test(stripped)) {
+    throw new Error(`Invalid KITE_BASE value: "${input}"`);
+  }
+  if (stripped.includes('//') || stripped.includes('..')) {
+    throw new Error(`Invalid KITE_BASE value: "${input}"`);
+  }
+  return '/' + stripped;
+}
+
 const port = Number(process.env.PORT) || 5430;
 const host = process.env.HOST || '127.0.0.1';
 const serverVersion = process.env.KITE_SERVER_VERSION || 'dev';
+const basePath = normalizeBase(process.env.KITE_BASE);
 
 // Detect runtime and configure adapter
 const isBun = typeof globalThis.Bun !== 'undefined';
@@ -145,8 +161,29 @@ const app = new Elysia({ adapter })
 // Both runtimes use node:http to create server for WebSocket upgrade support
 const fetchHandler = app.fetch;
 
+// Strip basePath prefix from incoming request URL before passing to Elysia.
+// This lets all registered routes stay `/api/xxx` while externally being `/<base>/api/xxx`.
+function stripBaseFromPath(pathname: string): { matched: boolean; stripped: string } {
+  if (!basePath) return { matched: true, stripped: pathname };
+  if (pathname === basePath) return { matched: true, stripped: '/' };
+  if (pathname.startsWith(basePath + '/')) {
+    return { matched: true, stripped: pathname.slice(basePath.length) };
+  }
+  return { matched: false, stripped: pathname };
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+
+  // Base path enforcement: reject anything outside /<base>/
+  const { matched, stripped } = stripBaseFromPath(url.pathname);
+  if (!matched) {
+    res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ error: 'Not Found', hint: basePath ? `Kite is mounted at ${basePath}/` : undefined }));
+    return;
+  }
+  const forwardUrl = new URL(url.toString());
+  forwardUrl.pathname = stripped;
 
   // Create Request object
   const headers = new Headers();
@@ -157,7 +194,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   const hasBody = req.method !== 'GET' && req.method !== 'HEAD';
-  const request = new Request(url.toString(), {
+  const request = new Request(forwardUrl.toString(), {
     method: req.method,
     headers,
     body: hasBody ? new ReadableStream({
@@ -194,14 +231,20 @@ const server = http.createServer(async (req, res) => {
 });
 
 if (terminalWss) {
+  const expectedWsPath = `${basePath}/api/terminal/ws`;
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url || '/', `http://${req.headers.host || `${host}:${port}`}`);
-    if (!url.pathname.startsWith('/api/terminal/ws')) {
+    if (url.pathname !== expectedWsPath && !url.pathname.startsWith(expectedWsPath + '/')) {
       socket.destroy();
       return;
     }
     const reqHost = req.headers.host || `${host}:${port}`;
     const expectedOrigin = `http://${reqHost}`;
+    // Rewrite URL to strip basePath so downstream URL parsing sees /api/terminal/ws
+    if (basePath) {
+      const stripped = url.pathname.slice(basePath.length);
+      req.url = stripped + (url.search || '');
+    }
     void handleTerminalUpgrade(req, socket, head, expectedOrigin);
   });
 } else {
@@ -210,8 +253,8 @@ if (terminalWss) {
 
 server.listen(port, host, () => {
   rootLogger.info(
-    { module: 'boot', runtime: runtimeName, version: serverVersion, host, port },
-    `Kite server listening on http://${host}:${port}`,
+    { module: 'boot', runtime: runtimeName, version: serverVersion, host, port, base: basePath || '/' },
+    `Kite server listening on http://${host}:${port}${basePath || ''}`,
   );
 });
 

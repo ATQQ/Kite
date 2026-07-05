@@ -12,6 +12,7 @@ import BulkActionBar from '../components/BulkActionBar.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import { useBulkSelection } from '../composables/useBulkSelection'
 import { CHIP_COLOR_PALETTE, chipClass as tagChipClass, pickFreeColor as pickFreeChipColor } from '../utils/color-chip'
+import { apiUrl } from '../lib/base'
 
 const projectStore = useProjectStore()
 const router = useRouter()
@@ -799,7 +800,7 @@ function toggleBulkPendingTag(id: string) {
 
 async function callBulkProjectsApi(payload: Record<string, unknown>): Promise<{ ok: boolean; data?: any; error?: string }> {
   try {
-    const res = await fetch('/api/projects/bulk', {
+    const res = await fetch(apiUrl('/projects/bulk'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

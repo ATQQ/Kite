@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useProjectStore } from '../store/project'
+import { routerBase } from '../lib/base'
 
 const routes = [
   {
@@ -72,7 +73,7 @@ const routes = [
 ]
 
 export const router = createRouter({
-  history: createWebHistory(),
+  history: createWebHistory(routerBase()),
   routes
 })
 

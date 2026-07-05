@@ -10,6 +10,7 @@ import BulkActionBar from '../components/BulkActionBar.vue'
 import { useBulkSelection } from '../composables/useBulkSelection'
 import { useLogTailStream } from '../composables/useLogTailStream'
 import { useLogSearchStream, type SearchHit } from '../composables/useLogSearchStream'
+import { apiUrl } from '../lib/base'
 
 type LogSource = {
   id: string
@@ -313,7 +314,7 @@ async function confirmBulkDeleteSources() {
   if (ids.length === 0) return
   isBulkDeletingSources.value = true
   try {
-    const res = await fetch('/api/log-sources/bulk', {
+    const res = await fetch(apiUrl('/log-sources/bulk'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

@@ -495,6 +495,7 @@ cli.command('serve', 'Start Kite Server and Web console')
   .option('--port <port>', 'Port to listen on', { default: 5431 })
   .option('--runtime <runtime>', 'Runtime to use: bun or node (default: auto, prefer bun)')
   .option('--pm2 [action]', 'Daemonize with pm2 (pass "stop" to stop)')
+  .option('--base <path>', 'URL path prefix for web + api + ws (e.g. --base kite → served at /kite/)')
   .action(async (options: any) => {
     try {
       const pm2Action = typeof options.pm2 === 'string' ? options.pm2 : undefined;
@@ -504,6 +505,7 @@ cli.command('serve', 'Start Kite Server and Web console')
         runtime: options.runtime,
         pm2: !!options.pm2,
         pm2Action: pm2Action as 'stop' | undefined,
+        base: options.base,
       });
     } catch (error: any) {
       console.error(chalk.red(`Failed to start Kite: ${error.message}`));

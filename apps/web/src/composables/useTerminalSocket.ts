@@ -1,4 +1,5 @@
 import { ref, shallowRef, type Ref } from 'vue'
+import { wsUrl } from '../lib/base'
 
 export type TerminalWsStatus = 'idle' | 'connecting' | 'open' | 'closed' | 'error'
 
@@ -28,8 +29,7 @@ export function useTerminalSocket(opts: UseTerminalSocketOptions) {
     setStatus('connecting')
     lastError.value = null
 
-    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const url = new URL(`${proto}//${window.location.host}/api/terminal/ws`)
+    const url = new URL(wsUrl('/terminal/ws'))
     if (params.projectId) url.searchParams.set('projectId', params.projectId)
     else if (params.cwd) url.searchParams.set('cwd', params.cwd)
     url.searchParams.set('cols', String(params.cols))

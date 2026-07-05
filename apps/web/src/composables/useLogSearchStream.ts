@@ -1,4 +1,5 @@
 import { ref, onUnmounted } from 'vue'
+import { apiUrl } from '../lib/base'
 
 export type SearchHit = {
   offset: number
@@ -43,7 +44,7 @@ export function useLogSearchStream(getToken: () => string) {
     if (params.toOffset !== undefined) qs.set('toOffset', String(params.toOffset))
 
     try {
-      const res = await fetch(`/api/log-sources/${sourceId}/search?${qs.toString()}`, {
+      const res = await fetch(apiUrl(`/log-sources/${sourceId}/search?${qs.toString()}`), {
         headers: { Authorization: `Bearer ${getToken()}` },
         signal: abortController.signal,
       })

@@ -24,6 +24,7 @@ export default defineConfig({
   },
   themeConfig: {
     logo: '/logo.svg',
+    outline: [2,3],
     nav: [
       { text: '快速开始', link: '/guide/quick-start' },
       { text: 'API', link: '/api' },

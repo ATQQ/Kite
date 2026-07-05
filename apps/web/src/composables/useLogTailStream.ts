@@ -1,4 +1,5 @@
 import { ref, onUnmounted } from 'vue'
+import { apiUrl } from '../lib/base'
 
 export type TailHandlers = {
   onSnapshot?: (payload: { size: number; lines: string[]; binary: boolean }) => void
@@ -17,7 +18,7 @@ export function useLogTailStream(getToken: () => string) {
     connected.value = true
 
     try {
-      const res = await fetch(`/api/log-sources/${sourceId}/stream?tailLines=${tailLines}`, {
+      const res = await fetch(apiUrl(`/log-sources/${sourceId}/stream?tailLines=${tailLines}`), {
         headers: { Authorization: `Bearer ${getToken()}` },
         signal: abortController.signal,
       })

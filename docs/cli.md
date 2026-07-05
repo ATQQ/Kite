@@ -40,6 +40,7 @@ kite serve --runtime auto
 kite serve --runtime node
 kite serve --runtime bun
 kite serve --host 0.0.0.0 --port 5431
+kite serve --base kite            # 挂到 /kite 前缀下（页面与接口共用）
 ```
 
 > 安全提示：`kite serve` 默认监听 `127.0.0.1`，仅本机可访问。若显式指定非本地地址（如 `--host 0.0.0.0` 或公网 IP），CLI 启动时会打印黄色 `[warn]` 提示，请务必在 Nginx/Caddy 等前置代理上配置 TLS 与限速。
@@ -47,6 +48,50 @@ kite serve --host 0.0.0.0 --port 5431
 > Admin Token 强度策略：长度 ≥ 24，且至少包含字母和数字，去重字符数 ≥ 8。当 `.env.local` 中的 `ADMIN_TOKEN` 不满足该策略时，`kite serve` 启动会打印 `[warn]` 但不会阻塞启动；建议执行 `kite reset-password --random` 重新生成强随机 Token，或手工替换为更强的随机字符串。
 >
 > 登录限流：管理端登录 (`POST /api/auth/login`) 与修改 Admin Token (`POST /api/settings/token`) 共享内存级限流，按客户端 IP（取 `X-Forwarded-For` / `X-Real-IP` 首项）累计失败次数；10 分钟内累计 8 次失败将锁定 5 分钟并返回 `429 Retry-After`。
+
+### 反向代理与子路径部署 (`--base`)
+
+如果你已经有一个对外站点（比如 `https://ops.example.com`），希望在它下面挂一个 `/kite` 前缀访问 Kite，而不用单独申请一个二级域名或额外端口，可以在启动时加 `--base`：
+
+```bash
+# 启动时把整套服务（Web 页面 + REST API + WebSocket 终端）都挂到 /kite 下
+kite serve --base kite --host 127.0.0.1 --port 5431
+# 访问入口：http://127.0.0.1:5431/kite/
+# API：    http://127.0.0.1:5431/kite/api/...
+# 终端 WS：ws://127.0.0.1:5431/kite/api/terminal/ws
+```
+
+`--base` 会同时改写：
+
+- 页面路由 base（Vue Router `createWebHistory` 会带上该前缀）
+- 前端所有 `/api/*` 请求
+- 终端 WebSocket 的连接地址
+
+因此 Nginx 只需要一段 `location`（含 `Upgrade` 头）就能同时代理 HTTP 与 WebSocket，无需再为终端单独写一份配置：
+
+```nginx
+# 假设 kite serve 监听 127.0.0.1:5431 且启动时带了 --base kite
+location /kite/ {
+    proxy_pass         http://127.0.0.1:5431;
+    proxy_http_version 1.1;
+    proxy_set_header   Host              $host;
+    proxy_set_header   X-Real-IP         $remote_addr;
+    proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header   X-Forwarded-Proto $scheme;
+
+    # 让同一个 location 也能代理终端 WebSocket
+    proxy_set_header   Upgrade    $http_upgrade;
+    proxy_set_header   Connection "upgrade";
+    proxy_read_timeout 3600s;
+}
+```
+
+访问 `https://ops.example.com/kite/` 即可打开管理端；页面、接口、终端全部走这一段代理。
+
+> - `--base kite`、`--base /kite`、`--base /kite/` 三种写法等价，最终都会规范化成前缀 `/kite`。
+> - 允许多层，比如 `--base internal/kite` → 前缀 `/internal/kite`。
+> - `--base` 只影响外部访问路径；`~/.kite/` 数据目录与 CLI 交互不变。
+> - 启用 `--base` 后，访问未带前缀的路径（如 `/api/ping`、`/`）会直接返回 404，避免暴露给未经代理的入口。
 
 ### 后台运行 (pm2)
 
