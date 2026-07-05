@@ -29,7 +29,7 @@ export default defineConfig({
       { text: 'API', link: '/api' },
       { text: 'CLI', link: '/cli' },
       { text: '统计', link: '/stats' },
-      { text: '更新日志', link: '/changelog' }
+      { text: '更新日志', link: '/release-notes' }
     ],
     sidebar: [
       {
@@ -49,7 +49,7 @@ export default defineConfig({
           { text: 'API 文档', link: '/api' },
           { text: 'CLI 文档', link: '/cli' },
           { text: '技术方案', link: '/spec' },
-          { text: '更新日志', link: '/changelog' }
+          { text: '更新日志', link: '/release-notes' }
         ]
       }
     ],
