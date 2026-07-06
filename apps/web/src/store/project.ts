@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { apiUrl, pageUrl } from '../lib/base'
 
 export interface Project {
   id: string
@@ -152,14 +153,14 @@ export const useProjectStore = defineStore('project', () => {
       headers['Authorization'] = `Bearer ${adminToken.value}`
     }
     
-    const res = await fetch(`/api${endpoint}`, {
+    const res = await fetch(apiUrl(endpoint), {
       ...options,
       headers
     })
     
     if (res.status === 401 && !options.silent401) {
       logout()
-      window.location.href = '/login'
+      window.location.href = pageUrl('/login')
       throw new Error('Unauthorized')
     }
     const data = await res.json()

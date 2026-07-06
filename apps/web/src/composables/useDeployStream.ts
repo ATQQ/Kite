@@ -1,4 +1,5 @@
 import { ref, onUnmounted, watch, type Ref } from 'vue'
+import { apiUrl } from '../lib/base'
 
 export function useDeployStream(deployId: Ref<string | null>, adminToken: Ref<string>) {
   const lines = ref<string[]>([])
@@ -15,7 +16,7 @@ export function useDeployStream(deployId: Ref<string | null>, adminToken: Ref<st
     abortController = new AbortController()
 
     try {
-      const res = await fetch(`/api/logs/${id}/stream`, {
+      const res = await fetch(apiUrl(`/logs/${id}/stream`), {
         headers: { 'Authorization': `Bearer ${adminToken.value}` },
         signal: abortController.signal,
       })

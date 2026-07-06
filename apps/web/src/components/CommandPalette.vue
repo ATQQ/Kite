@@ -17,6 +17,7 @@ import {
 } from 'lucide-vue-next'
 import { usePaletteStore } from '../store/palette'
 import { useProjectStore } from '../store/project'
+import { apiUrl } from '../lib/base'
 
 interface ProjectHit { type: 'project'; id: string; name: string; description: string | null; status: string | null; href: string }
 interface DeploymentHit { type: 'deployment'; id: string; projectId: string; projectName: string; status: string; startTime: string; href: string; snippet: string | null }
@@ -126,7 +127,7 @@ async function fetchResults(q: string) {
     const token = projectStore.adminToken
     const headers: Record<string, string> = {}
     if (token) headers['Authorization'] = `Bearer ${token}`
-    const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&limit=5`, {
+    const res = await fetch(apiUrl(`/search?q=${encodeURIComponent(q)}&limit=5`), {
       headers,
       signal: abortController.signal,
     })

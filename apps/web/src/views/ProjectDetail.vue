@@ -9,6 +9,7 @@ import CleanPreviewDialog from '../components/CleanPreviewDialog.vue'
 import ProjectTagsEditor from '../components/ProjectTagsEditor.vue'
 import { useToast } from '../composables/useToast'
 import { useIntervalRaf } from '../composables/useIntervalRaf'
+import { BASE_PATH } from '../lib/base'
 
 const route = useRoute()
 const router = useRouter()
@@ -78,7 +79,7 @@ function toggleCliHelp() {
 const isInitialLoading = ref(true)
 
 onMounted(async () => {
-  serverUrl.value = window.location.origin
+  serverUrl.value = window.location.origin + BASE_PATH
   await Promise.all([
     projectStore.fetchProjects(),
     projectStore.fetchCategories(),

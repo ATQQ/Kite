@@ -27,6 +27,24 @@ function getMimeType(filePath: string): string {
   return MIME_TYPES[ext] || 'application/octet-stream';
 }
 
+function getBasePath(): string {
+  const raw = process.env.KITE_BASE;
+  if (!raw) return '';
+  const stripped = String(raw).trim().replace(/^\/+|\/+$/g, '');
+  return stripped ? '/' + stripped : '';
+}
+
+async function renderIndexHtml(indexPath: string): Promise<Uint8Array> {
+  const buffer = await readFileBuffer(indexPath);
+  const base = getBasePath();
+  const assetPrefix = base ? base + '/' : '/';
+  const html = new TextDecoder('utf-8')
+    .decode(buffer)
+    .replace(/\/__KITE_BASE__\//g, assetPrefix)
+    .replace(/%KITE_BASE%/g, base);
+  return new TextEncoder().encode(html);
+}
+
 export const staticPlugin = new Elysia()
   .get('/*', async ({ request, set }) => {
     const webDir = process.env.KITE_WEB_DIR;
@@ -55,7 +73,8 @@ export const staticPlugin = new Elysia()
     try {
       const fileStat = await stat(filePath);
       if (fileStat.isFile()) {
-        const buffer = await readFileBuffer(filePath);
+        const isIndex = path.basename(filePath).toLowerCase() === 'index.html';
+        const buffer = isIndex ? await renderIndexHtml(filePath) : await readFileBuffer(filePath);
         set.headers['Content-Type'] = getMimeType(filePath);
         set.headers['Cache-Control'] = pathname.startsWith('/assets/') ? 'public, max-age=31536000, immutable' : 'no-cache';
         return new Response(buffer as BodyInit);
@@ -68,7 +87,7 @@ export const staticPlugin = new Elysia()
     const indexPath = path.resolve(webDir, 'index.html');
     try {
       await access(indexPath);
-      const buffer = await readFileBuffer(indexPath);
+      const buffer = await renderIndexHtml(indexPath);
       set.headers['Content-Type'] = 'text/html; charset=utf-8';
       set.headers['Cache-Control'] = 'no-cache';
       return new Response(buffer as BodyInit);

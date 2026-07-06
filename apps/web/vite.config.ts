@@ -4,9 +4,17 @@ import { readFileSync } from 'fs'
 
 const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf-8'))
 
-// https://vite.dev/config/
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   plugins: [vue()],
+  base: command === 'build' ? '/__KITE_BASE__/' : '/',
+  experimental: {
+    renderBuiltUrl(filename, { hostType }) {
+      if (hostType === 'js') {
+        return { runtime: `window.__kiteAsset(${JSON.stringify(filename)})` }
+      }
+      return { relative: false }
+    },
+  },
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
   },
@@ -24,4 +32,4 @@ export default defineConfig({
       }
     }
   }
-})
+}))

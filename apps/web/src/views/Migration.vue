@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { Database, Download, Upload, RefreshCw, CheckCircle2, AlertTriangle, FileArchive, Loader2 } from 'lucide-vue-next'
 import { useProjectStore } from '../store/project'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
+import { apiUrl } from '../lib/base'
 
 interface MigrationProject {
   id: string
@@ -72,7 +73,7 @@ async function loadProjects() {
   loadingProjects.value = true
   projectsError.value = ''
   try {
-    const res = await fetch('/api/migration/projects', {
+    const res = await fetch(apiUrl('/migration/projects'), {
       headers: { Authorization: `Bearer ${projectStore.adminToken}` },
     })
     const data = await res.json()
@@ -104,7 +105,7 @@ async function handleExport() {
           ? Math.max(0, Math.floor(Number(exportOptions.value.deploymentLimitPerProject) || 0))
           : 0,
     }
-    const res = await fetch('/api/migration/export', {
+    const res = await fetch(apiUrl('/migration/export'), {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${projectStore.adminToken}`,
@@ -184,7 +185,7 @@ async function doImport() {
       headers['X-Confirm-Overwrite'] = 'yes'
     }
 
-    const res = await fetch('/api/migration/import', {
+    const res = await fetch(apiUrl('/migration/import'), {
       method: 'POST',
       headers,
       body: formData,
