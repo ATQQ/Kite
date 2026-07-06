@@ -45,7 +45,7 @@ npm install -g pm2
 kite serve --pm2 --host 127.0.0.1 --port 5431
 ```
 
-Nginx 里只需要一段 `location /`，同时代理页面、API、终端 WebSocket：
+Nginx 里只需要一段 `location /`，同时代理页面、API、终端 WebSocket 与 CLI 的 NDJSON 流式部署响应：
 
 :::details Nginx 反代示例（点击展开）
 ```nginx
@@ -54,6 +54,9 @@ server {
     server_name ops.example.com;
 
     # ...ssl_certificate 等常规配置...
+
+    # 大 zip 包上传不被 413 卡住
+    client_max_body_size 1024m;
 
     location / {
         proxy_pass         http://127.0.0.1:5431;
@@ -66,7 +69,18 @@ server {
         # 让同一个 location 也能代理终端 WebSocket
         proxy_set_header   Upgrade    $http_upgrade;
         proxy_set_header   Connection "upgrade";
-        proxy_read_timeout 3600s;
+
+        # ★ 关键三件套：修复 `kite push` 报 `fetch failed`
+        # NDJSON 流式响应必须实时透传，大 zip 请求体也直接透传
+        proxy_buffering         off;
+        proxy_request_buffering off;
+        proxy_cache             off;
+
+        # 超时放宽，兼顾 pre/postDeploy 长任务与 WebSocket 长连
+        proxy_connect_timeout   60s;
+        proxy_send_timeout      1800s;
+        proxy_read_timeout      1800s;
+        send_timeout            1800s;
     }
 }
 ```
@@ -83,6 +97,9 @@ kite serve --pm2 --host 127.0.0.1 --port 5431 --base kite
 
 :::details Nginx 子路径反代示例
 ```nginx
+# server {} 内
+client_max_body_size 1024m;
+
 location /kite/ {
     proxy_pass         http://127.0.0.1:5431;
     proxy_http_version 1.1;
@@ -93,7 +110,16 @@ location /kite/ {
 
     proxy_set_header   Upgrade    $http_upgrade;
     proxy_set_header   Connection "upgrade";
-    proxy_read_timeout 3600s;
+
+    # ★ 关键三件套：与根路径版本保持一致
+    proxy_buffering         off;
+    proxy_request_buffering off;
+    proxy_cache             off;
+
+    proxy_connect_timeout   60s;
+    proxy_send_timeout      1800s;
+    proxy_read_timeout      1800s;
+    send_timeout            1800s;
 }
 ```
 :::
@@ -113,6 +139,7 @@ location /kite/ {
 
 > - pm2 / Nginx 更多细节见 [CLI 文档](/cli)。
 > - 不启用 pm2 的话，可以用 `nohup kite serve ... &` 或 systemd 等自选方案。
+> - 如果 `kite push` 出现 `Upload failed: fetch failed`（服务端却部署成功），多半是反代把 NDJSON 流式响应缓冲了，参见 [部署流程 · 反向代理（Nginx）配置建议](/guide/deploy-flow#反向代理-nginx-配置建议)。
 
 ## 3. 在 Web 管理端创建项目
 

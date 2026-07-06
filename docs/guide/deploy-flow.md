@@ -91,3 +91,75 @@ kite serve --runtime bun
 3. Web 管理端项目默认配置
 
 `--command` 是 `--post` 的别名，适合测试时快速指定服务端部署命令。
+
+## 反向代理（Nginx）配置建议
+
+如果你把 `kite serve` 放在 Nginx 反向代理之后（例如通过 `https://kite.example.com` 访问），请务必按下面的模板配置，否则可能出现以下典型问题：
+
+- `kite push` 报 `Upload failed: fetch failed`，但服务端实际部署已经成功。
+- 长时间无输出后连接被中间层掐断。
+- 大 zip 上传返回 `413 Request Entity Too Large`。
+- Web 管理端的终端 WebSocket 无法建立或频繁断开。
+
+根因是 `POST /api/deploy/upload` 使用 **NDJSON 流式响应** 逐行推送日志，一旦 Nginx 缓冲了响应体或过早触发 idle 超时，CLI 侧读流就会失败。下面这一份"通用配置"能同时覆盖：普通 HTTP、NDJSON 流式部署、大文件上传、WebSocket 终端。
+
+```nginx
+server {
+    # listen / ssl / server_name 略
+
+    # 大 zip 包上传不被 413 卡住
+    client_max_body_size 1024m;
+
+    location ^~ / {
+        proxy_pass http://127.0.0.1:5431;
+
+        proxy_set_header Host              $http_host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Real-Port       $remote_port;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host  $host;
+        proxy_set_header X-Forwarded-Port  $server_port;
+        proxy_set_header REMOTE-HOST       $remote_addr;
+
+        proxy_http_version 1.1;
+        proxy_set_header   Upgrade    $http_upgrade;
+        proxy_set_header   Connection "upgrade";
+        proxy_set_header   Sec-WebSocket-Protocol $http_sec_websocket_protocol;
+
+        # ────────── 关键三件套：修复 NDJSON 流被缓冲 / fetch failed ──────────
+        proxy_buffering         off;   # 不缓冲上游响应，日志实时透传给 CLI
+        proxy_request_buffering off;   # 大 zip 请求体直接透传，避免二次落盘
+        proxy_cache             off;   # 关闭响应缓存
+        # ────────────────────────────────────────────────────────────────
+
+        # 超时放宽，兼顾 pre/postDeploy 长任务与 WebSocket 长连
+        proxy_connect_timeout   60s;
+        proxy_send_timeout      1800s;
+        proxy_read_timeout      1800s;
+        send_timeout            1800s;
+    }
+}
+```
+
+### 关键点说明
+
+| 配置 | 作用 | 不加会怎样 |
+|------|------|-----------|
+| `proxy_buffering off` | 上游写一行 NDJSON，Nginx 立刻转发给客户端 | CLI 长时间无输出，连接被判 idle 后断开，报 `fetch failed` |
+| `proxy_request_buffering off` | 大 zip 请求体直接透传 | 大项目上传会先在 Nginx 磁盘上二次落盘，慢且占空间 |
+| `client_max_body_size 1024m` | 允许上传大 zip | 触发 `413 Request Entity Too Large` |
+| `Upgrade` / `Connection "upgrade"` | 透传给上游，让 Web 管理端的终端 WebSocket 能握手 | 管理端 web terminal 无法建立或频繁断开 |
+| `proxy_read_timeout 1800s` | 允许 pre/postDeploy 长任务 | 默认 60s 时长任务会被 Nginx 掐断连接 |
+
+### 应用与验证
+
+```bash
+# 服务器上
+nginx -t && nginx -s reload
+
+# 开发机上再跑一次
+kite push --env docs
+```
+
+正常情况下你能看到服务端日志一行一行实时流式输出，最后以 `Deployed successfully! (xxx)` 收尾。
