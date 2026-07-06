@@ -1,6 +1,6 @@
 {
   "name": "@kite/server",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "type": "module",
   "scripts": {
     "dev": "bun run --env-file=.env.local --watch src/index.ts"

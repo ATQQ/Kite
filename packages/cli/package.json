@@ -1,6 +1,6 @@
 {
   "name": "@kitecd/cli",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "type": "module",
   "bin": {
     "kite": "./bin/kite.js"
@@ -17,7 +17,7 @@
     "build": "tsc && rm -rf dist/web && mkdir -p dist/web && cp -R ../../apps/web/dist/. dist/web/",
     "dev": "tsc -w",
     "postinstall": "node scripts/postinstall.js",
-    "release": "bumpp package.json ../../apps/web/package.json ../../apps/server/package.json --execute='sh -c \"changelogen --output ../../CHANGELOG.md && git add ../../CHANGELOG.md && cd ../.. && bun run build\"' --tag --push"
+    "release": "bumpp package.json ../../package.json ../../apps/web/package.json ../../apps/server/package.json --execute='sh -c \"changelogen --output ../../CHANGELOG.md && git add ../../CHANGELOG.md && cd ../.. && bun run build\"' --tag --push"
   },
   "dependencies": {
     "@libsql/client": "^0.17.2",
