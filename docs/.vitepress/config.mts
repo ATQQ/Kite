@@ -1,6 +1,11 @@
 import { defineConfig } from 'vitepress'
-import { rm } from 'node:fs/promises'
-import { join } from 'node:path'
+import { rm, readFile } from 'node:fs/promises'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
+const pkg = JSON.parse(await readFile(join(__dirname, '../../package.json'), 'utf-8'))
+const version = pkg.version as string
 
 export default defineConfig({
   title: 'Kite',
@@ -30,7 +35,8 @@ export default defineConfig({
       { text: 'API', link: '/api' },
       { text: 'CLI', link: '/cli' },
       { text: '统计', link: '/stats' },
-      { text: '更新日志', link: '/release-notes' }
+      { text: '更新日志', link: '/release-notes' },
+      { text: `v${version}`, link: '/release-notes' }
     ],
     sidebar: [
       {
@@ -59,7 +65,7 @@ export default defineConfig({
     ],
     footer: {
       message: '<a href="/stats">使用统计</a> · <a href="/guide/telemetry">隐私说明</a> · 数据透明，零敏感字段',
-      copyright: '© 2026 Kite'
+      copyright: `© 2026 Kite · v${version}`
     }
   }
 })
