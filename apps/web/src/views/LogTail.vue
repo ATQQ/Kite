@@ -552,17 +552,17 @@ watch(() => pm2Status.value?.found === true ? pm2LogPaths.value.map((p) => p.pat
 
 <template>
   <div class="space-y-6">
-    <div class="flex items-center justify-between">
-      <div class="flex items-center space-x-3">
-        <button @click="router.back()" class="p-2 rounded-md text-textMuted hover:text-textMain hover:bg-white/5">
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div class="flex items-center space-x-3 min-w-0">
+        <button @click="router.back()" class="p-2 rounded-md text-textMuted hover:text-textMain hover:bg-white/5 shrink-0">
           <ArrowLeft class="w-4 h-4" />
         </button>
-        <div>
+        <div class="min-w-0">
           <h1 class="text-xl font-bold text-textMain">运行日志</h1>
-          <p class="text-xs text-textMuted font-mono mt-0.5">{{ project?.name || projectId }}</p>
+          <p class="text-xs text-textMuted font-mono mt-0.5 truncate">{{ project?.name || projectId }}</p>
         </div>
       </div>
-      <div class="flex items-center space-x-2">
+      <div class="flex items-center gap-2 flex-wrap sm:justify-end">
         <label
           v-if="pm2AppName"
           class="inline-flex items-center px-2 py-1.5 text-[11px] text-textMuted border border-border rounded-md cursor-pointer hover:text-textMain hover:border-primary/40 transition-colors select-none"
@@ -653,7 +653,7 @@ watch(() => pm2Status.value?.found === true ? pm2LogPaths.value.map((p) => p.pat
       </div>
     </div>
 
-    <div v-if="mergedMode && mergedTarget" class="w-full" style="height: calc(100vh - 220px); min-height: 560px;">
+    <div v-if="mergedMode && mergedTarget" class="w-full h-[calc(100vh-260px)] min-h-[420px] sm:h-[calc(100vh-220px)] sm:min-h-[560px]">
       <MergedLogPane
         :kind="mergedTarget.kind"
         :sources="mergedTarget.sources"

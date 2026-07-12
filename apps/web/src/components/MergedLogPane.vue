@@ -245,20 +245,20 @@ function clearBuffer() {
 <template>
   <div class="flex flex-col min-h-0 h-full bg-panel border border-border rounded-lg overflow-hidden">
     <!-- Header -->
-    <div class="flex items-center justify-between px-4 py-3 border-b border-border">
-      <div class="min-w-0 flex-1 flex items-center gap-2">
-        <span class="w-2 h-2 rounded-full" :class="kind === 'stdout' ? 'bg-success' : 'bg-danger'"></span>
+    <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-3 sm:px-4 py-2 sm:py-3 border-b border-border">
+      <div class="min-w-0 flex-1 flex items-center gap-2 flex-wrap">
+        <span class="w-2 h-2 rounded-full shrink-0" :class="kind === 'stdout' ? 'bg-success' : 'bg-danger'"></span>
         <div class="text-sm text-textMain font-medium">
           合并视图 · <span :class="kindColorCls">{{ kindLabel }}</span>
         </div>
         <span class="text-[11px] text-textMuted">
           {{ sources.length }} 个来源
         </span>
-        <span :class="activeCount > 0 ? 'text-success' : 'text-textMuted'" class="text-[11px] ml-1">
+        <span :class="activeCount > 0 ? 'text-success' : 'text-textMuted'" class="text-[11px]">
           {{ activeCount > 0 ? `● ${activeCount} 路实时` : '○ 未连接' }}
         </span>
       </div>
-      <div class="flex items-center gap-1 ml-3">
+      <div class="flex items-center gap-1 flex-wrap sm:flex-nowrap sm:ml-3">
         <label class="flex items-center text-[11px] text-textMuted mr-1">
           <span class="mr-1">尾部行数</span>
           <select
@@ -297,7 +297,7 @@ function clearBuffer() {
         </button>
         <button
           @click="emit('close')"
-          class="p-1 ml-1 rounded text-textMuted hover:text-danger hover:bg-white/5"
+          class="p-1 ml-auto sm:ml-1 rounded text-textMuted hover:text-danger hover:bg-white/5"
           title="关闭合并视图"
         >
           <X class="w-3.5 h-3.5" />
@@ -306,26 +306,26 @@ function clearBuffer() {
     </div>
 
     <!-- Source tags legend -->
-    <div class="px-4 py-2 border-b border-border/60 bg-base/40 flex flex-wrap items-center gap-2 text-[11px]">
-      <span class="text-textMuted flex items-center">
+    <div class="px-3 sm:px-4 py-2 border-b border-border/60 bg-base/40 flex flex-wrap items-center gap-2 text-[11px]">
+      <span class="text-textMuted flex items-center shrink-0">
         <Activity class="w-3 h-3 mr-1" />
         来源标签：
       </span>
       <span
         v-for="src in sources"
         :key="src.id"
-        class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-border bg-base font-mono"
+        class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-border bg-base font-mono max-w-full"
         :title="src.filePath"
       >
-        <span class="font-semibold" :class="paletteFor(src)">{{ tagFor(src) }}</span>
-        <span class="text-textMuted truncate max-w-[16em]">{{ src.label }}</span>
+        <span class="font-semibold shrink-0" :class="paletteFor(src)">{{ tagFor(src) }}</span>
+        <span class="text-textMuted truncate max-w-[10em] sm:max-w-[16em]">{{ src.label }}</span>
       </span>
     </div>
 
     <!-- Errors -->
     <div
       v-if="Object.keys(errorsByTag).length > 0"
-      class="px-4 py-2 text-xs text-danger bg-danger/5 border-b border-danger/20 space-y-0.5"
+      class="px-3 sm:px-4 py-2 text-xs text-danger bg-danger/5 border-b border-danger/20 space-y-0.5"
     >
       <div
         v-for="(msg, tag) in errorsByTag"
@@ -333,7 +333,7 @@ function clearBuffer() {
         class="flex items-center"
       >
         <AlertTriangle class="w-3.5 h-3.5 mr-1 shrink-0" />
-        <span class="font-mono mr-2">{{ tag }}</span>
+        <span class="font-mono mr-2 shrink-0">{{ tag }}</span>
         <span class="truncate">{{ msg }}</span>
       </div>
     </div>
@@ -344,7 +344,7 @@ function clearBuffer() {
       @scroll.passive="onScroll"
       @wheel.passive="onUserInteract"
       @touchstart.passive="onUserInteract"
-      class="flex-1 min-h-0 overflow-auto bg-base p-3 font-mono text-xs leading-relaxed"
+      class="flex-1 min-h-0 overflow-auto bg-base p-2 sm:p-3 font-mono text-[11px] sm:text-xs leading-relaxed"
     >
       <div v-if="lines.length === 0" class="text-textMuted text-center py-12">
         <Loader2 v-if="activeCount > 0 && !allSnapshotsReceived" class="w-4 h-4 mx-auto animate-spin" />
@@ -353,13 +353,13 @@ function clearBuffer() {
       <div
         v-for="l in lines"
         :key="l.seq"
-        class="whitespace-pre-wrap break-all text-textMain/90 flex items-start gap-2"
+        class="whitespace-pre-wrap break-words text-textMain/90 flex items-start gap-2"
       >
         <span
           class="shrink-0 font-semibold select-none"
           :class="tagColorBySourceId[l.sourceId] || 'text-textMuted'"
         >[{{ l.tag }}]</span>
-        <span class="min-w-0 flex-1">{{ l.text }}</span>
+        <span class="min-w-0 flex-1 break-all">{{ l.text }}</span>
       </div>
     </div>
   </div>

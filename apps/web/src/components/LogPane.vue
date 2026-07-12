@@ -299,14 +299,14 @@ onUnmounted(() => {
       请选择左侧日志源
     </div>
     <template v-else>
-      <div v-if="showHeader" class="flex items-center justify-between px-4 py-3 border-b border-border">
+      <div v-if="showHeader" class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-3 sm:px-4 py-2 sm:py-3 border-b border-border">
         <div class="min-w-0 flex-1">
           <div class="text-sm text-textMain font-medium truncate">{{ label }}</div>
           <div class="text-[10px] text-textMuted font-mono truncate" :title="filePath">
             {{ filePath }} · {{ formatBytes(fileSize) }}
           </div>
         </div>
-        <div class="flex items-center space-x-1 ml-3">
+        <div class="flex items-center gap-1 flex-wrap sm:flex-nowrap sm:ml-3">
           <button
             v-for="m in ['live','history','search'] as const"
             :key="m"
@@ -322,7 +322,7 @@ onUnmounted(() => {
           <button
             v-if="showClose"
             @click="emit('close')"
-            class="p-1 ml-1 rounded text-textMuted hover:text-danger hover:bg-white/5"
+            class="p-1 ml-auto sm:ml-1 rounded text-textMuted hover:text-danger hover:bg-white/5"
             title="关闭此面板"
           >
             <X class="w-3.5 h-3.5" />
@@ -332,8 +332,8 @@ onUnmounted(() => {
 
       <!-- Live -->
       <div v-if="mode === 'live'" class="flex-1 flex flex-col min-h-0">
-        <div class="flex items-center justify-between px-4 py-2 border-b border-border text-xs">
-          <div class="flex items-center space-x-3 text-textMuted">
+        <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-3 sm:px-4 py-2 border-b border-border text-xs">
+          <div class="flex items-center gap-3 flex-wrap text-textMuted">
             <label class="flex items-center space-x-1">
               <span>尾部行数</span>
               <select v-model.number="liveTailLines" @change="startLive" class="bg-base border border-border rounded px-2 py-0.5 text-textMain focus:outline-none focus:border-primary">
@@ -352,7 +352,7 @@ onUnmounted(() => {
               {{ tail.connected ? '● 实时跟随' : '○ 已断开' }}
             </span>
           </div>
-          <div class="flex items-center space-x-2">
+          <div class="flex items-center gap-2 flex-wrap sm:flex-nowrap">
             <button
               @click="toggleLiveFollow"
               class="inline-flex items-center px-2 py-1 border border-border text-textMuted hover:text-textMain rounded"
@@ -366,15 +366,15 @@ onUnmounted(() => {
             </button>
           </div>
         </div>
-        <div v-if="liveError" class="px-4 py-2 text-xs text-danger flex items-center bg-danger/5 border-b border-danger/20">
-          <AlertTriangle class="w-3.5 h-3.5 mr-1" /> {{ liveError }}
+        <div v-if="liveError" class="px-3 sm:px-4 py-2 text-xs text-danger flex items-center bg-danger/5 border-b border-danger/20">
+          <AlertTriangle class="w-3.5 h-3.5 mr-1 shrink-0" /> <span class="truncate">{{ liveError }}</span>
         </div>
         <div
           ref="liveLogRef"
           @scroll.passive="onLiveScroll"
           @wheel.passive="onLiveUserInteract"
           @touchstart.passive="onLiveUserInteract"
-          class="flex-1 overflow-auto bg-base p-3 font-mono text-xs leading-relaxed"
+          class="flex-1 overflow-auto bg-base p-2 sm:p-3 font-mono text-[11px] sm:text-xs leading-relaxed"
           style="min-height: 260px;"
         >
           <div v-if="liveLines.length === 0" class="text-textMuted text-center py-12">
@@ -387,8 +387,8 @@ onUnmounted(() => {
 
       <!-- History -->
       <div v-else-if="mode === 'history'" class="flex-1 flex flex-col min-h-0">
-        <div class="flex items-center justify-between px-4 py-2 border-b border-border text-xs">
-          <div class="flex items-center space-x-2">
+        <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-3 sm:px-4 py-2 border-b border-border text-xs">
+          <div class="flex items-center gap-2 flex-wrap">
             <button @click="loadHistoryHead" class="inline-flex items-center px-2 py-1 border border-border text-textMuted hover:text-textMain rounded">
               最前
             </button>
@@ -402,15 +402,15 @@ onUnmounted(() => {
               最末
             </button>
           </div>
-          <div class="text-textMuted font-mono">
+          <div class="text-textMuted font-mono truncate">
             {{ formatBytes(historyStart) }} ~ {{ formatBytes(historyEnd) }} / {{ formatBytes(historySize) }}
             <span v-if="historyBinary" class="ml-2 text-yellow-400">[二进制]</span>
           </div>
         </div>
-        <div v-if="historyError" class="px-4 py-2 text-xs text-danger flex items-center bg-danger/5 border-b border-danger/20">
-          <AlertTriangle class="w-3.5 h-3.5 mr-1" /> {{ historyError }}
+        <div v-if="historyError" class="px-3 sm:px-4 py-2 text-xs text-danger flex items-center bg-danger/5 border-b border-danger/20">
+          <AlertTriangle class="w-3.5 h-3.5 mr-1 shrink-0" /> <span class="truncate">{{ historyError }}</span>
         </div>
-        <div class="flex-1 overflow-auto bg-base p-3 font-mono text-xs leading-relaxed" style="min-height: 260px;">
+        <div class="flex-1 overflow-auto bg-base p-2 sm:p-3 font-mono text-[11px] sm:text-xs leading-relaxed" style="min-height: 260px;">
           <div v-if="historyLoading && historyLines.length === 0" class="text-textMuted text-center py-12">
             <Loader2 class="w-4 h-4 mx-auto animate-spin" />
           </div>
@@ -424,32 +424,32 @@ onUnmounted(() => {
 
       <!-- Search -->
       <div v-else class="flex-1 flex flex-col min-h-0">
-        <div class="px-4 py-2 border-b border-border space-y-2">
-          <div class="flex items-center space-x-2">
+        <div class="px-3 sm:px-4 py-2 border-b border-border space-y-2">
+          <div class="flex items-center gap-2 flex-wrap sm:flex-nowrap">
             <input
               v-model="searchQuery"
               @keydown.enter.prevent="runSearch"
               type="text"
               spellcheck="false"
               placeholder="输入关键词 / 正则 (回车搜索)"
-              class="flex-1 bg-base border border-border rounded-md px-3 py-1.5 text-textMain text-sm font-mono focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/40"
+              class="flex-1 min-w-0 bg-base border border-border rounded-md px-3 py-1.5 text-textMain text-sm font-mono focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/40"
             />
             <button
               v-if="search.running"
               @click="abortSearch"
-              class="inline-flex items-center px-3 py-1.5 text-xs border border-border rounded-md text-textMuted hover:text-textMain"
+              class="inline-flex items-center px-3 py-1.5 text-xs border border-border rounded-md text-textMuted hover:text-textMain shrink-0"
             >
               <X class="w-3 h-3 mr-1" /> 中止
             </button>
             <button
               v-else
               @click="runSearch"
-              class="inline-flex items-center px-3 py-1.5 text-xs bg-primary text-white rounded-md hover:bg-primary/90"
+              class="inline-flex items-center px-3 py-1.5 text-xs bg-primary text-white rounded-md hover:bg-primary/90 shrink-0"
             >
               <Search class="w-3 h-3 mr-1" /> 搜索
             </button>
           </div>
-          <div class="flex items-center space-x-3 text-xs text-textMuted">
+          <div class="flex items-center gap-3 flex-wrap text-xs text-textMuted">
             <label class="flex items-center"><input type="checkbox" v-model="searchRegex" class="mr-1 accent-primary" /> 正则</label>
             <label class="flex items-center"><input type="checkbox" v-model="searchCaseInsensitive" class="mr-1 accent-primary" /> 忽略大小写</label>
             <span v-if="search.running" class="text-primary">搜索中…</span>
@@ -457,17 +457,17 @@ onUnmounted(() => {
             <span v-if="searchTruncated" class="text-yellow-400">已截断（达到 {{ searchTruncated.maxHits }} 条上限）</span>
           </div>
         </div>
-        <div v-if="searchError" class="px-4 py-2 text-xs text-danger flex items-center bg-danger/5 border-b border-danger/20">
-          <AlertTriangle class="w-3.5 h-3.5 mr-1" /> {{ searchError }}
+        <div v-if="searchError" class="px-3 sm:px-4 py-2 text-xs text-danger flex items-center bg-danger/5 border-b border-danger/20">
+          <AlertTriangle class="w-3.5 h-3.5 mr-1 shrink-0" /> <span class="truncate">{{ searchError }}</span>
         </div>
-        <div class="flex-1 overflow-auto bg-base p-3 font-mono text-xs leading-relaxed" style="min-height: 260px;">
+        <div class="flex-1 overflow-auto bg-base p-2 sm:p-3 font-mono text-[11px] sm:text-xs leading-relaxed" style="min-height: 260px;">
           <div v-if="searchHits.length === 0 && !search.running" class="text-textMuted text-center py-12">
             {{ searchDone ? '无匹配' : '输入关键词后回车开始搜索' }}
           </div>
           <ul>
             <li v-for="(h, i) in searchHits" :key="i" class="flex items-start py-0.5">
-              <span class="text-textMuted/60 mr-3 text-right shrink-0 font-mono" style="min-width: 7em" :title="`offset=${h.offset}`">@{{ formatBytes(h.offset) }}</span>
-              <span class="text-textMain/90 whitespace-pre-wrap break-all" v-html="highlightHit(h.text)"></span>
+              <span class="text-textMuted/60 mr-2 sm:mr-3 text-right shrink-0 font-mono text-[10px] sm:text-xs" style="min-width: 5em" :title="`offset=${h.offset}`">@{{ formatBytes(h.offset) }}</span>
+              <span class="text-textMain/90 whitespace-pre-wrap break-all min-w-0 flex-1" v-html="highlightHit(h.text)"></span>
             </li>
           </ul>
         </div>
