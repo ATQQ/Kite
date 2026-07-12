@@ -33,6 +33,7 @@ const liveLines = ref<string[]>([])
 const liveFollow = ref(true)
 const liveTailLines = ref(20)
 const liveError = ref('')
+const liveSnapshotReceived = ref(false)
 const liveLogRef = ref<HTMLDivElement | null>(null)
 let isProgrammaticLiveScroll = false
 let programmaticLiveScrollTimer: ReturnType<typeof setTimeout> | null = null
@@ -97,10 +98,12 @@ function startLive() {
   if (!hasSource.value) return
   liveLines.value = []
   liveError.value = ''
+  liveSnapshotReceived.value = false
   tail.connect(props.sourceId, liveTailLines.value, {
     onSnapshot: ({ size, lines }) => {
       fileSize.value = size
       liveLines.value = lines
+      liveSnapshotReceived.value = true
       scrollLiveBottom()
     },
     onLines: ({ lines }) => {
@@ -375,7 +378,7 @@ onUnmounted(() => {
           style="min-height: 260px;"
         >
           <div v-if="liveLines.length === 0" class="text-textMuted text-center py-12">
-            <Loader2 v-if="tail.connected" class="w-4 h-4 mx-auto animate-spin" />
+            <Loader2 v-if="tail.connected && !liveSnapshotReceived" class="w-4 h-4 mx-auto animate-spin" />
             <span v-else>暂无日志内容</span>
           </div>
           <div v-for="(l, i) in liveLines" :key="i" class="whitespace-pre-wrap break-all text-textMain/90">{{ l }}</div>

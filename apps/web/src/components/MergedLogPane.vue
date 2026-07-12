@@ -39,12 +39,18 @@ const scrollRef = ref<HTMLDivElement | null>(null)
 const tailLines = ref<number>(props.tailLines)
 const errorsByTag = ref<Record<string, string>>({})
 const activeCount = ref(0)
+const snapshotReceived = ref<Set<string>>(new Set())
 let seqCounter = 0
 let isProgrammaticScroll = false
 let programmaticScrollTimer: ReturnType<typeof setTimeout> | null = null
 
 const kindLabel = computed(() => props.kind === 'stdout' ? 'stdout' : 'stderr')
 const kindColorCls = computed(() => props.kind === 'stdout' ? 'text-success' : 'text-danger')
+
+const allSnapshotsReceived = computed(() => {
+  if (props.sources.length === 0) return true
+  return props.sources.every((s) => snapshotReceived.value.has(s.id))
+})
 
 const controllers = new Map<string, AbortController>()
 
@@ -172,6 +178,11 @@ async function subscribe(src: MergedSource) {
           const data = JSON.parse(eventData)
           if (eventType === 'snapshot') {
             pushLines(src, Array.isArray(data?.lines) ? data.lines : [], true)
+            if (!snapshotReceived.value.has(src.id)) {
+              const next = new Set(snapshotReceived.value)
+              next.add(src.id)
+              snapshotReceived.value = next
+            }
           } else if (eventType === 'lines') {
             pushLines(src, Array.isArray(data?.lines) ? data.lines : [], false)
           } else if (eventType === 'rotated') {
@@ -199,6 +210,7 @@ function connectAll() {
   disconnectAll()
   lines.value = []
   errorsByTag.value = {}
+  snapshotReceived.value = new Set()
   seqCounter = 0
   for (const src of props.sources) {
     subscribe(src)
@@ -335,8 +347,8 @@ function clearBuffer() {
       class="flex-1 min-h-0 overflow-auto bg-base p-3 font-mono text-xs leading-relaxed"
     >
       <div v-if="lines.length === 0" class="text-textMuted text-center py-12">
-        <Loader2 v-if="activeCount > 0" class="w-4 h-4 mx-auto animate-spin" />
-        <span v-else>等待日志数据…</span>
+        <Loader2 v-if="activeCount > 0 && !allSnapshotsReceived" class="w-4 h-4 mx-auto animate-spin" />
+        <span v-else>暂无日志数据</span>
       </div>
       <div
         v-for="l in lines"
