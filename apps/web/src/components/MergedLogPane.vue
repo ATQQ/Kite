@@ -231,7 +231,7 @@ function clearBuffer() {
 </script>
 
 <template>
-  <div class="flex flex-col min-h-0 h-full bg-panel border border-border rounded-lg overflow-hidden" style="min-height: 540px;">
+  <div class="flex flex-col min-h-0 h-full bg-panel border border-border rounded-lg overflow-hidden">
     <!-- Header -->
     <div class="flex items-center justify-between px-4 py-3 border-b border-border">
       <div class="min-w-0 flex-1 flex items-center gap-2">
@@ -332,8 +332,7 @@ function clearBuffer() {
       @scroll.passive="onScroll"
       @wheel.passive="onUserInteract"
       @touchstart.passive="onUserInteract"
-      class="flex-1 overflow-auto bg-base p-3 font-mono text-xs leading-relaxed"
-      style="min-height: 260px;"
+      class="flex-1 min-h-0 overflow-auto bg-base p-3 font-mono text-xs leading-relaxed"
     >
       <div v-if="lines.length === 0" class="text-textMuted text-center py-12">
         <Loader2 v-if="activeCount > 0" class="w-4 h-4 mx-auto animate-spin" />

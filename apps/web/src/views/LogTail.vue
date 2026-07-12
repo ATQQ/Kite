@@ -653,7 +653,7 @@ watch(() => pm2Status.value?.found === true ? pm2LogPaths.value.map((p) => p.pat
       </div>
     </div>
 
-    <div v-if="mergedMode && mergedTarget" class="w-full">
+    <div v-if="mergedMode && mergedTarget" class="w-full" style="height: calc(100vh - 220px); min-height: 560px;">
       <MergedLogPane
         :kind="mergedTarget.kind"
         :sources="mergedTarget.sources"
