@@ -1,15 +1,15 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
-import { ArrowLeft, Plus, RefreshCw, Trash2, FileText, Play, Pause, ChevronDown, ChevronUp, Search, X, AlertTriangle, Loader2, Activity, History as HistoryIcon, Pencil, Zap, CheckSquare, Square, MinusSquare } from 'lucide-vue-next'
+import { ArrowLeft, Plus, RefreshCw, Trash2, FileText, Loader2, Pencil, Zap, CheckSquare, Square, MinusSquare, Columns, X } from 'lucide-vue-next'
 import { useProjectStore, type Pm2AppStatus } from '../store/project'
 import { useToast } from '../composables/useToast'
 import FolderPickerDialog from '../components/FolderPickerDialog.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import BulkActionBar from '../components/BulkActionBar.vue'
+import LogPane from '../components/LogPane.vue'
+import LogPaneSplit from '../components/LogPaneSplit.vue'
 import { useBulkSelection } from '../composables/useBulkSelection'
-import { useLogTailStream } from '../composables/useLogTailStream'
-import { useLogSearchStream, type SearchHit } from '../composables/useLogSearchStream'
 import { apiUrl } from '../lib/base'
 
 type LogSource = {
@@ -22,8 +22,6 @@ type LogSource = {
   createdAt: string
   updatedAt: string
 }
-
-type Mode = 'live' | 'history' | 'search'
 
 const route = useRoute()
 const router = useRouter()
@@ -43,6 +41,19 @@ const pm2Loading = ref(false)
 const pm2Importing = ref(false)
 const pm2AutoLinked = ref(false)
 const pm2AppName = computed(() => (project.value as any)?.pm2AppName?.trim() || '')
+
+const AUTO_PRUNE_STORAGE_KEY = 'kite.logTail.autoPrunePm2'
+const autoPrunePm2Logs = ref<boolean>(((): boolean => {
+  try {
+    const v = localStorage.getItem(AUTO_PRUNE_STORAGE_KEY)
+    return v === null ? true : v === '1'
+  } catch {
+    return true
+  }
+})())
+watch(autoPrunePm2Logs, (v) => {
+  try { localStorage.setItem(AUTO_PRUNE_STORAGE_KEY, v ? '1' : '0') } catch { /* ignore */ }
+})
 
 type Pm2LogPathItem = {
   path: string
@@ -94,38 +105,6 @@ const confirmDeleteOpen = ref(false)
 const pendingDeleteId = ref<string>('')
 const renamingId = ref<string>('')
 const renameValue = ref<string>('')
-
-const mode = ref<Mode>('live')
-
-const fileSize = ref(0)
-
-const liveLines = ref<string[]>([])
-const liveFollow = ref(true)
-const liveTailLines = ref(20)
-const liveError = ref('')
-const liveLogRef = ref<HTMLDivElement | null>(null)
-
-const tail = useLogTailStream(() => store.adminToken)
-
-const historyLines = ref<string[]>([])
-const historyStart = ref(0)
-const historyEnd = ref(0)
-const historySize = ref(0)
-const historyTruncatedHead = ref(false)
-const historyTruncatedTail = ref(false)
-const historyLoading = ref(false)
-const historyError = ref('')
-const historyBinary = ref(false)
-const HISTORY_WINDOW = 64 * 1024
-
-const searchQuery = ref('')
-const searchRegex = ref(false)
-const searchCaseInsensitive = ref(true)
-const searchHits = ref<SearchHit[]>([])
-const searchTruncated = ref<{ maxHits: number } | null>(null)
-const searchDone = ref<{ scannedBytes: number } | null>(null)
-const searchError = ref('')
-const search = useLogSearchStream(() => store.adminToken)
 
 async function loadSources() {
   loadingSources.value = true
@@ -194,6 +173,9 @@ async function autoLinkPm2Sources() {
   if (pm2AutoLinked.value) return
   if (!pm2AppName.value) return
   if (pm2Status.value?.found !== true) return
+  // 先按当前 PM2 activeSet 清理过期的 pm2 kind 行，避免"旧路径残留 + 新路径新增"造成翻倍。
+  await prunePm2IfNeeded()
+  await loadSources()
   const missing = pm2MissingPaths.value
   if (missing.length === 0) {
     pm2AutoLinked.value = true
@@ -223,9 +205,33 @@ async function autoLinkPm2Sources() {
 
 async function refreshAll() {
   pm2AutoLinked.value = false
-  await loadSources()
   await loadPm2Status()
+  await prunePm2IfNeeded()
+  await loadSources()
   await autoLinkPm2Sources()
+}
+
+// 清理已不在 pm2 jlist 有效路径集合内的 kind='pm2' 日志源。
+// 仅当自动清理开关开启、项目已绑定 pm2AppName、且 pm2Status.found === true 才执行。
+async function prunePm2IfNeeded() {
+  if (!autoPrunePm2Logs.value) return
+  if (!pm2AppName.value) return
+  if (pm2Status.value?.found !== true) return
+  try {
+    const res = await store.prunePm2LogSources(projectId.value)
+    const removed = Array.isArray(res?.removed) ? res.removed : []
+    if (removed.length === 0) return
+    const removedIds = new Set(removed.map((r) => r.id))
+    if (activeSourceId.value && removedIds.has(activeSourceId.value)) {
+      activeSourceId.value = ''
+    }
+    // 从本地 sources 中同步移除，避免在下一次 loadSources 之前列表仍显示旧项。
+    sources.value = sources.value.filter((s) => !removedIds.has(s.id))
+    toast.success(`已清理 ${removed.length} 个旧的 PM2 日志源`)
+  } catch (e: any) {
+    // 静默失败，避免影响主要刷新流程；控制台留痕便于排查
+    console.warn('prunePm2LogSources failed', e)
+  }
 }
 
 async function onPickerConfirm(paths: string[]) {
@@ -254,12 +260,7 @@ async function confirmDelete() {
   try {
     await store.deleteLogSource(id)
     if (activeSourceId.value === id) {
-      tail.disconnect()
-      search.abort()
       activeSourceId.value = ''
-      liveLines.value = []
-      historyLines.value = []
-      searchHits.value = []
     }
     await loadSources()
     pm2AutoLinked.value = false
@@ -308,6 +309,55 @@ function openBulkDeleteSources() {
   showBulkDeleteSources.value = true
 }
 
+// ---------- Split view ----------
+const SPLIT_MAX = 4
+const SPLIT_MIN = 2
+const splitMode = ref(false)
+
+const splitSources = computed(() => {
+  const ids = Array.from(sourceBulk.selectedIds.value)
+  const map = new Map(sources.value.map((s) => [s.id, s]))
+  return ids
+    .map((id) => map.get(id))
+    .filter((s): s is LogSource => !!s)
+    .slice(0, SPLIT_MAX)
+})
+
+const canOpenSplit = computed(() => {
+  const n = sourceBulk.selectedCount.value
+  return n >= SPLIT_MIN && n <= SPLIT_MAX
+})
+
+function openSplit() {
+  const n = sourceBulk.selectedCount.value
+  if (n < SPLIT_MIN) {
+    toast.error(`请至少勾选 ${SPLIT_MIN} 个日志源`)
+    return
+  }
+  if (n > SPLIT_MAX) {
+    toast.error('已超出分屏上限', `分屏最多同时查看 ${SPLIT_MAX} 个日志源`)
+    return
+  }
+  splitMode.value = true
+}
+
+function exitSplit() {
+  splitMode.value = false
+}
+
+function removeFromSplit(id: string) {
+  sourceBulk.toggle(id)
+  if (splitSources.value.length < SPLIT_MIN) {
+    splitMode.value = false
+  }
+}
+
+watch(splitSources, (val) => {
+  if (splitMode.value && val.length < SPLIT_MIN) {
+    splitMode.value = false
+  }
+})
+
 async function confirmBulkDeleteSources() {
   if (isBulkDeletingSources.value) return
   const ids = Array.from(sourceBulk.selectedIds.value)
@@ -335,12 +385,7 @@ async function confirmBulkDeleteSources() {
       toast.error('部分成功', `成功 ${success} 条，失败 ${failed} 条`)
     }
     if (activeSourceId.value && ids.includes(activeSourceId.value)) {
-      tail.disconnect()
-      search.abort()
       activeSourceId.value = ''
-      liveLines.value = []
-      historyLines.value = []
-      searchHits.value = []
     }
     showBulkDeleteSources.value = false
     sourceBulk.clear()
@@ -375,205 +420,16 @@ async function commitRename() {
 
 function pickSource(id: string) {
   if (activeSourceId.value === id) return
-  tail.disconnect()
-  search.abort()
   activeSourceId.value = id
-  liveLines.value = []
-  liveError.value = ''
-  historyLines.value = []
-  historyError.value = ''
-  searchHits.value = []
-  searchTruncated.value = null
-  searchDone.value = null
-  searchError.value = ''
-  onModeChange()
-}
-
-function onModeChange() {
-  tail.disconnect()
-  search.abort()
-  if (!activeSourceId.value) return
-  if (mode.value === 'live') {
-    startLive()
-  } else if (mode.value === 'history') {
-    loadHistoryTail()
-  }
-}
-
-watch(mode, onModeChange)
-
-function startLive() {
-  if (!activeSourceId.value) return
-  liveLines.value = []
-  liveError.value = ''
-  tail.connect(activeSourceId.value, liveTailLines.value, {
-    onSnapshot: ({ size, lines }) => {
-      fileSize.value = size
-      liveLines.value = lines
-      scrollLiveBottom()
-    },
-    onLines: ({ lines }) => {
-      liveLines.value.push(...lines)
-      if (liveLines.value.length > 5000) {
-        liveLines.value.splice(0, liveLines.value.length - 5000)
-      }
-      if (liveFollow.value) scrollLiveBottom()
-    },
-    onRotated: () => {
-      liveLines.value.push('--- log rotated ---')
-    },
-    onError: (msg) => { liveError.value = msg },
-  })
-}
-
-function scrollLiveBottom() {
-  nextTick(() => {
-    const el = liveLogRef.value
-    if (el) el.scrollTop = el.scrollHeight
-  })
-}
-
-function onLiveScroll() {
-  const el = liveLogRef.value
-  if (!el) return
-  const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 32
-  liveFollow.value = nearBottom
-}
-
-async function loadHistoryRange(offset: number, direction: 'forward' | 'backward' = 'forward') {
-  if (!activeSourceId.value) return
-  historyLoading.value = true
-  historyError.value = ''
-  try {
-    const data = await store.fetchLogSourceRange(activeSourceId.value, {
-      offset, size: HISTORY_WINDOW, direction,
-    })
-    historyLines.value = data.lines
-    historyStart.value = data.startOffset
-    historyEnd.value = data.endOffset
-    historySize.value = data.fileSize
-    historyTruncatedHead.value = data.truncatedHead
-    historyTruncatedTail.value = data.truncatedTail
-    historyBinary.value = data.binary
-    fileSize.value = data.fileSize
-  } catch (e: any) {
-    historyError.value = e?.message || '读取失败'
-  } finally {
-    historyLoading.value = false
-  }
-}
-
-async function loadHistoryTail() {
-  if (!activeSourceId.value) return
-  const meta = await refreshMeta()
-  if (!meta) return
-  const offset = Math.max(0, meta.size - HISTORY_WINDOW)
-  await loadHistoryRange(offset, 'forward')
-}
-
-async function loadHistoryHead() {
-  await loadHistoryRange(0, 'forward')
-}
-
-async function pageBackward() {
-  const next = Math.max(0, historyStart.value - HISTORY_WINDOW)
-  if (next === historyStart.value) return
-  await loadHistoryRange(next, 'forward')
-}
-
-async function pageForward() {
-  if (historyEnd.value >= historySize.value) return
-  await loadHistoryRange(historyEnd.value, 'forward')
-}
-
-async function refreshMeta() {
-  if (!activeSourceId.value) return null
-  try {
-    const meta = await store.fetchLogSourceMeta(activeSourceId.value)
-    fileSize.value = meta.size
-    return meta
-  } catch (e: any) {
-    toast.error(e?.message || '读取元数据失败')
-    return null
-  }
-}
-
-function runSearch() {
-  if (!activeSourceId.value) return
-  if (!searchQuery.value.trim()) {
-    toast.error('请输入关键词')
-    return
-  }
-  searchHits.value = []
-  searchTruncated.value = null
-  searchDone.value = null
-  searchError.value = ''
-  search.search(activeSourceId.value, {
-    q: searchQuery.value,
-    regex: searchRegex.value,
-    caseInsensitive: searchCaseInsensitive.value,
-    maxHits: 500,
-    context: 0,
-  }, {
-    onHit: (h) => { searchHits.value.push(h) },
-    onTruncated: (info) => { searchTruncated.value = info },
-    onDone: (info) => { searchDone.value = info },
-    onError: (msg) => { searchError.value = msg },
-  })
-}
-
-function abortSearch() {
-  search.abort()
-}
-
-function formatBytes(n: number): string {
-  if (!Number.isFinite(n) || n < 0) return '-'
-  if (n < 1024) return `${n} B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
-  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`
-  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`
-}
-
-function highlightHit(text: string): string {
-  const q = searchQuery.value
-  if (!q) return escapeHtml(text)
-  const flags = searchCaseInsensitive.value ? 'gi' : 'g'
-  let re: RegExp
-  try {
-    re = searchRegex.value
-      ? new RegExp(q, flags)
-      : new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), flags)
-  } catch {
-    return escapeHtml(text)
-  }
-  let out = ''
-  let i = 0
-  for (const m of text.matchAll(re)) {
-    const start = m.index ?? 0
-    const end = start + m[0].length
-    if (start > i) out += escapeHtml(text.slice(i, start))
-    out += `<mark class="bg-yellow-500/30 text-yellow-100 rounded px-0.5">${escapeHtml(text.slice(start, end))}</mark>`
-    i = end
-  }
-  if (i < text.length) out += escapeHtml(text.slice(i))
-  return out
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => (
-    c === '&' ? '&amp;' :
-    c === '<' ? '&lt;' :
-    c === '>' ? '&gt;' :
-    c === '"' ? '&quot;' : '&#39;'
-  ))
 }
 
 onMounted(async () => {
   if (!store.projects.length) {
     try { await store.fetchProjects() } catch { /* ignore */ }
   }
-  await loadSources()
   await loadPm2Status()
+  await prunePm2IfNeeded()
+  await loadSources()
   await autoLinkPm2Sources()
 })
 
@@ -581,19 +437,18 @@ onMounted(async () => {
 watch(pm2AppName, async () => {
   pm2AutoLinked.value = false
   await loadPm2Status()
+  await prunePm2IfNeeded()
+  await loadSources()
   await autoLinkPm2Sources()
 })
 
-watch(() => pm2Status.value?.found === true ? pm2LogPaths.value.map((p) => p.path).join('|') : '', (val, prev) => {
+watch(() => pm2Status.value?.found === true ? pm2LogPaths.value.map((p) => p.path).join('|') : '', async (val, prev) => {
   if (val && val !== prev) {
     pm2AutoLinked.value = false
-    autoLinkPm2Sources()
+    await prunePm2IfNeeded()
+    await loadSources()
+    await autoLinkPm2Sources()
   }
-})
-
-onUnmounted(() => {
-  tail.disconnect()
-  search.abort()
 })
 </script>
 
@@ -610,6 +465,35 @@ onUnmounted(() => {
         </div>
       </div>
       <div class="flex items-center space-x-2">
+        <label
+          v-if="pm2AppName"
+          class="inline-flex items-center px-2 py-1.5 text-[11px] text-textMuted border border-border rounded-md cursor-pointer hover:text-textMain hover:border-primary/40 transition-colors select-none"
+          title="刷新时自动清理 PM2 重启后遗留的旧日志源（仅移除 kind=pm2 且不在最新有效路径集合中的记录）"
+        >
+          <input v-model="autoPrunePm2Logs" type="checkbox" class="mr-1.5 accent-primary" />
+          自动清理旧 PM2 日志
+        </label>
+        <button
+          v-if="!splitMode"
+          @click="openSplit"
+          :disabled="!canOpenSplit"
+          class="inline-flex items-center px-3 py-1.5 text-xs font-medium bg-base border border-border hover:border-primary/50 hover:text-primary text-textMuted rounded-md transition-all disabled:opacity-50 disabled:hover:border-border disabled:hover:text-textMuted"
+          :title="sourceBulk.selectedCount.value < 2
+            ? '勾选左侧 2~4 个日志源后可开启分屏对比'
+            : (sourceBulk.selectedCount.value > 4 ? '分屏最多同时查看 4 个日志源' : `分屏对比选中的 ${sourceBulk.selectedCount.value} 个日志源`)"
+        >
+          <Columns class="w-3.5 h-3.5 mr-1.5" />
+          分屏对比{{ sourceBulk.selectedCount.value >= 2 ? ` (${Math.min(sourceBulk.selectedCount.value, 4)})` : '' }}
+        </button>
+        <button
+          v-else
+          @click="exitSplit"
+          class="inline-flex items-center px-3 py-1.5 text-xs font-medium bg-base border border-primary/50 text-primary hover:bg-primary/10 rounded-md transition-all"
+          title="退出分屏，返回单开查看"
+        >
+          <X class="w-3.5 h-3.5 mr-1.5" />
+          退出分屏
+        </button>
         <button
           @click="refreshAll"
           class="inline-flex items-center px-3 py-1.5 text-xs font-medium bg-base border border-border hover:border-primary/50 hover:text-primary text-textMuted rounded-md transition-all"
@@ -644,7 +528,11 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <div class="grid grid-cols-12 gap-4">
+    <div v-if="splitMode" class="w-full">
+      <LogPaneSplit :sources="splitSources" @remove="removeFromSplit" />
+    </div>
+
+    <div v-else class="grid grid-cols-12 gap-4">
       <!-- Source list -->
       <aside class="col-span-12 lg:col-span-3 bg-panel border border-border rounded-lg p-3">
         <div class="text-xs text-textMuted mb-2 px-1 flex items-center justify-between">
@@ -733,174 +621,15 @@ onUnmounted(() => {
 
       <!-- Viewer -->
       <section class="col-span-12 lg:col-span-9 bg-panel border border-border rounded-lg flex flex-col" style="min-height: 540px;">
-        <div v-if="!activeSource" class="flex-1 flex items-center justify-center text-textMuted text-sm">
+        <LogPane
+          v-if="activeSource"
+          :source-id="activeSource.id"
+          :label="activeSource.label"
+          :file-path="activeSource.filePath"
+        />
+        <div v-else class="flex-1 flex items-center justify-center text-textMuted text-sm">
           请选择左侧日志源
         </div>
-        <template v-else>
-          <div class="flex items-center justify-between px-4 py-3 border-b border-border">
-            <div class="min-w-0 flex-1">
-              <div class="text-sm text-textMain font-medium truncate">{{ activeSource.label }}</div>
-              <div class="text-[10px] text-textMuted font-mono truncate" :title="activeSource.filePath">
-                {{ activeSource.filePath }} · {{ formatBytes(fileSize) }}
-              </div>
-            </div>
-            <div class="flex items-center space-x-1 ml-3">
-              <button
-                v-for="m in ['live','history','search'] as const"
-                :key="m"
-                @click="mode = m"
-                class="inline-flex items-center px-2.5 py-1 text-xs rounded-md border transition-all"
-                :class="mode === m ? 'border-primary/60 bg-primary/10 text-primary' : 'border-border text-textMuted hover:text-textMain'"
-              >
-                <Activity v-if="m === 'live'" class="w-3 h-3 mr-1" />
-                <HistoryIcon v-else-if="m === 'history'" class="w-3 h-3 mr-1" />
-                <Search v-else class="w-3 h-3 mr-1" />
-                {{ m === 'live' ? '实时' : m === 'history' ? '历史' : '搜索' }}
-              </button>
-            </div>
-          </div>
-
-          <!-- Live -->
-          <div v-if="mode === 'live'" class="flex-1 flex flex-col min-h-0">
-            <div class="flex items-center justify-between px-4 py-2 border-b border-border text-xs">
-              <div class="flex items-center space-x-3 text-textMuted">
-                <label class="flex items-center space-x-1">
-                  <span>尾部行数</span>
-                  <select v-model.number="liveTailLines" @change="startLive" class="bg-base border border-border rounded px-2 py-0.5 text-textMain focus:outline-none focus:border-primary">
-                    <option :value="5">5</option>
-                    <option :value="10">10</option>
-                    <option :value="20">20</option>
-                    <option :value="30">30</option>
-                    <option :value="50">50</option>
-                    <option :value="100">100</option>
-                    <option :value="200">200</option>
-                    <option :value="500">500</option>
-                    <option :value="1000">1000</option>
-                  </select>
-                </label>
-                <span :class="tail.connected ? 'text-success' : 'text-textMuted'">
-                  {{ tail.connected ? '● 实时跟随' : '○ 已断开' }}
-                </span>
-              </div>
-              <div class="flex items-center space-x-2">
-                <button
-                  @click="liveFollow = !liveFollow; if (liveFollow) scrollLiveBottom()"
-                  class="inline-flex items-center px-2 py-1 border border-border text-textMuted hover:text-textMain rounded"
-                  :class="{ 'text-primary border-primary/40': liveFollow }"
-                >
-                  <component :is="liveFollow ? Pause : Play" class="w-3 h-3 mr-1" />
-                  {{ liveFollow ? '自动滚动中' : '已暂停滚动' }}
-                </button>
-                <button @click="startLive" class="inline-flex items-center px-2 py-1 border border-border text-textMuted hover:text-textMain rounded">
-                  <RefreshCw class="w-3 h-3 mr-1" /> 重连
-                </button>
-              </div>
-            </div>
-            <div v-if="liveError" class="px-4 py-2 text-xs text-danger flex items-center bg-danger/5 border-b border-danger/20">
-              <AlertTriangle class="w-3.5 h-3.5 mr-1" /> {{ liveError }}
-            </div>
-            <div
-              ref="liveLogRef"
-              @scroll="onLiveScroll"
-              class="flex-1 overflow-auto bg-base p-3 font-mono text-xs leading-relaxed"
-              style="min-height: 380px;"
-            >
-              <div v-if="liveLines.length === 0" class="text-textMuted text-center py-12">
-                <Loader2 v-if="tail.connected" class="w-4 h-4 mx-auto animate-spin" />
-                <span v-else>暂无日志内容</span>
-              </div>
-              <div v-for="(l, i) in liveLines" :key="i" class="whitespace-pre-wrap break-all text-textMain/90">{{ l }}</div>
-            </div>
-          </div>
-
-          <!-- History -->
-          <div v-else-if="mode === 'history'" class="flex-1 flex flex-col min-h-0">
-            <div class="flex items-center justify-between px-4 py-2 border-b border-border text-xs">
-              <div class="flex items-center space-x-2">
-                <button @click="loadHistoryHead" class="inline-flex items-center px-2 py-1 border border-border text-textMuted hover:text-textMain rounded">
-                  最前
-                </button>
-                <button @click="pageBackward" :disabled="historyLoading || historyStart <= 0" class="inline-flex items-center px-2 py-1 border border-border text-textMuted hover:text-textMain rounded disabled:opacity-40">
-                  <ChevronUp class="w-3 h-3 mr-1" /> 上一页
-                </button>
-                <button @click="pageForward" :disabled="historyLoading || historyEnd >= historySize" class="inline-flex items-center px-2 py-1 border border-border text-textMuted hover:text-textMain rounded disabled:opacity-40">
-                  <ChevronDown class="w-3 h-3 mr-1" /> 下一页
-                </button>
-                <button @click="loadHistoryTail" class="inline-flex items-center px-2 py-1 border border-border text-textMuted hover:text-textMain rounded">
-                  最末
-                </button>
-              </div>
-              <div class="text-textMuted font-mono">
-                {{ formatBytes(historyStart) }} ~ {{ formatBytes(historyEnd) }} / {{ formatBytes(historySize) }}
-                <span v-if="historyBinary" class="ml-2 text-yellow-400">[二进制]</span>
-              </div>
-            </div>
-            <div v-if="historyError" class="px-4 py-2 text-xs text-danger flex items-center bg-danger/5 border-b border-danger/20">
-              <AlertTriangle class="w-3.5 h-3.5 mr-1" /> {{ historyError }}
-            </div>
-            <div class="flex-1 overflow-auto bg-base p-3 font-mono text-xs leading-relaxed" style="min-height: 380px;">
-              <div v-if="historyLoading && historyLines.length === 0" class="text-textMuted text-center py-12">
-                <Loader2 class="w-4 h-4 mx-auto animate-spin" />
-              </div>
-              <div v-else>
-                <div v-if="historyTruncatedHead" class="text-[10px] text-textMuted text-center py-1">… 顶部已截齐到换行</div>
-                <div v-for="(l, i) in historyLines" :key="i" class="whitespace-pre-wrap break-all text-textMain/90">{{ l }}</div>
-                <div v-if="historyTruncatedTail" class="text-[10px] text-textMuted text-center py-1">… 底部已截齐到换行</div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Search -->
-          <div v-else class="flex-1 flex flex-col min-h-0">
-            <div class="px-4 py-2 border-b border-border space-y-2">
-              <div class="flex items-center space-x-2">
-                <input
-                  v-model="searchQuery"
-                  @keydown.enter.prevent="runSearch"
-                  type="text"
-                  spellcheck="false"
-                  placeholder="输入关键词 / 正则 (回车搜索)"
-                  class="flex-1 bg-base border border-border rounded-md px-3 py-1.5 text-textMain text-sm font-mono focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/40"
-                />
-                <button
-                  v-if="search.running"
-                  @click="abortSearch"
-                  class="inline-flex items-center px-3 py-1.5 text-xs border border-border rounded-md text-textMuted hover:text-textMain"
-                >
-                  <X class="w-3 h-3 mr-1" /> 中止
-                </button>
-                <button
-                  v-else
-                  @click="runSearch"
-                  class="inline-flex items-center px-3 py-1.5 text-xs bg-primary text-white rounded-md hover:bg-primary/90"
-                >
-                  <Search class="w-3 h-3 mr-1" /> 搜索
-                </button>
-              </div>
-              <div class="flex items-center space-x-3 text-xs text-textMuted">
-                <label class="flex items-center"><input type="checkbox" v-model="searchRegex" class="mr-1 accent-primary" /> 正则</label>
-                <label class="flex items-center"><input type="checkbox" v-model="searchCaseInsensitive" class="mr-1 accent-primary" /> 忽略大小写</label>
-                <span v-if="search.running" class="text-primary">搜索中…</span>
-                <span v-else-if="searchDone">扫描 {{ formatBytes(searchDone.scannedBytes) }}，命中 {{ searchHits.length }} 条</span>
-                <span v-if="searchTruncated" class="text-yellow-400">已截断（达到 {{ searchTruncated.maxHits }} 条上限）</span>
-              </div>
-            </div>
-            <div v-if="searchError" class="px-4 py-2 text-xs text-danger flex items-center bg-danger/5 border-b border-danger/20">
-              <AlertTriangle class="w-3.5 h-3.5 mr-1" /> {{ searchError }}
-            </div>
-            <div class="flex-1 overflow-auto bg-base p-3 font-mono text-xs leading-relaxed" style="min-height: 380px;">
-              <div v-if="searchHits.length === 0 && !search.running" class="text-textMuted text-center py-12">
-                {{ searchDone ? '无匹配' : '输入关键词后回车开始搜索' }}
-              </div>
-              <ul>
-                <li v-for="(h, i) in searchHits" :key="i" class="flex items-start py-0.5">
-                  <span class="text-textMuted/60 mr-3 text-right shrink-0 font-mono" style="min-width: 7em" :title="`offset=${h.offset}`">@{{ formatBytes(h.offset) }}</span>
-                  <span class="text-textMain/90 whitespace-pre-wrap break-all" v-html="highlightHit(h.text)"></span>
-                </li>
-              </ul>
-            </div>
-          </div>
-        </template>
       </section>
     </div>
 

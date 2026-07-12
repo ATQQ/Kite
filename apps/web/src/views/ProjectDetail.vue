@@ -329,6 +329,8 @@ async function autoImportPm2LogSources() {
     if ((status as any).outLogPath) paths.push({ path: (status as any).outLogPath, kind: 'stdout' })
     if ((status as any).errorLogPath) paths.push({ path: (status as any).errorLogPath, kind: 'stderr' })
     if (paths.length === 0) return
+    // 绑定/换绑 PM2 应用后先清理过期的 pm2 kind 日志源，避免旧路径残留导致重启后翻倍。
+    try { await projectStore.prunePm2LogSources(projectId) } catch { /* ignore */ }
     const existing = await projectStore.fetchLogSources(projectId)
     const have = new Set((existing?.items || []).map((s: any) => s.filePath))
     const missing = paths.filter((p) => !have.has(p.path))
