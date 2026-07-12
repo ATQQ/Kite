@@ -40,6 +40,8 @@ const tailLines = ref<number>(props.tailLines)
 const errorsByTag = ref<Record<string, string>>({})
 const activeCount = ref(0)
 let seqCounter = 0
+let isProgrammaticScroll = false
+let programmaticScrollTimer: ReturnType<typeof setTimeout> | null = null
 
 const kindLabel = computed(() => props.kind === 'stdout' ? 'stdout' : 'stderr')
 const kindColorCls = computed(() => props.kind === 'stdout' ? 'text-success' : 'text-danger')
@@ -81,7 +83,6 @@ function pushLines(src: MergedSource, incoming: string[], asSnapshot = false) {
   }
   if (asSnapshot) {
     lines.value = lines.value.filter((l) => l.sourceId !== src.id).concat(arr)
-    lines.value.sort((a, b) => a.seq - b.seq)
   } else {
     lines.value.push(...arr)
   }
@@ -94,15 +95,36 @@ function pushLines(src: MergedSource, incoming: string[], asSnapshot = false) {
 function scrollBottom() {
   nextTick(() => {
     const el = scrollRef.value
-    if (el) el.scrollTop = el.scrollHeight
+    if (!el) return
+    isProgrammaticScroll = true
+    el.scrollTop = el.scrollHeight
+    if (programmaticScrollTimer) clearTimeout(programmaticScrollTimer)
+    programmaticScrollTimer = setTimeout(() => {
+      isProgrammaticScroll = false
+      programmaticScrollTimer = null
+    }, 120)
   })
 }
 
 function onScroll() {
+  if (isProgrammaticScroll) return
   const el = scrollRef.value
   if (!el) return
   const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 32
-  follow.value = nearBottom
+  if (!nearBottom && follow.value) follow.value = false
+}
+
+function onUserInteract() {
+  if (isProgrammaticScroll) return
+  const el = scrollRef.value
+  if (!el) return
+  const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 32
+  if (!nearBottom) follow.value = false
+}
+
+function toggleFollow() {
+  follow.value = !follow.value
+  if (follow.value) scrollBottom()
 }
 
 function disconnectAll() {
@@ -193,6 +215,10 @@ watch(tailLines, () => {
 
 onUnmounted(() => {
   disconnectAll()
+  if (programmaticScrollTimer) {
+    clearTimeout(programmaticScrollTimer)
+    programmaticScrollTimer = null
+  }
 })
 
 function reconnect() {
@@ -236,7 +262,7 @@ function clearBuffer() {
           </select>
         </label>
         <button
-          @click="follow = !follow; if (follow) scrollBottom()"
+          @click="toggleFollow"
           class="inline-flex items-center px-2 py-1 border border-border text-textMuted hover:text-textMain rounded text-xs"
           :class="{ 'text-primary border-primary/40': follow }"
         >
@@ -303,7 +329,9 @@ function clearBuffer() {
     <!-- Lines -->
     <div
       ref="scrollRef"
-      @scroll="onScroll"
+      @scroll.passive="onScroll"
+      @wheel.passive="onUserInteract"
+      @touchstart.passive="onUserInteract"
       class="flex-1 overflow-auto bg-base p-3 font-mono text-xs leading-relaxed"
       style="min-height: 260px;"
     >

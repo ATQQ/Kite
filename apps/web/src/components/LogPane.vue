@@ -34,6 +34,8 @@ const liveFollow = ref(true)
 const liveTailLines = ref(20)
 const liveError = ref('')
 const liveLogRef = ref<HTMLDivElement | null>(null)
+let isProgrammaticLiveScroll = false
+let programmaticLiveScrollTimer: ReturnType<typeof setTimeout> | null = null
 
 const tail = useLogTailStream(() => store.adminToken)
 
@@ -118,15 +120,36 @@ function startLive() {
 function scrollLiveBottom() {
   nextTick(() => {
     const el = liveLogRef.value
-    if (el) el.scrollTop = el.scrollHeight
+    if (!el) return
+    isProgrammaticLiveScroll = true
+    el.scrollTop = el.scrollHeight
+    if (programmaticLiveScrollTimer) clearTimeout(programmaticLiveScrollTimer)
+    programmaticLiveScrollTimer = setTimeout(() => {
+      isProgrammaticLiveScroll = false
+      programmaticLiveScrollTimer = null
+    }, 120)
   })
 }
 
 function onLiveScroll() {
+  if (isProgrammaticLiveScroll) return
   const el = liveLogRef.value
   if (!el) return
   const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 32
-  liveFollow.value = nearBottom
+  if (!nearBottom && liveFollow.value) liveFollow.value = false
+}
+
+function onLiveUserInteract() {
+  if (isProgrammaticLiveScroll) return
+  const el = liveLogRef.value
+  if (!el) return
+  const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 32
+  if (!nearBottom) liveFollow.value = false
+}
+
+function toggleLiveFollow() {
+  liveFollow.value = !liveFollow.value
+  if (liveFollow.value) scrollLiveBottom()
 }
 
 async function loadHistoryRange(offset: number, direction: 'forward' | 'backward' = 'forward') {
@@ -260,6 +283,10 @@ function escapeHtml(s: string): string {
 onUnmounted(() => {
   tail.disconnect()
   search.abort()
+  if (programmaticLiveScrollTimer) {
+    clearTimeout(programmaticLiveScrollTimer)
+    programmaticLiveScrollTimer = null
+  }
 })
 </script>
 
@@ -324,7 +351,7 @@ onUnmounted(() => {
           </div>
           <div class="flex items-center space-x-2">
             <button
-              @click="liveFollow = !liveFollow; if (liveFollow) scrollLiveBottom()"
+              @click="toggleLiveFollow"
               class="inline-flex items-center px-2 py-1 border border-border text-textMuted hover:text-textMain rounded"
               :class="{ 'text-primary border-primary/40': liveFollow }"
             >
@@ -341,7 +368,9 @@ onUnmounted(() => {
         </div>
         <div
           ref="liveLogRef"
-          @scroll="onLiveScroll"
+          @scroll.passive="onLiveScroll"
+          @wheel.passive="onLiveUserInteract"
+          @touchstart.passive="onLiveUserInteract"
           class="flex-1 overflow-auto bg-base p-3 font-mono text-xs leading-relaxed"
           style="min-height: 260px;"
         >
