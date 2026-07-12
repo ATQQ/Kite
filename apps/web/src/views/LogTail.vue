@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
-import { ArrowLeft, Plus, RefreshCw, Trash2, FileText, Loader2, Pencil, Zap, CheckSquare, Square, MinusSquare, Columns, X } from 'lucide-vue-next'
+import { ArrowLeft, Plus, RefreshCw, Trash2, FileText, Loader2, Pencil, Zap, CheckSquare, Square, MinusSquare, Columns, X, Layers } from 'lucide-vue-next'
 import { useProjectStore, type Pm2AppStatus } from '../store/project'
 import { useToast } from '../composables/useToast'
 import FolderPickerDialog from '../components/FolderPickerDialog.vue'
@@ -9,6 +9,7 @@ import ConfirmDialog from '../components/ConfirmDialog.vue'
 import BulkActionBar from '../components/BulkActionBar.vue'
 import LogPane from '../components/LogPane.vue'
 import LogPaneSplit from '../components/LogPaneSplit.vue'
+import MergedLogPane from '../components/MergedLogPane.vue'
 import { useBulkSelection } from '../composables/useBulkSelection'
 import { apiUrl } from '../lib/base'
 
@@ -88,6 +89,103 @@ const pm2MissingPaths = computed(() => {
   if (pm2LogPaths.value.length === 0) return []
   const have = new Set(sources.value.map((s) => s.filePath))
   return pm2LogPaths.value.filter((p) => !have.has(p.path))
+})
+
+type Pm2Meta = {
+  kind: 'stdout' | 'stderr'
+  pmId?: number
+  instanceId?: number
+}
+const pm2MetaByPath = computed<Map<string, Pm2Meta>>(() => {
+  const map = new Map<string, Pm2Meta>()
+  const s = pm2Status.value
+  if (!s || s.found === false) return map
+  const perInstance = Array.isArray(s.instancesLogPaths) ? s.instancesLogPaths : []
+  for (const inst of perInstance) {
+    if (inst?.outLogPath) map.set(inst.outLogPath, { kind: 'stdout', pmId: inst.pmId, instanceId: inst.instanceId })
+    if (inst?.errorLogPath) map.set(inst.errorLogPath, { kind: 'stderr', pmId: inst.pmId, instanceId: inst.instanceId })
+  }
+  if (s.outLogPath && !map.has(s.outLogPath)) map.set(s.outLogPath, { kind: 'stdout', pmId: s.pmId })
+  if (s.errorLogPath && !map.has(s.errorLogPath)) map.set(s.errorLogPath, { kind: 'stderr', pmId: s.pmId })
+  return map
+})
+
+function getPm2Meta(src: LogSource): Pm2Meta | null {
+  if (src.kind !== 'pm2') return null
+  const meta = pm2MetaByPath.value.get(src.filePath)
+  if (meta) return meta
+  const lower = src.filePath.toLowerCase()
+  if (/(err|error|stderr)\.log$/.test(lower) || /-err(-\d+)?\.log$/.test(lower)) return { kind: 'stderr' }
+  if (/(out|stdout)\.log$/.test(lower) || /-out(-\d+)?\.log$/.test(lower)) return { kind: 'stdout' }
+  return null
+}
+
+type GroupedSources = {
+  stdout: LogSource[]
+  stderr: LogSource[]
+  other: LogSource[]
+}
+const groupedSources = computed<GroupedSources>(() => {
+  const groups: GroupedSources = { stdout: [], stderr: [], other: [] }
+  for (const s of sources.value) {
+    const meta = getPm2Meta(s)
+    if (meta?.kind === 'stdout') groups.stdout.push(s)
+    else if (meta?.kind === 'stderr') groups.stderr.push(s)
+    else groups.other.push(s)
+  }
+  return groups
+})
+
+const pm2StdoutSources = computed(() => groupedSources.value.stdout)
+const pm2StderrSources = computed(() => groupedSources.value.stderr)
+
+type MergedTarget = {
+  kind: 'stdout' | 'stderr'
+  sources: Array<{ id: string; label: string; filePath: string; pmId?: number; instanceId?: number }>
+} | null
+const mergedTarget = ref<MergedTarget>(null)
+const mergedMode = computed(() => !!mergedTarget.value)
+
+function buildMergedSources(kind: 'stdout' | 'stderr') {
+  const list = kind === 'stdout' ? pm2StdoutSources.value : pm2StderrSources.value
+  return list.map((s) => {
+    const meta = getPm2Meta(s)
+    return {
+      id: s.id,
+      label: s.label,
+      filePath: s.filePath,
+      pmId: meta?.pmId,
+      instanceId: meta?.instanceId,
+    }
+  })
+}
+
+function openMerged(kind: 'stdout' | 'stderr') {
+  const items = buildMergedSources(kind)
+  if (items.length === 0) {
+    toast.error(`没有可合并的 ${kind} 日志`, '请先从 PM2 导入日志源')
+    return
+  }
+  if (splitMode.value) splitMode.value = false
+  mergedTarget.value = { kind, sources: items }
+}
+
+function exitMerged() {
+  mergedTarget.value = null
+}
+
+watch([pm2StdoutSources, pm2StderrSources], () => {
+  if (!mergedTarget.value) return
+  const items = buildMergedSources(mergedTarget.value.kind)
+  if (items.length === 0) {
+    mergedTarget.value = null
+    return
+  }
+  const prevKey = mergedTarget.value.sources.map((s) => s.id).sort().join('|')
+  const nextKey = items.map((s) => s.id).sort().join('|')
+  if (prevKey !== nextKey) {
+    mergedTarget.value = { kind: mergedTarget.value.kind, sources: items }
+  }
 })
 
 const canImportFromPm2 = computed(() => pm2AppName.value && pm2Status.value?.found === true && pm2LogPaths.value.length > 0)
@@ -495,6 +593,33 @@ watch(() => pm2Status.value?.found === true ? pm2LogPaths.value.map((p) => p.pat
           退出分屏
         </button>
         <button
+          v-if="!mergedMode && pm2StdoutSources.length > 0"
+          @click="openMerged('stdout')"
+          class="inline-flex items-center px-3 py-1.5 text-xs font-medium bg-base border border-success/40 text-success hover:bg-success/10 rounded-md transition-all"
+          :title="`将 ${pm2StdoutSources.length} 个 PM2 stdout 文件合并到一屏，每行前缀标注 pm2 实例编号`"
+        >
+          <Layers class="w-3.5 h-3.5 mr-1.5" />
+          合并 stdout ({{ pm2StdoutSources.length }})
+        </button>
+        <button
+          v-if="!mergedMode && pm2StderrSources.length > 0"
+          @click="openMerged('stderr')"
+          class="inline-flex items-center px-3 py-1.5 text-xs font-medium bg-base border border-danger/40 text-danger hover:bg-danger/10 rounded-md transition-all"
+          :title="`将 ${pm2StderrSources.length} 个 PM2 stderr 文件合并到一屏，每行前缀标注 pm2 实例编号`"
+        >
+          <Layers class="w-3.5 h-3.5 mr-1.5" />
+          合并 stderr ({{ pm2StderrSources.length }})
+        </button>
+        <button
+          v-if="mergedMode"
+          @click="exitMerged"
+          class="inline-flex items-center px-3 py-1.5 text-xs font-medium bg-base border border-primary/50 text-primary hover:bg-primary/10 rounded-md transition-all"
+          title="退出合并视图"
+        >
+          <X class="w-3.5 h-3.5 mr-1.5" />
+          退出合并
+        </button>
+        <button
           @click="refreshAll"
           class="inline-flex items-center px-3 py-1.5 text-xs font-medium bg-base border border-border hover:border-primary/50 hover:text-primary text-textMuted rounded-md transition-all"
         >
@@ -528,7 +653,15 @@ watch(() => pm2Status.value?.found === true ? pm2LogPaths.value.map((p) => p.pat
       </div>
     </div>
 
-    <div v-if="splitMode" class="w-full">
+    <div v-if="mergedMode && mergedTarget" class="w-full">
+      <MergedLogPane
+        :kind="mergedTarget.kind"
+        :sources="mergedTarget.sources"
+        @close="exitMerged"
+      />
+    </div>
+
+    <div v-else-if="splitMode" class="w-full">
       <LogPaneSplit :sources="splitSources" @remove="removeFromSplit" />
     </div>
 
@@ -561,61 +694,98 @@ watch(() => pm2Status.value?.found === true ? pm2LogPaths.value.map((p) => p.pat
           暂无日志源
           <p class="mt-1 text-[10px]">点击右上「添加日志文件」</p>
         </div>
-        <ul v-else class="space-y-1">
-          <li
-            v-for="s in sources"
-            :key="s.id"
-            class="group rounded-md border transition-all"
-            :class="sourceBulk.isSelected(s.id) ? 'border-primary/60 bg-primary/10' : (activeSourceId === s.id ? 'border-primary/60 bg-primary/5' : 'border-transparent hover:bg-white/5')"
-          >
-            <div class="flex items-start p-2">
-              <button
-                type="button"
-                class="p-1 mr-1 rounded transition-colors shrink-0"
-                :class="sourceBulk.isSelected(s.id) ? 'text-primary' : 'text-textMuted opacity-0 group-hover:opacity-100 hover:text-textMain'"
-                :title="sourceBulk.isSelected(s.id) ? '取消选中' : '选中此日志源'"
-                @click.stop="toggleSourceSelection($event, s.id)"
-              >
-                <CheckSquare v-if="sourceBulk.isSelected(s.id)" class="w-3.5 h-3.5" />
-                <Square v-else class="w-3.5 h-3.5" />
-              </button>
-              <button
-                @click="pickSource(s.id)"
-                class="flex-1 text-left min-w-0"
-              >
-                <div v-if="renamingId === s.id" @click.stop>
-                  <input
-                    v-model="renameValue"
-                    @keydown.enter.prevent="commitRename"
-                    @keydown.esc.prevent="renamingId = ''"
-                    @blur="commitRename"
-                    class="w-full bg-base border border-border rounded px-2 py-1 text-xs text-textMain focus:outline-none focus:border-primary"
-                    autofocus
-                  />
-                </div>
-                <div v-else>
-                  <div class="text-sm text-textMain font-medium truncate">{{ s.label }}</div>
-                  <div class="text-[10px] text-textMuted font-mono truncate" :title="s.filePath">{{ s.filePath }}</div>
-                </div>
-              </button>
-              <div class="flex items-center space-x-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button
-                  @click.stop="startRename(s)"
-                  class="p-1 text-textMuted hover:text-textMain rounded"
-                  title="重命名"
-                >
-                  <Pencil class="w-3 h-3" />
-                </button>
-                <button
-                  @click.stop="askDelete(s.id)"
-                  class="p-1 text-textMuted hover:text-danger rounded"
-                  title="移除"
-                >
-                  <Trash2 class="w-3 h-3" />
-                </button>
+        <ul v-else class="space-y-3">
+          <template v-for="group in [
+            { key: 'stdout', label: 'PM2 · stdout', items: pm2StdoutSources, badgeCls: 'bg-success/15 text-success border-success/30' },
+            { key: 'stderr', label: 'PM2 · stderr', items: pm2StderrSources, badgeCls: 'bg-danger/15 text-danger border-danger/30' },
+            { key: 'other', label: '其他日志源', items: groupedSources.other, badgeCls: '' },
+          ]" :key="group.key">
+            <li v-if="group.items.length > 0" class="space-y-1">
+              <div class="px-1 pb-1 border-b border-border/50 flex items-center justify-between text-[10px] uppercase tracking-wider text-textMuted/70">
+                <span class="flex items-center gap-1.5">
+                  <span
+                    v-if="group.key !== 'other'"
+                    class="w-1.5 h-1.5 rounded-full"
+                    :class="group.key === 'stdout' ? 'bg-success' : 'bg-danger'"
+                  ></span>
+                  {{ group.label }}
+                </span>
+                <span class="font-mono">{{ group.items.length }}</span>
               </div>
-            </div>
-          </li>
+              <ul class="space-y-1">
+                <li
+                  v-for="s in group.items"
+                  :key="s.id"
+                  class="group rounded-md border transition-all"
+                  :class="sourceBulk.isSelected(s.id) ? 'border-primary/60 bg-primary/10' : (activeSourceId === s.id ? 'border-primary/60 bg-primary/5' : 'border-transparent hover:bg-white/5')"
+                >
+                  <div class="flex items-start p-2">
+                    <button
+                      type="button"
+                      class="p-1 mr-1 rounded transition-colors shrink-0"
+                      :class="sourceBulk.isSelected(s.id) ? 'text-primary' : 'text-textMuted opacity-0 group-hover:opacity-100 hover:text-textMain'"
+                      :title="sourceBulk.isSelected(s.id) ? '取消选中' : '选中此日志源'"
+                      @click.stop="toggleSourceSelection($event, s.id)"
+                    >
+                      <CheckSquare v-if="sourceBulk.isSelected(s.id)" class="w-3.5 h-3.5" />
+                      <Square v-else class="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      @click="pickSource(s.id)"
+                      class="flex-1 text-left min-w-0"
+                    >
+                      <div v-if="renamingId === s.id" @click.stop>
+                        <input
+                          v-model="renameValue"
+                          @keydown.enter.prevent="commitRename"
+                          @keydown.esc.prevent="renamingId = ''"
+                          @blur="commitRename"
+                          class="w-full bg-base border border-border rounded px-2 py-1 text-xs text-textMain focus:outline-none focus:border-primary"
+                          autofocus
+                        />
+                      </div>
+                      <div v-else>
+                        <div class="flex items-center gap-1.5 min-w-0">
+                          <span
+                            v-if="getPm2Meta(s)"
+                            class="inline-flex items-center px-1.5 py-0 text-[9px] font-mono rounded border shrink-0"
+                            :class="getPm2Meta(s)?.kind === 'stdout' ? 'bg-success/10 text-success border-success/30' : 'bg-danger/10 text-danger border-danger/30'"
+                          >
+                            {{ getPm2Meta(s)?.kind }}
+                          </span>
+                          <span
+                            v-if="getPm2Meta(s) && (getPm2Meta(s)?.pmId !== undefined || getPm2Meta(s)?.instanceId !== undefined)"
+                            class="inline-flex items-center px-1.5 py-0 text-[9px] font-mono rounded border border-border bg-base text-textMuted shrink-0"
+                            :title="`pm2 pmId=${getPm2Meta(s)?.pmId ?? '-'} instance=${getPm2Meta(s)?.instanceId ?? '-'}`"
+                          >
+                            #{{ getPm2Meta(s)?.instanceId ?? getPm2Meta(s)?.pmId }}
+                          </span>
+                          <span class="text-sm text-textMain font-medium truncate">{{ s.label }}</span>
+                        </div>
+                        <div class="text-[10px] text-textMuted font-mono truncate" :title="s.filePath">{{ s.filePath }}</div>
+                      </div>
+                    </button>
+                    <div class="flex items-center space-x-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button
+                        @click.stop="startRename(s)"
+                        class="p-1 text-textMuted hover:text-textMain rounded"
+                        title="重命名"
+                      >
+                        <Pencil class="w-3 h-3" />
+                      </button>
+                      <button
+                        @click.stop="askDelete(s.id)"
+                        class="p-1 text-textMuted hover:text-danger rounded"
+                        title="移除"
+                      >
+                        <Trash2 class="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+                </li>
+              </ul>
+            </li>
+          </template>
         </ul>
       </aside>
 
