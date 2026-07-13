@@ -548,6 +548,19 @@ export const useProjectStore = defineStore('project', () => {
     return await apiFetch(`/log-sources/${sourceId}`, { method: 'DELETE' })
   }
 
+  async function prunePm2LogSources(projectId: string) {
+    return await apiFetch(`/projects/${projectId}/log-sources/prune-pm2`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }) as {
+      removed: Array<{ id: string; label: string; filePath: string }>
+      activePaths: string[]
+      kept?: number
+      skipped?: string
+      message?: string
+    }
+  }
+
   async function fetchLogSourceMeta(sourceId: string) {
     return await apiFetch(`/log-sources/${sourceId}/meta`) as {
       id: string
@@ -846,6 +859,7 @@ export const useProjectStore = defineStore('project', () => {
     createLogSources,
     updateLogSource,
     deleteLogSource,
+    prunePm2LogSources,
     fetchLogSourceMeta,
     fetchLogSourceRange,
     login,

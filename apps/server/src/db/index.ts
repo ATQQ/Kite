@@ -378,6 +378,22 @@ export const db = {
     },
     async create(data: { projectId: string; label: string; filePath: string; kind?: string | null; sortOrder?: number | null }) {
       await ensureDbReady();
+      const existingRows = await ormDb.select().from(schema.projectLogSources)
+        .where(and(
+          eq(schema.projectLogSources.projectId, data.projectId),
+          eq(schema.projectLogSources.filePath, data.filePath),
+        )).limit(1);
+      const existing = existingRows[0];
+      if (existing) {
+        const nextKind = data.kind ?? existing.kind ?? 'plain';
+        if (existing.kind !== nextKind) {
+          const patch = { kind: nextKind, updatedAt: new Date().toISOString() };
+          await ormDb.update(schema.projectLogSources).set(patch)
+            .where(eq(schema.projectLogSources.id, existing.id));
+          return { ...existing, ...patch };
+        }
+        return existing;
+      }
       const now = new Date().toISOString();
       const row = {
         id: 'lsrc_' + randomUUID().replace(/-/g, '').substring(0, 12),

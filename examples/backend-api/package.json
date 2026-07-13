@@ -5,6 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "bun --hot src/index.ts",
-    "build": "rm -rf dist && mkdir -p dist/src && cp src/index.ts dist/src/index.ts && cp package.json dist/package.json"
+    "build": "rm -rf dist && mkdir -p dist/src && cp src/index.ts dist/src/index.ts && cp package.json dist/package.json",
+    "pm2:start": "pm2 start ecosystem.config.cjs",
+    "pm2:stop": "pm2 delete kite-backend-api",
+    "pm2:logs": "pm2 logs kite-backend-api",
+    "load-test": "./scripts/load-test.sh"
   }
 }

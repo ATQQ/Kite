@@ -3,6 +3,7 @@ import path from 'node:path';
 import { db } from '../db/index.js';
 import { moduleLogger } from '../lib/logger.js';
 import { verifyAdminToken } from '../lib/auth.js';
+import { getPm2AppStatus } from '../lib/pm2.js';
 import {
   pathGuard,
   readTail,
@@ -126,6 +127,63 @@ export const logSourceRoutes = new Elysia()
     const ok = await db.logSources.remove(params.sourceId);
     if (!ok) { set.status = 404; return { error: 'Log source not found' }; }
     return { ok: true };
+  })
+
+  // ---------- Prune stale PM2 log sources ----------
+  .post('/api/projects/:id/log-sources/prune-pm2', async ({ headers, params, query, set }) => {
+    if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
+    const project = await db.projects.findById(params.id);
+    if (!project) { set.status = 404; return { error: 'Project not found' }; }
+
+    const pm2AppName = (project as any).pm2AppName ? String((project as any).pm2AppName).trim() : '';
+    if (!pm2AppName) {
+      return { skipped: 'no-pm2-binding', removed: [], activePaths: [] };
+    }
+
+    const rawForce = (query as any)?.force;
+    const force = rawForce === '1' || rawForce === 'true' || rawForce === true;
+
+    const status = await getPm2AppStatus(pm2AppName);
+    if (!status.found && !force) {
+      return { skipped: 'pm2-not-found', removed: [], activePaths: [], message: status.message };
+    }
+
+    const activeSet = new Set<string>();
+    const addPath = (p?: string) => {
+      if (!p) return;
+      try { activeSet.add(path.resolve(p)); } catch { /* ignore */ }
+    };
+    if (status.found) {
+      if (Array.isArray(status.instancesLogPaths)) {
+        for (const inst of status.instancesLogPaths) {
+          addPath(inst?.outLogPath);
+          addPath(inst?.errorLogPath);
+        }
+      }
+      addPath(status.outLogPath);
+      addPath(status.errorLogPath);
+    }
+
+    const sources = await db.logSources.findByProject(params.id);
+    const removed: Array<{ id: string; label: string; filePath: string }> = [];
+    for (const s of sources) {
+      if (s.kind !== 'pm2') continue;
+      let resolved = s.filePath;
+      try { resolved = path.resolve(s.filePath); } catch { /* ignore */ }
+      if (activeSet.has(resolved)) continue;
+      const ok = await db.logSources.remove(s.id);
+      if (ok) {
+        removed.push({ id: s.id, label: s.label, filePath: s.filePath });
+        log.info({ projectId: params.id, sourceId: s.id, filePath: s.filePath, force }, 'pruned stale pm2 log source');
+      }
+    }
+
+    return {
+      removed,
+      activePaths: Array.from(activeSet),
+      kept: sources.length - removed.length,
+      forced: force && !status.found ? true : undefined,
+    };
   })
 
   // ---------- Meta ----------
