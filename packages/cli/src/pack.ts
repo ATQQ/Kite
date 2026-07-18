@@ -154,7 +154,7 @@ export async function packProject(
             archive.file(fullPath, { name: pattern });
           }
         } else {
-          archive.glob(pattern, { cwd: sourceDir, ignore: ignoreList });
+          archive.glob(pattern, { cwd: sourceDir, ignore: ignoreList, dot: true });
         }
       });
     } else {
