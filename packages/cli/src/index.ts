@@ -772,6 +772,86 @@ cli.command('push', 'Push and deploy project')
   });
 
 // ==========================
+// Pack command: validate packaging without deployment
+// ==========================
+cli.command('pack', 'Pack project and show included files (does not deploy)')
+  .option('--out <dir>', 'Output directory to pack')
+  .option('--ignore <patterns>', 'Extra ignore patterns (comma separated, may repeat)')
+  .option('--no-ignore-builtin', 'Disable built-in ignore patterns (node_modules, .git, .env*, etc.)')
+  .option('--env <name>', 'Environment name (selects kite.config.<name>.json)')
+  .action(async (options: any) => {
+    try {
+      const allEnvs = listProjectEnvs();
+      if (allEnvs.length === 0) {
+        console.error(chalk.red('No kite.config*.json found. Run `kite init` first.'));
+        process.exit(1);
+      }
+
+      let resolved: ResolvedProjectConfig;
+      if (options.env) {
+        const found = resolveProjectConfig(options.env);
+        if (!found) {
+          console.error(chalk.red(`kite.config.${options.env}.json not found.`));
+          process.exit(1);
+        }
+        resolved = found;
+      } else if (allEnvs.length === 1) {
+        resolved = allEnvs[0];
+      } else {
+        const selectedEnv = await askEnvironment(allEnvs);
+        resolved = allEnvs.find(e => e.env === selectedEnv)!;
+      }
+
+      const projectConfig = resolved.config;
+      const envName = resolved.env;
+
+      if (envName) {
+        console.log(chalk.gray(`Environment: ${envName}`));
+      }
+
+      const localEnv = readLocalEnv();
+      const outputDir = options.out || localEnv.KITE_OUTPUT_DIR || projectConfig.outputDir || './';
+      const files = projectConfig.files || [];
+
+      const sourceDir = path.resolve(process.cwd(), outputDir);
+      if (!fs.existsSync(sourceDir)) {
+        console.error(chalk.red(`Error: Output directory not found: ${sourceDir}`));
+        process.exit(1);
+      }
+
+      const cliIgnore = parseIgnoreOption(options.ignore);
+      const ignore = cliIgnore.length > 0
+        ? cliIgnore
+        : (Array.isArray(projectConfig.ignore) ? projectConfig.ignore : []);
+      const ignoreBuiltin = options.ignoreBuiltin === false
+        ? true
+        : (projectConfig.ignoreBuiltin === true);
+
+      const spinner = ora('Packing files...').start();
+      const zipFilePath = path.resolve(process.cwd(), '.deploy-archive.zip');
+
+      const packResult = await packProject(sourceDir, zipFilePath, {
+        files: files.length > 0 ? files : undefined,
+        ignore,
+        ignoreBuiltin,
+      });
+      spinner.succeed(chalk.green('Packed successfully'));
+      displayPackResult(packResult);
+
+      console.log(chalk.gray('\nNote: This is a dry-run for validation. Use `kite push` to deploy.'));
+
+    } catch (error: any) {
+      console.error(chalk.red(`\nPack failed: ${error.message}`));
+      process.exit(1);
+    } finally {
+      const zipFilePath = path.resolve(process.cwd(), '.deploy-archive.zip');
+      if (fs.existsSync(zipFilePath)) {
+        fs.unlinkSync(zipFilePath);
+      }
+    }
+  });
+
+// ==========================
 // Migration commands: export / import
 // ==========================
 cli.command('export', 'Export Kite database (and optional artifacts) to a portable archive')
