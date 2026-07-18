@@ -12,6 +12,7 @@ interface UploadOptions {
   env?: Record<string, string>;
   startedAt?: string;
   traceId?: string;
+  timeoutMs?: number;
 }
 
 interface UploadResult {
@@ -23,8 +24,9 @@ interface UploadResult {
 }
 
 export async function uploadZip(options: UploadOptions): Promise<UploadResult> {
-  const { serverUrl, token, zipFilePath, projectId, preDeploy, postDeploy, postDeployAsync, env, startedAt } = options;
+  const { serverUrl, token, zipFilePath, projectId, preDeploy, postDeploy, postDeployAsync, env, startedAt, timeoutMs } = options;
   const traceId = options.traceId || randomUUID();
+  const timeout = timeoutMs || 1800000;
 
   const fileData = await fs.promises.readFile(zipFilePath);
   const blob = new Blob([fileData], { type: 'application/zip' });
@@ -42,6 +44,9 @@ export async function uploadZip(options: UploadOptions): Promise<UploadResult> {
   const endpoint = `${serverUrl.replace(/\/$/, '')}/api/deploy/upload`;
 
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
+
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
@@ -49,7 +54,10 @@ export async function uploadZip(options: UploadOptions): Promise<UploadResult> {
         'X-Kite-Trace-Id': traceId,
       },
       body: form as any,
+      signal: controller.signal,
     });
+
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
       const errorText = await response.text();
