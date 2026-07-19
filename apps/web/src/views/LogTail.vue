@@ -551,8 +551,8 @@ watch(() => pm2Status.value?.found === true ? pm2LogPaths.value.map((p) => p.pat
 </script>
 
 <template>
-  <div class="space-y-6">
-    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+  <div class="flex flex-col h-full min-h-0 gap-4 sm:gap-6">
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between shrink-0">
       <div class="flex items-center space-x-3 min-w-0">
         <button @click="router.back()" class="p-2 rounded-md text-textMuted hover:text-textMain hover:bg-white/5 shrink-0">
           <ArrowLeft class="w-4 h-4" />
@@ -653,7 +653,7 @@ watch(() => pm2Status.value?.found === true ? pm2LogPaths.value.map((p) => p.pat
       </div>
     </div>
 
-    <div v-if="mergedMode && mergedTarget" class="w-full h-[calc(100vh-260px)] min-h-[420px] sm:h-[calc(100vh-220px)] sm:min-h-[560px]">
+    <div v-if="mergedMode && mergedTarget" class="w-full min-h-[420px] lg:flex-1 lg:min-h-0">
       <MergedLogPane
         :kind="mergedTarget.kind"
         :sources="mergedTarget.sources"
@@ -661,13 +661,13 @@ watch(() => pm2Status.value?.found === true ? pm2LogPaths.value.map((p) => p.pat
       />
     </div>
 
-    <div v-else-if="splitMode" class="w-full">
+    <div v-else-if="splitMode" class="w-full min-h-[420px] lg:flex-1 lg:min-h-0">
       <LogPaneSplit :sources="splitSources" @remove="removeFromSplit" />
     </div>
 
-    <div v-else class="grid grid-cols-12 gap-4">
+    <div v-else class="grid grid-cols-12 gap-4 lg:flex-1 lg:min-h-0">
       <!-- Source list -->
-      <aside class="col-span-12 lg:col-span-3 bg-panel border border-border rounded-lg p-3">
+      <aside class="col-span-12 lg:col-span-3 bg-panel border border-border rounded-lg p-3 flex flex-col min-h-0 overflow-y-auto">
         <div class="text-xs text-textMuted mb-2 px-1 flex items-center justify-between">
           <span class="flex items-center gap-1.5">
             <button
@@ -790,7 +790,7 @@ watch(() => pm2Status.value?.found === true ? pm2LogPaths.value.map((p) => p.pat
       </aside>
 
       <!-- Viewer -->
-      <section class="col-span-12 lg:col-span-9 bg-panel border border-border rounded-lg flex flex-col" style="min-height: 540px;">
+      <section class="col-span-12 lg:col-span-9 bg-panel border border-border rounded-lg flex flex-col min-h-[540px] lg:min-h-0 overflow-hidden">
         <LogPane
           v-if="activeSource"
           :source-id="activeSource.id"
