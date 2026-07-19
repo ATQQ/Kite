@@ -183,6 +183,23 @@ location /kite/ {
 可以使用清理预览功能，来判断参与清理的文件和目录。
 :::
 
+:::warning **需要上传 `.` 开头的文件？请关闭内置忽略**
+`kite push` / `kite pack` 默认启用内置忽略规则，会跳过 `.git/**`、`.env*`、`.vscode/**`、`.DS_Store` 等一系列点前缀文件与目录。如果你确实需要把这些点前缀文件（例如 `.env.production`、`.nuxt/` 里的产物）打进部署包，需要显式关闭内置忽略：
+
+- `kite.config.json` 中添加：
+  ```json
+  {
+    "ignoreBuiltin": true
+  }
+  ```
+- 或在命令行使用 `--no-ignore-builtin`：
+  ```bash
+  kite push --no-ignore-builtin
+  ```
+
+关闭后仅剩你在 `ignore` 字段里自定义的规则生效，请自行确保 `.git`、密钥文件等不会被误传。详见 [CLI · 配置项说明](./../cli)。
+:::
+
 ## 5. 数据目录
 
 CLI 与 Server 的所有状态都保存在 `~/.kite`，**升级 CLI 不会覆盖**：
