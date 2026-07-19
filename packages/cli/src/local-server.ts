@@ -377,7 +377,7 @@ export async function startLocalServer(options: ServeOptions = {}) {
       return json(200, {
         global_deploy_token: store.getGlobalDeployToken(),
         default_deploy_path: '.deployments',
-        max_upload_size: '50',
+        max_upload_size: '100',
         webhook_url: '',
         webhook_events: 'deploy_success,deploy_failure'
       });

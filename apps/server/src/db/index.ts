@@ -106,7 +106,7 @@ const initDb = async () => {
   });
   await client.execute({
     sql: `INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`,
-    args: ['max_upload_size', '50']
+    args: ['max_upload_size', '100']
   });
   await client.execute({
     sql: `INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`,

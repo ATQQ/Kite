@@ -53,7 +53,7 @@ const form = ref({
   webhook_url: '',
   webhook_events: [] as string[],
   default_deploy_path: '',
-  max_upload_size: '50',
+  max_upload_size: '100',
   global_deploy_token: '',
   artifact_keep_n: '10',
   deployment_stuck_threshold_min: '10',
@@ -97,7 +97,7 @@ onMounted(async () => {
     form.value.webhook_url = settingsData.webhook_url || ''
     form.value.webhook_events = settingsData.webhook_events ? settingsData.webhook_events.split(',') : []
     form.value.default_deploy_path = settingsData.default_deploy_path || ''
-    form.value.max_upload_size = settingsData.max_upload_size || '50'
+    form.value.max_upload_size = settingsData.max_upload_size || '100'
     form.value.global_deploy_token = settingsData.global_deploy_token || ''
     form.value.artifact_keep_n = settingsData.artifact_keep_n || '10'
     form.value.deployment_stuck_threshold_min = settingsData.deployment_stuck_threshold_min || '10'
@@ -120,7 +120,7 @@ const saveSettings = async () => {
     webhook_url: form.value.webhook_url,
     webhook_events: form.value.webhook_events.join(','),
     default_deploy_path: form.value.default_deploy_path,
-    max_upload_size: form.value.max_upload_size,
+    max_upload_size: String(form.value.max_upload_size),
     global_deploy_token: form.value.global_deploy_token,
     artifact_keep_n: form.value.artifact_keep_n,
     deployment_stuck_threshold_min: String(thresholdNum),
@@ -578,7 +578,7 @@ function addCurrentIpToAllowlist() {
             min="1"
             max="500"
             class="w-full bg-base border border-border rounded-md px-4 py-3 text-textMain font-mono text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all"
-            placeholder="50"
+            placeholder="100"
           />
           <p class="text-xs text-textMuted mt-2">{{ t('settings.maxUploadSizeHint') }}</p>
         </div>
