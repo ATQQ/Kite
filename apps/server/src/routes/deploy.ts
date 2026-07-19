@@ -50,11 +50,10 @@ function broadcastToSubscribers(deployId: string, event: string, data: string) {
 async function* runShellCommand(command: string, cwd: string, env?: Record<string, string>) {
   const proc = await spawn('sh', ['-c', command], { cwd, env });
 
-  const decoder = new TextDecoder();
-  let buffer = '';
-
-  // Read from a stream, yielding complete lines
+  // Read from a stream, yielding complete lines (own decoder/buffer per stream)
   async function* readLines(stream: ReadableStream<Uint8Array>) {
+    const decoder = new TextDecoder();
+    let buffer = '';
     const reader = stream.getReader();
     try {
       while (true) {
@@ -65,15 +64,62 @@ async function* runShellCommand(command: string, cwd: string, env?: Record<strin
         buffer = lines.pop()!;
         for (const line of lines) yield line;
       }
-      if (buffer) { yield buffer; buffer = ''; }
+      if (buffer) yield buffer;
     } finally {
-      reader.releaseLock();
+      // Bun ReadableStream teardown may throw TypeError: undefined is not a function
+      try {
+        reader.releaseLock();
+      } catch {
+        /* ignore */
+      }
     }
   }
 
-  // Merge stdout and stderr
-  for await (const line of readLines(proc.stdout)) yield line;
-  for await (const line of readLines(proc.stderr)) yield line;
+  // Parallel merge stdout + stderr (serial read can block pipes / hit Bun releaseLock quirks)
+  const lineQueue: string[] = [];
+  let notify: (() => void) | null = null;
+  let stdoutDone = false;
+  let stderrDone = false;
+  let pumpError: unknown = null;
+
+  const wake = () => {
+    notify?.();
+    notify = null;
+  };
+
+  const pump = async (stream: ReadableStream<Uint8Array>, which: 'stdout' | 'stderr') => {
+    try {
+      for await (const line of readLines(stream)) {
+        lineQueue.push(line);
+        wake();
+      }
+    } catch (err) {
+      pumpError = err;
+      wake();
+    } finally {
+      if (which === 'stdout') stdoutDone = true;
+      else stderrDone = true;
+      wake();
+    }
+  };
+
+  const pumps = Promise.all([
+    pump(proc.stdout, 'stdout'),
+    pump(proc.stderr, 'stderr'),
+  ]);
+
+  while (!stdoutDone || !stderrDone || lineQueue.length > 0) {
+    if (lineQueue.length === 0) {
+      await new Promise<void>((r) => { notify = r; });
+      continue;
+    }
+    while (lineQueue.length > 0) {
+      yield lineQueue.shift()!;
+    }
+  }
+
+  await pumps;
+  if (pumpError) throw pumpError;
 
   const exitCode = await proc.exited;
   yield `\x00EXIT:${exitCode}`;
@@ -940,6 +986,11 @@ export const deployRoutes = new Elysia()
             const failMsg = `[Kite Deploy] Deployment failed: ${err.message}`;
             sendEvent(controller, 'log', { data: failMsg });
             await appendLog(failMsg);
+            if (err?.stack) {
+              const stackMsg = `[Kite Deploy] Stack: ${err.stack}`;
+              sendEvent(controller, 'log', { data: stackMsg });
+              await appendLog(stackMsg);
+            }
 
             await db.deployments.update(deploymentRow.id, { status: 'failed', duration: durationStr, endTime: new Date().toISOString() });
             await db.projects.update(project.id, { status: 'failed' });
@@ -961,7 +1012,7 @@ export const deployRoutes = new Elysia()
 
             sendEvent(controller, 'status', { status: 'failed', duration: durationStr, deployId: deploymentRow.id });
             broadcastToSubscribers(deploymentRow.id, 'status', JSON.stringify({ status: 'failed', duration: durationStr }));
-            reqLog.error({ ms: Date.now() - startTime, err: { name: err?.name, message: err?.message } }, 'deploy failed');
+            reqLog.error({ ms: Date.now() - startTime, err: { name: err?.name, message: err?.message, stack: err?.stack } }, 'deploy failed');
           } finally {
             controller.close();
           }
