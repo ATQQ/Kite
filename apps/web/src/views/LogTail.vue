@@ -209,9 +209,7 @@ async function loadSources() {
   try {
     const data = await store.fetchLogSources(projectId.value)
     sources.value = data.items
-    if (!activeSourceId.value && sources.value.length > 0) {
-      pickSource(sources.value[0].id)
-    }
+    pickDefaultSource()
   } catch (e: any) {
     toast.error(e?.message || '加载日志源失败')
   } finally {
@@ -293,7 +291,7 @@ async function autoLinkPm2Sources() {
     const created = Array.isArray(data?.created) ? data.created : []
     if (created.length > 0) {
       await loadSources()
-      if (!activeSourceId.value) pickSource(created[0].id)
+      pickDefaultSource()
     }
     pm2AutoLinked.value = true
   } catch {
@@ -519,6 +517,15 @@ async function commitRename() {
 function pickSource(id: string) {
   if (activeSourceId.value === id) return
   activeSourceId.value = id
+}
+
+function pickDefaultSource() {
+  const currentValid = activeSourceId.value && sources.value.some((s) => s.id === activeSourceId.value)
+  if (currentValid) return
+  const g = groupedSources.value
+  const first = g.stdout[0] || g.stderr[0] || g.other[0] || sources.value[0]
+  if (first) pickSource(first.id)
+  else activeSourceId.value = ''
 }
 
 onMounted(async () => {
