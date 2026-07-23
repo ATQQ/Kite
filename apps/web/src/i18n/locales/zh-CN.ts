@@ -546,6 +546,7 @@ export default {
       tokenInvalidated: '旧 Token 已立即失效',
       tokenResetFailed: 'Token 重置失败',
       deleteFailedRetry: '删除失败，请稍后重试',
+      notFoundOrFailed: '项目不存在或加载失败',
       tabOverviewLabel: '概览',
       tabConfigLabel: '配置',
       tabDangerLabel: '危险区',

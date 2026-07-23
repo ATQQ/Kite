@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
+import { computed, ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useProjectStore, type CleanPreviewResult, type DeploymentLog, type Pm2AppStatus } from '../store/project'
@@ -17,8 +17,8 @@ const projectStore = useProjectStore()
 const toast = useToast()
 const { t } = useI18n()
 
-const projectId = route.params.id as string
-const project = computed(() => projectStore.getProjectById(projectId))
+const projectId = computed(() => String(route.params.id || ''))
+const project = computed(() => projectStore.getProjectById(projectId.value))
 
 const formData = ref({
   destPath: '',
@@ -53,7 +53,7 @@ const serverUrl = ref('http://127.0.0.1:3000')
 const cliEnv = ref('')
 const cliHelpCollapsed = ref(false)
 const cliHelpUserToggled = ref(false)
-const cliHelpStorageKey = computed(() => `kite:cli-help-collapsed:${projectId}`)
+const cliHelpStorageKey = computed(() => `kite:cli-help-collapsed:${projectId.value}`)
 
 function initCliHelpCollapsed() {
   try {
@@ -77,44 +77,7 @@ function toggleCliHelp() {
 }
 
 const isInitialLoading = ref(true)
-
-onMounted(async () => {
-  serverUrl.value = window.location.origin + BASE_PATH
-  await Promise.all([
-    projectStore.fetchProjects(),
-    projectStore.fetchCategories(),
-    projectStore.fetchTags(),
-    loadPm2Available(),
-  ])
-  if (project.value) {
-    formData.value.destPath = project.value.destPath || ''
-    formData.value.preDeploy = project.value.preDeploy || ''
-    formData.value.postDeploy = project.value.postDeploy || ''
-    formData.value.postDeployAsync = Boolean((project.value as any).postDeployAsync)
-    formData.value.categoryId = project.value.categoryId || ''
-    formData.value.pm2AppName = (project.value as any).pm2AppName || ''
-    formData.value.tagIds = Array.isArray((project.value as any).tagIds) ? [...(project.value as any).tagIds] : []
-    cliEnv.value = project.value.env || ''
-    const rawMode = (project.value as any).cleanMode
-    cleanForm.value.cleanMode = (rawMode === 'clean' || rawMode === 'clean-all') ? rawMode : 'merge'
-    const rawProtect = (project.value as any).protectPaths
-    if (typeof rawProtect === 'string' && rawProtect.length > 0) {
-      try {
-        const parsed = JSON.parse(rawProtect)
-        cleanForm.value.protectPaths = Array.isArray(parsed) ? parsed.filter((s) => typeof s === 'string') : []
-      } catch {
-        cleanForm.value.protectPaths = []
-      }
-    } else {
-      cleanForm.value.protectPaths = []
-    }
-    isInitialLoading.value = false
-    Promise.all([loadDeployments(), refreshPm2Status()]).catch(() => {})
-  } else {
-    isInitialLoading.value = false
-    router.replace('/projects')
-  }
-})
+const loadError = ref('')
 
 const deployments = ref<DeploymentLog[]>([])
 const isLoadingDeployments = ref(false)
@@ -149,7 +112,7 @@ async function loadDeployments() {
   try {
     await projectStore.fetchLogs()
     deployments.value = projectStore.logs
-      .filter(l => l.projectId === projectId)
+      .filter(l => l.projectId === projectId.value)
     if (deploymentPage.value > totalDeploymentPages.value) {
       deploymentPage.value = Math.max(1, totalDeploymentPages.value)
     }
@@ -238,9 +201,9 @@ async function confirmRollback() {
 
 function goLogBoard(log?: DeploymentLog) {
   if (log) {
-    router.push({ path: '/logs', query: { id: log.id, projectId } })
+    router.push({ path: '/logs', query: { id: log.id, projectId: projectId.value } })
   } else {
-    router.push({ path: '/logs', query: { projectId } })
+    router.push({ path: '/logs', query: { projectId: projectId.value } })
   }
 }
 
@@ -258,7 +221,7 @@ function formatStart(s: string) {
 async function savePartial(payload: Record<string, any>, successMessage = t('project.detail.configSaved')) {
   try {
     applyOptimisticPatch(payload)
-    await projectStore.updateProject(projectId, payload)
+    await projectStore.updateProject(projectId.value, payload)
     toast.success(successMessage)
     return true
   } catch (e: any) {
@@ -323,15 +286,15 @@ async function saveScripts() {
 
 async function autoImportPm2LogSources() {
   try {
-    const status = await projectStore.fetchProjectPm2(projectId)
+    const status = await projectStore.fetchProjectPm2(projectId.value)
     if (!status || status.found !== true) return
     const paths: Array<{ path: string; kind: 'stdout' | 'stderr' }> = []
     if ((status as any).outLogPath) paths.push({ path: (status as any).outLogPath, kind: 'stdout' })
     if ((status as any).errorLogPath) paths.push({ path: (status as any).errorLogPath, kind: 'stderr' })
     if (paths.length === 0) return
     // 绑定/换绑 PM2 应用后先清理过期的 pm2 kind 日志源，避免旧路径残留导致重启后翻倍。
-    try { await projectStore.prunePm2LogSources(projectId) } catch { /* ignore */ }
-    const existing = await projectStore.fetchLogSources(projectId)
+    try { await projectStore.prunePm2LogSources(projectId.value) } catch { /* ignore */ }
+    const existing = await projectStore.fetchLogSources(projectId.value)
     const have = new Set((existing?.items || []).map((s: any) => s.filePath))
     const missing = paths.filter((p) => !have.has(p.path))
     if (missing.length === 0) return
@@ -341,7 +304,7 @@ async function autoImportPm2LogSources() {
       label: `${name} · ${m.kind}`,
       kind: 'pm2',
     }))
-    const data: any = await projectStore.createLogSources(projectId, items)
+    const data: any = await projectStore.createLogSources(projectId.value, items)
     const created = Array.isArray(data?.created) ? data.created : []
     if (created.length > 0) {
       toast.success(t('project.detail.pm2LogsImported', { n: created.length }), t('project.detail.pm2LogsImportedHint'))
@@ -388,7 +351,7 @@ async function saveEnv() {
   try {
     const envPayload = { env: cliEnv.value.trim() }
     applyOptimisticPatch(envPayload)
-    await projectStore.updateProject(projectId, envPayload)
+    await projectStore.updateProject(projectId.value, envPayload)
     toast.success(t('project.detail.envSaved'))
   } catch (e: any) {
     toast.error(t('project.detail.saveFailed'), e?.message || t('project.detail.retryLater'))
@@ -426,9 +389,63 @@ async function refreshPm2Status() {
   }
   pm2Loading.value = true
   try {
-    pm2Status.value = await projectStore.fetchProjectPm2(projectId)
+    pm2Status.value = await projectStore.fetchProjectPm2(projectId.value)
   } finally {
     pm2Loading.value = false
+  }
+}
+
+function applyProjectToForm() {
+  const p = project.value
+  if (!p) return
+  formData.value.destPath = p.destPath || ''
+  formData.value.preDeploy = p.preDeploy || ''
+  formData.value.postDeploy = p.postDeploy || ''
+  formData.value.postDeployAsync = Boolean((p as any).postDeployAsync)
+  formData.value.categoryId = p.categoryId || ''
+  formData.value.pm2AppName = (p as any).pm2AppName || ''
+  formData.value.tagIds = Array.isArray((p as any).tagIds) ? [...(p as any).tagIds] : []
+  cliEnv.value = p.env || ''
+  const rawMode = (p as any).cleanMode
+  cleanForm.value.cleanMode = (rawMode === 'clean' || rawMode === 'clean-all') ? rawMode : 'merge'
+  const rawProtect = (p as any).protectPaths
+  if (typeof rawProtect === 'string' && rawProtect.length > 0) {
+    try {
+      const parsed = JSON.parse(rawProtect)
+      cleanForm.value.protectPaths = Array.isArray(parsed) ? parsed.filter((s) => typeof s === 'string') : []
+    } catch {
+      cleanForm.value.protectPaths = []
+    }
+  } else {
+    cleanForm.value.protectPaths = []
+  }
+}
+
+async function loadDetail() {
+  isInitialLoading.value = true
+  loadError.value = ''
+  serverUrl.value = window.location.origin + BASE_PATH
+  try {
+    await Promise.all([
+      projectStore.fetchProjects(),
+      projectStore.fetchCategories(),
+      projectStore.fetchTags(),
+      loadPm2Available(),
+    ])
+    if (!project.value && projectId.value) {
+      await projectStore.fetchProjectById(projectId.value)
+    }
+    if (project.value) {
+      applyProjectToForm()
+      Promise.all([loadDeployments(), refreshPm2Status()]).catch(() => {})
+    } else {
+      loadError.value = t('project.detail.notFoundOrFailed')
+    }
+  } catch (e) {
+    console.error('[ProjectDetail] init failed', e)
+    loadError.value = t('project.detail.notFoundOrFailed')
+  } finally {
+    isInitialLoading.value = false
   }
 }
 
@@ -466,7 +483,7 @@ const pm2ConflictProjects = computed(() => {
   const name = formData.value.pm2AppName.trim()
   if (!name) return []
   return projectStore.projects.filter(
-    (p) => p.id !== projectId && (p.pm2AppName || '').trim() === name,
+    (p) => p.id !== projectId.value && (p.pm2AppName || '').trim() === name,
   )
 })
 
@@ -526,7 +543,7 @@ async function commitCleanForm() {
       protectPaths: cleanForm.value.protectPaths.length ? cleanForm.value.protectPaths : null,
     }
     applyOptimisticPatch(cleanPayload)
-    await projectStore.updateProject(projectId, cleanPayload)
+    await projectStore.updateProject(projectId.value, cleanPayload)
     toast.success(t('project.detail.cleanPolicySaved'), cleanForm.value.cleanMode === 'merge' ? t('project.detail.cleanPolicyMergeDetail') : t('project.detail.cleanPolicyDetail', { mode: cleanForm.value.cleanMode }))
   } catch (e: any) {
     toast.error(t('project.detail.saveFailed'), e?.message)
@@ -554,7 +571,7 @@ async function openPreview() {
   previewError.value = ''
   previewData.value = null
   try {
-    previewData.value = await projectStore.cleanPreview(projectId, {
+    previewData.value = await projectStore.cleanPreview(projectId.value, {
       cleanMode: cleanForm.value.cleanMode,
       protectPaths: cleanForm.value.protectPaths,
     })
@@ -617,10 +634,10 @@ const envSuffix = computed(() => cliEnv.value.trim() ? ` --env ${cliEnv.value.tr
 const configFileName = computed(() => cliEnv.value.trim() ? `kite.config.${cliEnv.value.trim()}.json` : 'kite.config.json')
 
 const installCommand = 'npm install -g @kitecd/cli'
-const initCommand = computed(() => `kite init --project ${projectId}${envSuffix.value} --out ./dist --server ${serverUrl.value} --token ${project.value?.token || '<DEPLOY_TOKEN>'}`)
+const initCommand = computed(() => `kite init --project ${projectId.value}${envSuffix.value} --out ./dist --server ${serverUrl.value} --token ${project.value?.token || '<DEPLOY_TOKEN>'}`)
 const pushCommand = computed(() => `kite push${envSuffix.value}`)
-const directPushCommand = computed(() => `kite push --server ${serverUrl.value} --project ${projectId}${envSuffix.value} --out ./dist`)
-const directPushWithTokenCommand = computed(() => `kite push --server ${serverUrl.value} --project ${projectId} --token ${project.value?.token || '<DEPLOY_TOKEN>'}${envSuffix.value} --out ./dist`)
+const directPushCommand = computed(() => `kite push --server ${serverUrl.value} --project ${projectId.value}${envSuffix.value} --out ./dist`)
+const directPushWithTokenCommand = computed(() => `kite push --server ${serverUrl.value} --project ${projectId.value} --token ${project.value?.token || '<DEPLOY_TOKEN>'}${envSuffix.value} --out ./dist`)
 const tokenPlaceholder = computed(() => project.value?.token || '<DEPLOY_TOKEN>')
 const tokenSetProjectCommand = computed(() => cliEnv.value.trim()
   ? `kite config:set token ${tokenPlaceholder.value} --env ${cliEnv.value.trim()}`
@@ -628,7 +645,7 @@ const tokenSetProjectCommand = computed(() => cliEnv.value.trim()
 const tokenSetGlobalCommand = computed(() => `kite config:set token ${tokenPlaceholder.value} --global`)
 const tokenEnvLocalLine = computed(() => `KITE_DEPLOY_TOKEN=${tokenPlaceholder.value}`)
 const configExample = computed(() => JSON.stringify({
-  projectId,
+  projectId: projectId.value,
   outputDir: './dist',
   files: ['**/*'],
   postDeploy: project.value?.postDeploy || 'pm2 restart your-service'
@@ -656,7 +673,7 @@ const refreshToken = () => {
 const confirmRefreshToken = async () => {
   isRefreshingToken.value = true
   try {
-    await projectStore.generateToken(projectId)
+    await projectStore.generateToken(projectId.value)
     isTokenVisible.value = true
     showRefreshTokenModal.value = false
     toast.success(t('project.detail.tokenRegenerated'), t('project.detail.tokenInvalidated'))
@@ -698,7 +715,7 @@ async function confirmDelete() {
   isDeleting.value = true
   deleteError.value = ''
   try {
-    const success = await projectStore.removeProject(projectId)
+    const success = await projectStore.removeProject(projectId.value)
     if (success) {
       showDeleteModal.value = false
       router.replace('/projects')
@@ -713,7 +730,7 @@ async function confirmDelete() {
 }
 
 type DetailTab = 'overview' | 'config' | 'integration'
-const tabStorageKey = computed(() => `kite:project-detail-tab:${projectId}`)
+const tabStorageKey = computed(() => `kite:project-detail-tab:${projectId.value}`)
 const activeTab = ref<DetailTab>('overview')
 const tabs = computed<Array<{ key: DetailTab; label: string; icon: any }>>(() => [
   { key: 'overview', label: t('project.detail.tabOverviewLabel'), icon: LayoutDashboard },
@@ -727,6 +744,22 @@ onMounted(() => {
       activeTab.value = saved
     }
   } catch {}
+  void loadDetail()
+})
+watch(projectId, (next, prev) => {
+  if (!next || next === prev) return
+  try {
+    const saved = localStorage.getItem(tabStorageKey.value)
+    if (saved === 'overview' || saved === 'config' || saved === 'integration') {
+      activeTab.value = saved
+    } else {
+      activeTab.value = 'overview'
+    }
+  } catch {
+    activeTab.value = 'overview'
+  }
+  cliHelpUserToggled.value = false
+  void loadDetail()
 })
 function switchTab(tab: DetailTab) {
   activeTab.value = tab
@@ -737,7 +770,7 @@ function switchTab(tab: DetailTab) {
 </script>
 
 <template>
-  <!-- Skeleton Placeholder (only shown before initial data arrives) -->
+  <div>
   <div v-if="isInitialLoading" class="max-w-7xl mx-auto space-y-6 pb-12" aria-busy="true">
     <div class="flex items-start gap-3 sm:gap-4 mb-8 animate-pulse">
       <div class="w-9 h-9 rounded-full bg-border/40 shrink-0"></div>
@@ -1831,5 +1864,19 @@ function switchTab(tab: DetailTab) {
       :loading="isRollingBack"
       @confirm="confirmRollback"
     />
+  </div>
+
+  <div v-else class="max-w-7xl mx-auto py-16 text-center space-y-4">
+    <AlertTriangle class="w-10 h-10 mx-auto text-warning" />
+    <p class="text-textMain font-medium">{{ loadError || t('project.detail.notFoundOrFailed') }}</p>
+    <button
+      type="button"
+      class="inline-flex items-center px-4 py-2 text-sm font-medium bg-primary text-white rounded-md hover:opacity-90 transition-opacity"
+      @click="router.push('/projects')"
+    >
+      <ArrowLeft class="w-4 h-4 mr-1.5" />
+      {{ t('project.detail.backToList') }}
+    </button>
+  </div>
   </div>
 </template>

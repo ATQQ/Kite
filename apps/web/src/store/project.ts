@@ -173,33 +173,60 @@ export const useProjectStore = defineStore('project', () => {
     return data
   }
 
+  function mapProject(p: any): Project {
+    return {
+      ...p,
+      destPath: p.deployPath,
+      preDeploy: p.preDeployScript,
+      postDeploy: p.postDeployScript,
+      env: p.env || '',
+      cleanMode: p.cleanMode ?? null,
+      protectPaths: p.protectPaths ?? null,
+      categoryId: p.categoryId ?? null,
+      pm2AppName: p.pm2AppName ?? null,
+      tagIds: Array.isArray(p.tagIds) ? p.tagIds : [],
+      lastDeployAt: p.lastDeployAt ?? null,
+    }
+  }
+
+  function upsertProject(mapped: Project) {
+    const idx = projects.value.findIndex(p => p.id === mapped.id)
+    if (idx >= 0) {
+      projects.value[idx] = { ...projects.value[idx], ...mapped }
+    } else {
+      projects.value = [mapped, ...projects.value]
+    }
+  }
+
   async function fetchProjects(filter?: { tagIds?: string[] }) {
     try {
       const qs = filter?.tagIds && filter.tagIds.length > 0
         ? `?tagIds=${encodeURIComponent(filter.tagIds.join(','))}`
         : ''
       const data = await apiFetch('/projects' + qs)
-      projects.value = data.map((p: any) => ({
-        ...p,
-        destPath: p.deployPath,
-        preDeploy: p.preDeployScript,
-        postDeploy: p.postDeployScript,
-        env: p.env || '',
-        cleanMode: p.cleanMode ?? null,
-        protectPaths: p.protectPaths ?? null,
-        categoryId: p.categoryId ?? null,
-        pm2AppName: p.pm2AppName ?? null,
-        tagIds: Array.isArray(p.tagIds) ? p.tagIds : [],
-        lastDeployAt: p.lastDeployAt ?? null,
-      }))
+      projects.value = Array.isArray(data) ? data.map(mapProject) : []
     } catch (e) {
       console.error('Failed to fetch projects', e)
     }
   }
 
+  async function fetchProjectById(id: string): Promise<Project | null> {
+    try {
+      const data = await apiFetch(`/projects/${id}`)
+      if (!data || data.error || !data.id) return null
+      const mapped = mapProject(data)
+      upsertProject(mapped)
+      return mapped
+    } catch (e) {
+      console.error('Failed to fetch project', e)
+      return null
+    }
+  }
+
   async function fetchLogs() {
     try {
-      logs.value = await apiFetch('/logs')
+      const data = await apiFetch('/logs')
+      logs.value = Array.isArray(data) ? data : []
     } catch (e) {
       console.error('Failed to fetch logs', e)
     }
@@ -225,6 +252,9 @@ export const useProjectStore = defineStore('project', () => {
         })
       })
       if (data.success) {
+        if (data.project?.id) {
+          upsertProject(mapProject(data.project))
+        }
         if (tagIds && tagIds.length > 0) {
           await Promise.all([fetchProjects(), fetchTags()])
         } else {
@@ -811,6 +841,7 @@ export const useProjectStore = defineStore('project', () => {
     tags,
     systemResources,
     fetchProjects,
+    fetchProjectById,
     fetchLogs,
     getProjectById,
     addProject,

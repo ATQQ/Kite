@@ -546,6 +546,7 @@ export default {
       tokenInvalidated: 'Old token invalidated immediately',
       tokenResetFailed: 'Token reset failed',
       deleteFailedRetry: 'Delete failed, please retry later',
+      notFoundOrFailed: 'Project not found or failed to load',
       tabOverviewLabel: 'Overview',
       tabConfigLabel: 'Config',
       tabDangerLabel: 'Danger zone',
