@@ -304,7 +304,7 @@ export const db = {
     },
     async findAllWithMeta() {
       await ensureDbReady();
-      const rows = await ormDb.select().from(schema.projects);
+      const rows = await ormDb.select().from(schema.projects).orderBy(desc(schema.projects.createdAt));
       if (rows.length === 0) return [];
       const aggRes = await client.execute(
         `SELECT project_id AS pid, MAX(start_time) AS last
