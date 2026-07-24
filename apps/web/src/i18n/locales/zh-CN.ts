@@ -104,6 +104,7 @@ export default {
     dashboard: '概览',
     projects: '项目管理',
     deployLogs: '部署日志',
+    runtimeLogs: '运行日志',
     terminal: '终端',
     auditLog: '操作日志',
     storage: '存储',

@@ -44,6 +44,11 @@ const routes = [
         component: () => import('../views/LogBoard.vue')
       },
       {
+        path: 'runtime-logs',
+        name: 'RuntimeLogs',
+        component: () => import('../views/RuntimeLogsWorkspace.vue')
+      },
+      {
         path: 'audit',
         name: 'AuditLog',
         component: () => import('../views/AuditLog.vue')

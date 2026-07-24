@@ -104,6 +104,7 @@ export default {
     dashboard: 'Dashboard',
     projects: 'Projects',
     deployLogs: 'Deploy Logs',
+    runtimeLogs: 'Runtime Logs',
     terminal: 'Terminal',
     auditLog: 'Audit Log',
     storage: 'Storage',
