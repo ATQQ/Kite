@@ -26,6 +26,34 @@ const viewMode = ref<'card' | 'list'>(((): 'card' | 'list' => {
 })())
 watch(viewMode, (v) => localStorage.setItem(VIEW_KEY, v))
 
+type GroupBy = 'none' | 'category' | 'env'
+const GROUP_BY_KEY = 'kite:projectList:groupBy'
+const GROUP_COLLAPSED_KEY = 'kite:projectList:collapsedGroups'
+const DEFAULT_GROUP_SUFFIX = '__default__'
+const groupBy = ref<GroupBy>(((): GroupBy => {
+  const v = localStorage.getItem(GROUP_BY_KEY)
+  return v === 'category' || v === 'env' ? v : 'none'
+})())
+watch(groupBy, (v) => localStorage.setItem(GROUP_BY_KEY, v))
+const collapsedGroups = ref<Record<string, boolean>>(((): Record<string, boolean> => {
+  try {
+    const raw = localStorage.getItem(GROUP_COLLAPSED_KEY)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw)
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const out: Record<string, boolean> = {}
+      for (const k of Object.keys(parsed)) {
+        if (typeof parsed[k] === 'boolean') out[k] = parsed[k]
+      }
+      return out
+    }
+    return {}
+  } catch {
+    return {}
+  }
+})())
+watch(collapsedGroups, (v) => localStorage.setItem(GROUP_COLLAPSED_KEY, JSON.stringify(v)), { deep: true })
+
 const selectedCategoryFilter = ref<string>('all') // 'all' | 'default' | <categoryId>
 const selectedEnvFilter = ref<string>('all') // 'all' | 'default'(no env) | <envName>
 const selectedTagIds = ref<string[]>([])
@@ -136,6 +164,120 @@ function envChipClass(env?: string | null): string {
 function categoryNameOf(categoryId?: string | null): string {
   if (!categoryId) return t('project.list.defaultCategory')
   return categoryMap.value.get(categoryId)?.name ?? t('project.list.defaultCategory')
+}
+
+type ProjectGroup = {
+  key: string
+  label: string
+  color: string | null
+  isDefault: boolean
+  count: number
+  projects: typeof projectStore.projects
+}
+
+const groupedProjects = computed<ProjectGroup[]>(() => {
+  const list = filteredProjects.value
+  if (groupBy.value === 'none') {
+    return [{
+      key: 'all',
+      label: '',
+      color: null,
+      isDefault: false,
+      count: list.length,
+      projects: list,
+    }]
+  }
+
+  if (groupBy.value === 'category') {
+    const buckets = new Map<string, typeof projectStore.projects>()
+    const defaultBucket: typeof projectStore.projects = []
+    for (const c of projectStore.categories) buckets.set(c.id, [])
+    for (const p of list) {
+      const cid = p.categoryId || ''
+      if (cid && buckets.has(cid)) buckets.get(cid)!.push(p)
+      else defaultBucket.push(p)
+    }
+    const result: ProjectGroup[] = []
+    for (const c of projectStore.categories) {
+      const arr = buckets.get(c.id) || []
+      if (arr.length === 0) continue
+      result.push({
+        key: `cat:${c.id}`,
+        label: c.name,
+        color: c.color ?? null,
+        isDefault: false,
+        count: arr.length,
+        projects: arr,
+      })
+    }
+    if (defaultBucket.length > 0) {
+      result.push({
+        key: `cat:${DEFAULT_GROUP_SUFFIX}`,
+        label: t('project.list.groupDefaultCategory'),
+        color: null,
+        isDefault: true,
+        count: defaultBucket.length,
+        projects: defaultBucket,
+      })
+    }
+    return result
+  }
+
+  // env
+  const buckets = new Map<string, typeof projectStore.projects>()
+  const defaultBucket: typeof projectStore.projects = []
+  for (const env of envOptions.value) buckets.set(env, [])
+  for (const p of list) {
+    const env = (p.env || '').trim()
+    if (env && buckets.has(env)) buckets.get(env)!.push(p)
+    else defaultBucket.push(p)
+  }
+  const result: ProjectGroup[] = []
+  for (const env of envOptions.value) {
+    const arr = buckets.get(env) || []
+    if (arr.length === 0) continue
+    result.push({
+      key: `env:${env}`,
+      label: env,
+      color: null,
+      isDefault: false,
+      count: arr.length,
+      projects: arr,
+    })
+  }
+  if (defaultBucket.length > 0) {
+    result.push({
+      key: `env:${DEFAULT_GROUP_SUFFIX}`,
+      label: t('project.list.groupDefaultEnv'),
+      color: null,
+      isDefault: true,
+      count: defaultBucket.length,
+      projects: defaultBucket,
+    })
+  }
+  return result
+})
+
+function isGroupCollapsed(key: string): boolean {
+  return collapsedGroups.value[key] === true
+}
+
+function toggleGroupCollapsed(key: string) {
+  const next = { ...collapsedGroups.value }
+  if (next[key]) delete next[key]
+  else next[key] = true
+  collapsedGroups.value = next
+}
+
+function groupHeaderChipClass(g: ProjectGroup): string {
+  if (groupBy.value === 'category') {
+    return categoryChipClass(g.color)
+  }
+  if (groupBy.value === 'env') {
+    if (g.isDefault) return 'bg-base text-textMuted border-border'
+    return envChipClass(g.label)
+  }
+  return 'bg-base text-textMuted border-border'
 }
 
 function formatRelativeTime(iso?: string | null): string {
@@ -952,6 +1094,34 @@ async function confirmBulkDelete() {
             <ListIcon class="w-3.5 h-3.5" />
           </button>
         </div>
+        <div class="flex items-center border border-border rounded-md overflow-hidden" :title="t('project.list.groupByLabel')">
+          <button
+            @click="groupBy = 'none'"
+            :class="groupBy === 'none' ? 'bg-primary/15 text-primary' : 'text-textMuted hover:text-textMain'"
+            class="flex items-center px-2.5 py-1.5 text-xs transition-colors"
+            :title="t('project.list.groupByNone')"
+          >
+            {{ t('project.list.groupByNone') }}
+          </button>
+          <button
+            @click="groupBy = 'category'"
+            :class="groupBy === 'category' ? 'bg-primary/15 text-primary' : 'text-textMuted hover:text-textMain'"
+            class="flex items-center px-2.5 py-1.5 text-xs transition-colors border-l border-border"
+            :title="t('project.list.groupByCategory')"
+          >
+            <FolderTree class="w-3.5 h-3.5 mr-1" />
+            {{ t('project.list.groupByCategory') }}
+          </button>
+          <button
+            @click="groupBy = 'env'"
+            :class="groupBy === 'env' ? 'bg-primary/15 text-primary' : 'text-textMuted hover:text-textMain'"
+            class="flex items-center px-2.5 py-1.5 text-xs transition-colors border-l border-border"
+            :title="t('project.list.groupByEnv')"
+          >
+            <Activity class="w-3.5 h-3.5 mr-1" />
+            {{ t('project.list.groupByEnv') }}
+          </button>
+        </div>
         <button
           @click="openCategoryModal"
           class="flex items-center px-3 py-2 border border-border hover:border-primary/50 text-textMain rounded-md transition-all font-medium text-sm"
@@ -1076,103 +1246,133 @@ async function confirmBulkDelete() {
     </div>
 
     <!-- Card view -->
-    <div v-if="viewMode === 'card'" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
-      <div
-        v-for="project in filteredProjects"
-        :key="project.id"
-        class="group bg-panel border rounded-xl p-5 transition-all shadow-sm cursor-pointer relative overflow-hidden"
-        :class="bulk.isSelected(project.id) ? 'border-primary/60 ring-1 ring-primary/40' : 'border-border hover:border-primary/50'"
-        @click="goToDetail(project.id)"
-      >
-        <div class="absolute top-0 left-0 w-1 h-full" :class="project.status === 'success' ? 'bg-success' : project.status === 'failed' ? 'bg-danger' : 'bg-primary'"></div>
-
-        <button
-          type="button"
-          class="absolute top-3 left-3 p-1 rounded-md transition-all"
-          :class="bulk.isSelected(project.id) ? 'opacity-100 text-primary' : 'opacity-0 group-hover:opacity-100 text-textMuted hover:text-textMain'"
-          :title="bulk.isSelected(project.id) ? t('project.list.bulkDeselectTitle') : t('project.list.bulkSelectTitle')"
-          @click.stop="toggleRowSelection($event, project.id)"
-        >
-          <CheckSquare v-if="bulk.isSelected(project.id)" class="w-4 h-4" />
-          <Square v-else class="w-4 h-4" />
-        </button>
-
-        <div class="flex justify-between items-start mb-4">
-          <div class="flex items-center space-x-3">
-            <div class="p-2 rounded-lg bg-base border border-border group-hover:border-primary/30 transition-colors">
-              <Server class="w-5 h-5 text-textMain group-hover:text-primary transition-colors" />
-            </div>
-            <div>
-              <h3 class="font-semibold text-textMain text-base">{{ project.name }}</h3>
-              <p class="text-xs text-textMuted font-mono mt-0.5">{{ project.id }}</p>
-            </div>
-          </div>
-          <div class="flex items-center space-x-2">
-            <span
-              v-if="project.env"
-              class="inline-flex items-center px-2.5 py-1 rounded-md text-xs border font-mono font-medium"
-              :class="envChipClass(project.env)"
-              :title="project.env"
-            >
-              {{ project.env }}
-            </span>
-            <div class="relative">
-              <button class="p-1 dark:hover:bg-white/10 hover:bg-black/10 rounded-md transition-colors text-textMuted hover:text-textMain" @click.stop="toggleDropdown(project.id, $event)">
-                <MoreVertical class="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <p class="text-sm text-textMuted mb-3 line-clamp-2 min-h-[40px]">
-          {{ project.description || t('project.list.noDescription') }}
-        </p>
-
-        <div class="flex items-center flex-wrap gap-1.5 mb-3">
-          <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] border" :class="categoryChipClass(categoryMap.get(project.categoryId || '')?.color)">
-            <Tag class="w-3 h-3 mr-1" />
-            {{ categoryNameOf(project.categoryId) }}
-          </span>
-          <ProjectTagsEditor
-            :model-value="project.tagIds || []"
-            size="sm"
-            :on-persist="(next) => persistProjectTags(project.id, next)"
-            :aria-label="t('project.list.tagsEditAriaLabel', { name: project.name })"
-          />
-        </div>
-
-        <div class="flex items-center justify-between border-t border-border pt-4 text-xs text-textMuted">
-          <div class="flex items-center" :title="project.lastDeployAt ? new Date(project.lastDeployAt).toLocaleString() : t('project.list.noDeploy')">
-            <Clock class="w-3.5 h-3.5 mr-1.5" />
-            <span>{{ formatRelativeTime(project.lastDeployAt) }}</span>
-          </div>
-          <div class="flex items-center space-x-3">
-            <button
-              @click.stop="goToLogs(project.id)"
-              class="flex items-center text-textMuted hover:text-primary transition-colors"
-              :title="t('project.list.deployLogTitle')"
-            >
-              <ScrollText class="w-3.5 h-3.5 mr-1" />
-              <span>{{ t('project.list.deployLog') }}</span>
-            </button>
-            <button
-              @click.stop="goToRunLogs(project.id)"
-              class="flex items-center text-textMuted hover:text-primary transition-colors"
-              :title="t('project.list.runLogTitle')"
-            >
-              <Activity class="w-3.5 h-3.5 mr-1" />
-              <span>{{ t('project.list.runLog') }}</span>
-            </button>
-            <span class="flex items-center" :class="project.status === 'success' ? 'text-success' : project.status === 'failed' ? 'text-danger' : 'text-primary'">
-              <span class="w-2 h-2 rounded-full mr-1.5" :class="project.status === 'success' ? 'bg-success shadow-[0_0_8px_#10b981]' : project.status === 'failed' ? 'bg-danger' : 'bg-primary'"></span>
-              {{ project.status === 'success' ? t('project.list.statusNormal') : project.status === 'failed' ? t('project.list.statusAbnormal') : t('project.list.statusIdle') }}
-            </span>
-          </div>
-        </div>
-      </div>
-      <div v-if="filteredProjects.length === 0" class="col-span-full text-center py-16 text-textMuted text-sm">
+    <div v-if="viewMode === 'card'" class="space-y-6">
+      <div v-if="filteredProjects.length === 0" class="text-center py-16 text-textMuted text-sm">
         {{ t('project.list.emptyUnderCategory') }}
       </div>
+      <template v-else>
+        <section v-for="g in groupedProjects" :key="g.key">
+          <button
+            v-if="groupBy !== 'none'"
+            type="button"
+            class="flex items-center w-full mb-3 py-2 px-1 text-left group/gh transition-colors"
+            @click.stop="toggleGroupCollapsed(g.key)"
+          >
+            <ChevronRight
+              class="w-4 h-4 text-textMuted transition-transform mr-1.5 shrink-0"
+              :class="isGroupCollapsed(g.key) ? '' : 'rotate-90'"
+            />
+            <span
+              class="inline-flex items-center px-2 py-0.5 rounded text-[11px] border font-medium"
+              :class="groupHeaderChipClass(g)"
+            >
+              <FolderTree v-if="groupBy === 'category'" class="w-3 h-3 mr-1" />
+              <Activity v-else class="w-3 h-3 mr-1" />
+              {{ g.label }}
+            </span>
+            <span class="ml-2 text-xs text-textMuted">{{ t('project.list.groupCount', { n: g.count }) }}</span>
+            <span class="ml-3 h-px flex-1 bg-border/50"></span>
+          </button>
+          <div
+            v-if="groupBy === 'none' || !isGroupCollapsed(g.key)"
+            class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6"
+          >
+            <div
+              v-for="project in g.projects"
+              :key="project.id"
+              class="group bg-panel border rounded-xl p-5 transition-all shadow-sm cursor-pointer relative overflow-hidden"
+              :class="bulk.isSelected(project.id) ? 'border-primary/60 ring-1 ring-primary/40' : 'border-border hover:border-primary/50'"
+              @click="goToDetail(project.id)"
+            >
+              <div class="absolute top-0 left-0 w-1 h-full" :class="project.status === 'success' ? 'bg-success' : project.status === 'failed' ? 'bg-danger' : 'bg-primary'"></div>
+
+              <button
+                type="button"
+                class="absolute top-3 left-3 p-1 rounded-md transition-all"
+                :class="bulk.isSelected(project.id) ? 'opacity-100 text-primary' : 'opacity-0 group-hover:opacity-100 text-textMuted hover:text-textMain'"
+                :title="bulk.isSelected(project.id) ? t('project.list.bulkDeselectTitle') : t('project.list.bulkSelectTitle')"
+                @click.stop="toggleRowSelection($event, project.id)"
+              >
+                <CheckSquare v-if="bulk.isSelected(project.id)" class="w-4 h-4" />
+                <Square v-else class="w-4 h-4" />
+              </button>
+
+              <div class="flex justify-between items-start mb-4">
+                <div class="flex items-center space-x-3">
+                  <div class="p-2 rounded-lg bg-base border border-border group-hover:border-primary/30 transition-colors">
+                    <Server class="w-5 h-5 text-textMain group-hover:text-primary transition-colors" />
+                  </div>
+                  <div>
+                    <h3 class="font-semibold text-textMain text-base">{{ project.name }}</h3>
+                    <p class="text-xs text-textMuted font-mono mt-0.5">{{ project.id }}</p>
+                  </div>
+                </div>
+                <div class="flex items-center space-x-2">
+                  <span
+                    v-if="project.env"
+                    class="inline-flex items-center px-2.5 py-1 rounded-md text-xs border font-mono font-medium"
+                    :class="envChipClass(project.env)"
+                    :title="project.env"
+                  >
+                    {{ project.env }}
+                  </span>
+                  <div class="relative">
+                    <button class="p-1 dark:hover:bg-white/10 hover:bg-black/10 rounded-md transition-colors text-textMuted hover:text-textMain" @click.stop="toggleDropdown(project.id, $event)">
+                      <MoreVertical class="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <p class="text-sm text-textMuted mb-3 line-clamp-2 min-h-[40px]">
+                {{ project.description || t('project.list.noDescription') }}
+              </p>
+
+              <div class="flex items-center flex-wrap gap-1.5 mb-3">
+                <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] border" :class="categoryChipClass(categoryMap.get(project.categoryId || '')?.color)">
+                  <Tag class="w-3 h-3 mr-1" />
+                  {{ categoryNameOf(project.categoryId) }}
+                </span>
+                <ProjectTagsEditor
+                  :model-value="project.tagIds || []"
+                  size="sm"
+                  :on-persist="(next) => persistProjectTags(project.id, next)"
+                  :aria-label="t('project.list.tagsEditAriaLabel', { name: project.name })"
+                />
+              </div>
+
+              <div class="flex items-center justify-between border-t border-border pt-4 text-xs text-textMuted">
+                <div class="flex items-center" :title="project.lastDeployAt ? new Date(project.lastDeployAt).toLocaleString() : t('project.list.noDeploy')">
+                  <Clock class="w-3.5 h-3.5 mr-1.5" />
+                  <span>{{ formatRelativeTime(project.lastDeployAt) }}</span>
+                </div>
+                <div class="flex items-center space-x-3">
+                  <button
+                    @click.stop="goToLogs(project.id)"
+                    class="flex items-center text-textMuted hover:text-primary transition-colors"
+                    :title="t('project.list.deployLogTitle')"
+                  >
+                    <ScrollText class="w-3.5 h-3.5 mr-1" />
+                    <span>{{ t('project.list.deployLog') }}</span>
+                  </button>
+                  <button
+                    @click.stop="goToRunLogs(project.id)"
+                    class="flex items-center text-textMuted hover:text-primary transition-colors"
+                    :title="t('project.list.runLogTitle')"
+                  >
+                    <Activity class="w-3.5 h-3.5 mr-1" />
+                    <span>{{ t('project.list.runLog') }}</span>
+                  </button>
+                  <span class="flex items-center" :class="project.status === 'success' ? 'text-success' : project.status === 'failed' ? 'text-danger' : 'text-primary'">
+                    <span class="w-2 h-2 rounded-full mr-1.5" :class="project.status === 'success' ? 'bg-success shadow-[0_0_8px_#10b981]' : project.status === 'failed' ? 'bg-danger' : 'bg-primary'"></span>
+                    {{ project.status === 'success' ? t('project.list.statusNormal') : project.status === 'failed' ? t('project.list.statusAbnormal') : t('project.list.statusIdle') }}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </template>
     </div>
 
     <!-- List view -->
@@ -1202,73 +1402,102 @@ async function confirmBulkDelete() {
             <th class="text-right font-medium px-4 py-3 w-12"></th>
           </tr>
         </thead>
-        <tbody>
-          <tr
-            v-for="project in filteredProjects"
-            :key="project.id"
-            class="border-t border-border cursor-pointer"
-            :class="bulk.isSelected(project.id) ? 'bg-primary/5 hover:bg-primary/10' : 'hover:bg-white/5'"
-            @click="goToDetail(project.id)"
-          >
-            <td class="px-3 py-3 w-10">
-              <button
-                type="button"
-                class="p-1 rounded transition-colors"
-                :class="bulk.isSelected(project.id) ? 'text-primary' : 'text-textMuted hover:text-textMain'"
-                :title="bulk.isSelected(project.id) ? t('project.list.bulkDeselectTitle') : t('project.list.bulkSelectTitle')"
-                @click.stop="toggleRowSelection($event, project.id)"
-              >
-                <CheckSquare v-if="bulk.isSelected(project.id)" class="w-4 h-4" />
-                <Square v-else class="w-4 h-4" />
-              </button>
-            </td>
-            <td class="px-4 py-3">
-              <span v-if="project.env" class="inline-flex items-center px-2 py-0.5 rounded text-[10px] border font-mono" :class="envChipClass(project.env)">{{ project.env }}</span>
-              <span v-else class="text-textMuted text-xs">—</span>
-            </td>
-            <td class="px-4 py-3">
-              <div class="flex items-center space-x-2">
-                <Server class="w-4 h-4 text-textMuted" />
-                <div>
-                  <div class="text-textMain font-medium">{{ project.name }}</div>
-                  <div class="text-[11px] text-textMuted font-mono">{{ project.id }}</div>
-                </div>
-              </div>
-            </td>
-            <td class="px-4 py-3 text-textMuted font-mono text-xs break-all max-w-xs">{{ project.destPath || '—' }}</td>
-            <td class="px-4 py-3">
-              <div class="flex items-center flex-wrap gap-1">
-                <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] border" :class="categoryChipClass(categoryMap.get(project.categoryId || '')?.color)">
-                  <Tag class="w-3 h-3 mr-1" />
-                  {{ categoryNameOf(project.categoryId) }}
-                </span>
-                <ProjectTagsEditor
-                  :model-value="project.tagIds || []"
-                  size="sm"
-                  :on-persist="(next) => persistProjectTags(project.id, next)"
-                  :aria-label="t('project.list.tagsEditAriaLabel', { name: project.name })"
-                />
-              </div>
-            </td>
-            <td class="px-4 py-3 text-textMuted text-xs" :title="project.lastDeployAt ? new Date(project.lastDeployAt).toLocaleString() : t('project.list.noDeploy')">
-              {{ formatRelativeTime(project.lastDeployAt) }}
-            </td>
-            <td class="px-4 py-3">
-              <span class="inline-flex items-center text-xs" :class="project.status === 'success' ? 'text-success' : project.status === 'failed' ? 'text-danger' : 'text-primary'">
-                <span class="w-2 h-2 rounded-full mr-1.5" :class="project.status === 'success' ? 'bg-success' : project.status === 'failed' ? 'bg-danger' : 'bg-primary'"></span>
-                {{ project.status === 'success' ? t('project.list.statusNormal') : project.status === 'failed' ? t('project.list.statusAbnormal') : t('project.list.statusIdle') }}
-              </span>
-            </td>
-            <td class="px-4 py-3 text-right">
-              <button class="p-1 dark:hover:bg-white/10 hover:bg-black/10 rounded-md text-textMuted hover:text-textMain" @click.stop="toggleDropdown(project.id, $event)">
-                <MoreVertical class="w-4 h-4" />
-              </button>
-            </td>
-          </tr>
-          <tr v-if="filteredProjects.length === 0">
+        <tbody v-if="filteredProjects.length === 0">
+          <tr>
             <td colspan="8" class="px-4 py-12 text-center text-textMuted text-sm">{{ t('project.list.emptyUnderCategory') }}</td>
           </tr>
         </tbody>
+        <template v-for="g in groupedProjects" :key="g.key">
+          <tbody v-if="filteredProjects.length > 0 && groupBy !== 'none'">
+            <tr class="bg-base/40 border-t border-border">
+              <td colspan="8" class="px-3 py-2">
+                <button
+                  type="button"
+                  class="flex items-center w-full text-left"
+                  @click.stop="toggleGroupCollapsed(g.key)"
+                >
+                  <ChevronRight
+                    class="w-4 h-4 text-textMuted transition-transform mr-1.5 shrink-0"
+                    :class="isGroupCollapsed(g.key) ? '' : 'rotate-90'"
+                  />
+                  <span
+                    class="inline-flex items-center px-2 py-0.5 rounded text-[11px] border font-medium"
+                    :class="groupHeaderChipClass(g)"
+                  >
+                    <FolderTree v-if="groupBy === 'category'" class="w-3 h-3 mr-1" />
+                    <Activity v-else class="w-3 h-3 mr-1" />
+                    {{ g.label }}
+                  </span>
+                  <span class="ml-2 text-xs text-textMuted">{{ t('project.list.groupCount', { n: g.count }) }}</span>
+                </button>
+              </td>
+            </tr>
+          </tbody>
+          <tbody v-if="filteredProjects.length > 0 && (groupBy === 'none' || !isGroupCollapsed(g.key))">
+            <tr
+              v-for="project in g.projects"
+              :key="project.id"
+              class="border-t border-border cursor-pointer"
+              :class="bulk.isSelected(project.id) ? 'bg-primary/5 hover:bg-primary/10' : 'hover:bg-white/5'"
+              @click="goToDetail(project.id)"
+            >
+              <td class="px-3 py-3 w-10">
+                <button
+                  type="button"
+                  class="p-1 rounded transition-colors"
+                  :class="bulk.isSelected(project.id) ? 'text-primary' : 'text-textMuted hover:text-textMain'"
+                  :title="bulk.isSelected(project.id) ? t('project.list.bulkDeselectTitle') : t('project.list.bulkSelectTitle')"
+                  @click.stop="toggleRowSelection($event, project.id)"
+                >
+                  <CheckSquare v-if="bulk.isSelected(project.id)" class="w-4 h-4" />
+                  <Square v-else class="w-4 h-4" />
+                </button>
+              </td>
+              <td class="px-4 py-3">
+                <span v-if="project.env" class="inline-flex items-center px-2 py-0.5 rounded text-[10px] border font-mono" :class="envChipClass(project.env)">{{ project.env }}</span>
+                <span v-else class="text-textMuted text-xs">—</span>
+              </td>
+              <td class="px-4 py-3">
+                <div class="flex items-center space-x-2">
+                  <Server class="w-4 h-4 text-textMuted" />
+                  <div>
+                    <div class="text-textMain font-medium">{{ project.name }}</div>
+                    <div class="text-[11px] text-textMuted font-mono">{{ project.id }}</div>
+                  </div>
+                </div>
+              </td>
+              <td class="px-4 py-3 text-textMuted font-mono text-xs break-all max-w-xs">{{ project.destPath || '—' }}</td>
+              <td class="px-4 py-3">
+                <div class="flex items-center flex-wrap gap-1">
+                  <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] border" :class="categoryChipClass(categoryMap.get(project.categoryId || '')?.color)">
+                    <Tag class="w-3 h-3 mr-1" />
+                    {{ categoryNameOf(project.categoryId) }}
+                  </span>
+                  <ProjectTagsEditor
+                    :model-value="project.tagIds || []"
+                    size="sm"
+                    :on-persist="(next) => persistProjectTags(project.id, next)"
+                    :aria-label="t('project.list.tagsEditAriaLabel', { name: project.name })"
+                  />
+                </div>
+              </td>
+              <td class="px-4 py-3 text-textMuted text-xs" :title="project.lastDeployAt ? new Date(project.lastDeployAt).toLocaleString() : t('project.list.noDeploy')">
+                {{ formatRelativeTime(project.lastDeployAt) }}
+              </td>
+              <td class="px-4 py-3">
+                <span class="inline-flex items-center text-xs" :class="project.status === 'success' ? 'text-success' : project.status === 'failed' ? 'text-danger' : 'text-primary'">
+                  <span class="w-2 h-2 rounded-full mr-1.5" :class="project.status === 'success' ? 'bg-success' : project.status === 'failed' ? 'bg-danger' : 'bg-primary'"></span>
+                  {{ project.status === 'success' ? t('project.list.statusNormal') : project.status === 'failed' ? t('project.list.statusAbnormal') : t('project.list.statusIdle') }}
+                </span>
+              </td>
+              <td class="px-4 py-3 text-right">
+                <button class="p-1 dark:hover:bg-white/10 hover:bg-black/10 rounded-md text-textMuted hover:text-textMain" @click.stop="toggleDropdown(project.id, $event)">
+                  <MoreVertical class="w-4 h-4" />
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </template>
       </table>
       </div>
     </div>
