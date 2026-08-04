@@ -237,9 +237,9 @@ Authorization: Bearer <YOUR_ADMIN_TOKEN>
 * **FormData 参数**:
   * `file`: 压缩包文件 (File)
   * `projectId`: 项目 ID (String)
-  * `preDeploy`: CLI 覆盖的前置脚本 (String, 可选)
-  * `postDeploy`: CLI 覆盖的后置脚本 (String, 可选)
-  * `postDeployAsync`: 单次部署覆盖项目级 `postDeployAsync` 设置 (String, 可选；接受 `"true"|"false"|"1"|"0"`)。`true` 时 server 在 spawn `postDeploy` 之后立刻返回 success，不阻塞等待子进程结束。
+  * `preDeploy`: 前置脚本，**当项目未配置 `preDeployScript` 时才生效** (String, 可选)。项目在 Web 端配置了 `preDeployScript` 时，本字段被忽略，部署日志会打印 `Pre-deploy: using platform script (CLI-provided script ignored)`。
+  * `postDeploy`: 后置脚本，**当项目未配置 `postDeployScript` 时才生效** (String, 可选)。覆盖规则同 `preDeploy`。
+  * `postDeployAsync`: 单次部署的 async 覆盖 (String, 可选；接受 `"true"|"false"|"1"|"0"`)。**当 Web 端项目设置未开启 `postDeployAsync` 时才生效**：CLI 传 `true` 时本次部署异步执行；CLI 传 `false` 同步执行。Web 端开启 `postDeployAsync`（true）时强制异步，CLI `false` 被忽略（部署日志会打印 `Post-deploy async: forced by platform config (CLI flag ignored)`）。
   * `env`: 部署时注入到 pre/post 脚本的环境变量，**JSON 字符串** 形式 (String, 可选)
 * **Response**: NDJSON 流（`Content-Type: application/x-ndjson`），每行一个 JSON 对象：
 

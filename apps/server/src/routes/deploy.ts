@@ -729,9 +729,13 @@ export const deployRoutes = new Elysia()
         return { error: 'Project ID mismatch' };
       }
 
-      const preDeployCmd = body.preDeploy || project.preDeployScript;
-      const postDeployCmd = body.postDeploy || project.postDeployScript;
-      // postDeployAsync: 单次 > 项目级；FormData 传字符串 'true'/'false'，需归一化
+      // Platform config wins over CLI-uploaded scripts; CLI value is fallback when platform unset.
+      const preDeployOverride = Boolean(project.preDeployScript) && Boolean(body.preDeploy);
+      const preDeployCmd = project.preDeployScript || body.preDeploy;
+      const postDeployOverride = Boolean(project.postDeployScript) && Boolean(body.postDeploy);
+      const postDeployCmd = project.postDeployScript || body.postDeploy;
+      // postDeployAsync: 平台优先 —— 项目级开启 (true) 时以平台为准，CLI 单次覆盖不生效；
+      // 项目级未开启 (false/默认) 时 fallback 到 CLI 单次值。FormData 传字符串 'true'/'false'，需归一化
       const parseBool = (v: unknown): boolean | undefined => {
         if (typeof v === 'boolean') return v;
         if (typeof v === 'string') {
@@ -740,8 +744,10 @@ export const deployRoutes = new Elysia()
         }
         return undefined;
       };
-      const overrideAsync = parseBool(body.postDeployAsync);
-      const postDeployAsync = overrideAsync !== undefined ? overrideAsync : Boolean(project.postDeployAsync);
+      const platformAsync = Boolean(project.postDeployAsync);
+      const cliAsync = parseBool(body.postDeployAsync);
+      const postDeployAsync = platformAsync || (cliAsync ?? false);
+      const postDeployAsyncOverride = platformAsync && cliAsync === false;
       // env 通过 FormData 传输为 JSON 字符串，需手动解析
       let deployEnv: Record<string, string> | undefined;
       if (body.env) {
@@ -839,6 +845,11 @@ export const deployRoutes = new Elysia()
 
             // Pre-deploy
             if (preDeployCmd) {
+              if (preDeployOverride) {
+                const overrideMsg = `[Kite Deploy] Pre-deploy: using platform script (CLI-provided script ignored)`;
+                sendEvent(controller, 'log', { data: overrideMsg });
+                await appendLog(overrideMsg);
+              }
               sendEvent(controller, 'log', { data: `[Kite Deploy] Running Pre-deploy: ${preDeployCmd}` });
               await appendLog(`[Kite Deploy] Running Pre-deploy: ${preDeployCmd}`);
               let failed = false;
@@ -872,7 +883,17 @@ export const deployRoutes = new Elysia()
 
             // Post-deploy
             if (postDeployCmd) {
+              if (postDeployOverride) {
+                const overrideMsg = `[Kite Deploy] Post-deploy: using platform script (CLI-provided script ignored)`;
+                sendEvent(controller, 'log', { data: overrideMsg });
+                await appendLog(overrideMsg);
+              }
               if (postDeployAsync) {
+                if (postDeployAsyncOverride) {
+                  const asyncOverrideMsg = `[Kite Deploy] Post-deploy async: forced by platform config (CLI flag ignored)`;
+                  sendEvent(controller, 'log', { data: asyncOverrideMsg });
+                  await appendLog(asyncOverrideMsg);
+                }
                 const dispatchMsg = `[Kite Deploy] Dispatching Post-deploy asynchronously (not waiting): ${postDeployCmd}`;
                 sendEvent(controller, 'log', { data: dispatchMsg });
                 await appendLog(dispatchMsg);

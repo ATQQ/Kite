@@ -92,13 +92,15 @@ kite serve --runtime bun
 
 ## 命令覆盖优先级
 
-部署命令按以下优先级生效：
+部署配置按以下优先级生效（高 → 低）：
 
-1. CLI 参数：`--token`、`--server`、`--project`、`--out`、`--pre`、`--post`、`--command`
+1. CLI 参数：`--token`、`--server`、`--project`、`--out`、`--ignore`、`--no-ignore-builtin`
 2. 本地配置：`.env.local` 和 `kite.config.json`
 3. Web 管理端项目默认配置
 
-`--command` 是 `--post` 的别名，适合测试时快速指定服务端部署命令。
+> **`preDeploy` / `postDeploy` / `postDeployAsync` 例外**：脚本内容与异步开关**以 Web 管理端项目配置为准**。项目在 Web 端配置了 `preDeployScript` / `postDeployScript` 时，CLI 通过 `--pre` / `--post` 或本地配置上传的同名字段**不生效**（部署日志会打印 `using platform script (CLI-provided script ignored)` 提示）。仅当 Web 端未配置脚本时，才 fallback 到 CLI 上传值。Web 端开启 `postDeployAsync`（true）时强制异步，CLI `--post-deploy-async=false` 无法改回同步（部署日志会打印 `Post-deploy async: forced by platform config (CLI flag ignored)`）；Web 端未开启时 CLI flag 仍可单次开启异步。
+
+`--command` 是 `--post` 的别名。
 
 ## 反向代理（Nginx）配置建议
 
