@@ -319,9 +319,14 @@ const currentDeploymentByProject = computed(() => {
   })
   for (const log of sorted) {
     if (log.status !== 'success') continue
-    if ((log as any).triggerSource === 'rollback') continue
     if (map[log.projectId]) continue
-    map[log.projectId] = log.id
+    // A successful rollback re-deploys the source version's code, so the live
+    // version is the rollback's `rollbackOf` target, not the rollback event row.
+    if ((log as any).triggerSource === 'rollback' && (log as any).rollbackOf) {
+      map[log.projectId] = (log as any).rollbackOf
+    } else {
+      map[log.projectId] = log.id
+    }
   }
   return map
 })

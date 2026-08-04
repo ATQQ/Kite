@@ -156,7 +156,16 @@ const currentDeploymentId = computed(() => {
     const tb = new Date(b.startTime).getTime() || 0
     return tb - ta
   })
-  return sorted.find(l => l.status === 'success' && (l as any).triggerSource !== 'rollback')?.id || ''
+  const latest = sorted.find(l => l.status === 'success')
+  if (!latest) return ''
+  // A successful rollback re-deploys the source version's code, so the live
+  // version is the rollback's `rollbackOf` target, not the rollback event row.
+  // Otherwise the marker would stay on the pre-rollback latest and block the
+  // very rollback that should undo it (A→B then B cannot roll back to A).
+  if ((latest as any).triggerSource === 'rollback' && (latest as any).rollbackOf) {
+    return (latest as any).rollbackOf
+  }
+  return latest.id
 })
 
 function canRollbackLog(log: DeploymentLog): boolean {

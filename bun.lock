@@ -11,7 +11,7 @@
     },
     "apps/server": {
       "name": "@kite/server",
-      "version": "1.7.1",
+      "version": "1.7.2",
       "dependencies": {
         "@elysiajs/node": "^1.4.5",
         "@libsql/client": "^0.17.2",
@@ -33,7 +33,7 @@
     },
     "apps/web": {
       "name": "web",
-      "version": "1.7.1",
+      "version": "1.7.2",
       "dependencies": {
         "lucide-vue-next": "^1.0.0",
         "pinia": "^3.0.4",
@@ -57,7 +57,7 @@
     },
     "packages/cli": {
       "name": "@kitecd/cli",
-      "version": "1.7.1",
+      "version": "1.7.2",
       "bin": {
         "kite": "./bin/kite.js",
       },
