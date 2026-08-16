@@ -238,7 +238,9 @@ export const useProjectStore = defineStore('project', () => {
 
   async function addProject(project: Partial<Project>): Promise<{ ok: boolean; error?: string; conflictProject?: string }> {
     try {
-      const tagIds = Array.isArray((project as any).tagIds) ? (project as any).tagIds as string[] : undefined
+      const tagIds = Array.isArray((project as any).tagIds) ? [...(project as any).tagIds] : []
+      const categoryIdRaw = (project as any).categoryId
+      const categoryId = categoryIdRaw === '' ? null : categoryIdRaw ?? null
       const data = await apiFetch('/projects', {
         method: 'POST',
         body: JSON.stringify({
@@ -246,7 +248,7 @@ export const useProjectStore = defineStore('project', () => {
           description: project.description,
           deployPath: project.destPath || '/tmp/default-deploy',
           env: project.env || undefined,
-          categoryId: project.categoryId ?? undefined,
+          categoryId,
           pm2AppName: (project as any).pm2AppName ?? undefined,
           tagIds,
         })

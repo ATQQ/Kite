@@ -307,7 +307,7 @@ const createProject = async () => {
     destPath: newProject.value.destPath,
     env: newProject.value.env,
     categoryId: newProject.value.categoryId || null,
-    tagIds: newProject.value.tagIds.length > 0 ? [...newProject.value.tagIds] : undefined,
+    tagIds: [...newProject.value.tagIds],
   })
   if (result.ok) {
     showCreateModal.value = false
@@ -481,10 +481,26 @@ interface BatchRow {
 const batchRows = ref<BatchRow[]>([])
 let batchRowSeq = 0
 
-function basenameOf(p: string): string {
+// 根据路径生成唯一项目名：basename 与已有项目名或批量内已用名重复时，
+// 向上拼接父目录（如 /a/dist 与 /b/dist → a-dist / b-dist），仍重复则加数字后缀。
+function uniqueNameForPath(p: string, existingNames: Set<string>, usedNames: Set<string>): string {
   const norm = p.replace(/[\\/]+$/, '')
-  const segs = norm.split(/[\\/]/)
-  return segs[segs.length - 1] || norm || 'project'
+  const segs = norm.split(/[\\/]/).filter(Boolean)
+  const base = segs[segs.length - 1] || norm || 'project'
+  const taken = (n: string) => existingNames.has(n) || usedNames.has(n)
+  let name = base
+  let depth = 2
+  while (taken(name) && depth <= Math.min(segs.length, 3)) {
+    name = segs.slice(segs.length - depth).join('-')
+    depth++
+  }
+  let suffix = 2
+  const finalName = name
+  while (taken(name)) {
+    name = `${finalName}-${suffix}`
+    suffix++
+  }
+  return name
 }
 
 function openFolderPicker() {
@@ -492,18 +508,23 @@ function openFolderPicker() {
 }
 
 function onFolderPicked(paths: string[]) {
-  batchRows.value = paths.map((p) => ({
-    id: ++batchRowSeq,
-    name: basenameOf(p),
-    destPath: p,
-    env: '',
-    description: '',
-    categoryId: selectedCategoryFilter.value && selectedCategoryFilter.value !== 'all' && selectedCategoryFilter.value !== 'default'
-      ? selectedCategoryFilter.value
-      : '',
-    tagIds: selectedTagIds.value.length > 0 ? [...selectedTagIds.value] : [],
-    status: 'pending' as BatchStatus,
-  }))
+  const usedNames = new Set<string>()
+  batchRows.value = paths.map((p) => {
+    const name = uniqueNameForPath(p, existingNames.value, usedNames)
+    usedNames.add(name)
+    return {
+      id: ++batchRowSeq,
+      name,
+      destPath: p,
+      env: '',
+      description: '',
+      categoryId: selectedCategoryFilter.value && selectedCategoryFilter.value !== 'all' && selectedCategoryFilter.value !== 'default'
+        ? selectedCategoryFilter.value
+        : '',
+      tagIds: selectedTagIds.value.length > 0 ? [...selectedTagIds.value] : [],
+      status: 'pending' as BatchStatus,
+    }
+  })
   showBatchModal.value = true
   projectStore.fetchCategories()
   projectStore.fetchTags()
@@ -511,11 +532,14 @@ function onFolderPicked(paths: string[]) {
 
 function addRowsFromPicker(paths: string[]) {
   const existPaths = new Set(batchRows.value.map((r) => r.destPath))
+  const usedNames = new Set(batchRows.value.map((r) => r.name))
   for (const p of paths) {
     if (existPaths.has(p)) continue
+    const name = uniqueNameForPath(p, existingNames.value, usedNames)
+    usedNames.add(name)
     batchRows.value.push({
       id: ++batchRowSeq,
-      name: basenameOf(p),
+      name,
       destPath: p,
       env: '',
       description: '',
@@ -610,7 +634,7 @@ async function submitBatch() {
         destPath: row.destPath,
         env: row.env?.trim() || undefined,
         categoryId: row.categoryId || null,
-        tagIds: row.tagIds.length > 0 ? [...row.tagIds] : undefined,
+        tagIds: [...row.tagIds],
       })
       if (result.ok) {
         row.status = 'success'
