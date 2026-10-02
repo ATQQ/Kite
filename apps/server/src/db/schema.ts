@@ -53,6 +53,7 @@ export const deployments = sqliteTable('deployments', {
   artifactPath: text('artifact_path'),         // absolute path to ~/.kite/deployments/<projectId>/artifacts/<id>.zip (null = unarchived / cleaned)
   artifactSize: integer('artifact_size'),      // bytes
   rollbackOf: text('rollback_of'),             // source deployment id when this run is a rollback
+  actorIp: text('actor_ip'),                   // 发起本次部署的来源 IP（best-effort，可能为 null）
 });
 
 // 项目日志源（PM2 / Nginx / 自定义文件路径）

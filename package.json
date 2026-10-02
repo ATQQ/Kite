@@ -17,6 +17,8 @@
     "cli": "bun run build && node packages/cli/bin/kite.js",
     "cli:node": "bun run build && node packages/cli/bin/kite.js",
     "cli:bun": "bun run build && bun packages/cli/bin/kite.js",
+    "link:global": "bun run build && cd packages/cli && bun link",
+    "unlink:global": "cd packages/cli && bun unlink",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs",

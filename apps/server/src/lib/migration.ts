@@ -81,7 +81,7 @@ const PROJECT_COLUMNS = [
 
 const DEPLOYMENT_COLUMNS = [
   'id', 'project_id', 'project_name', 'status', 'trigger_source',
-  'duration', 'output', 'start_time', 'end_time',
+  'duration', 'output', 'start_time', 'end_time', 'actor_ip',
 ];
 
 const CREATE_PROJECTS = `

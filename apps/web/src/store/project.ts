@@ -113,6 +113,7 @@ export interface DeploymentLog {
   artifactPath?: string | null
   artifactSize?: number | null
   rollbackOf?: string | null
+  actorIp?: string | null
 }
 
 export interface CleanPreviewNode {

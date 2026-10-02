@@ -23,6 +23,7 @@ import {
 import { shutdownAllSessions } from "./lib/terminal.js";
 import { staticPlugin } from "./static.js";
 import { ensureDbReady } from "./db/index.js";
+import { detectClientIp, CLIENT_IP_HEADER } from "./lib/client-ip.js";
 import { moduleLogger, pickTraceId, rootLogger } from "./lib/logger.js";
 import { randomUUID } from "node:crypto";
 import http from "node:http";
@@ -191,6 +192,15 @@ const server = http.createServer(async (req, res) => {
     if (value) {
       headers.set(key, Array.isArray(value) ? value.join(', ') : value);
     }
+  }
+
+  // Inject best-effort client IP (proxy-forwarded first, then TCP socket) for audit / deployment logs.
+  if (!headers.has(CLIENT_IP_HEADER)) {
+    const clientIp = detectClientIp({
+      socketRemoteAddress: (req.socket as any)?.remoteAddress || null,
+      headers: req.headers,
+    });
+    if (clientIp) headers.set(CLIENT_IP_HEADER, clientIp);
   }
 
   const hasBody = req.method !== 'GET' && req.method !== 'HEAD';

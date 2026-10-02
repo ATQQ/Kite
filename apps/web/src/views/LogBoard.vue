@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useProjectStore } from '../store/project'
 import { ansiToHtml } from '../utils/ansi'
 import { useDeployStream } from '../composables/useDeployStream'
-import { Terminal, CheckCircle2, XCircle, Clock, RefreshCw, AlertCircle, RotateCcw, Archive, ArchiveX, Copy, CheckCheck, Wrench, GitBranch, ListTree, FileText } from 'lucide-vue-next'
+import { Terminal, CheckCircle2, XCircle, Clock, RefreshCw, AlertCircle, RotateCcw, Archive, ArchiveX, Copy, CheckCheck, Wrench, GitBranch, ListTree, FileText, Globe } from 'lucide-vue-next'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import DeploymentTimeline from '../components/DeploymentTimeline.vue'
 import { useToast } from '../composables/useToast'
@@ -522,6 +522,10 @@ async function confirmMark() {
                   <Clock class="w-3 h-3 mr-1" />
                   {{ log.duration }}
                 </span>
+                <span v-if="log.actorIp" class="flex items-center font-mono" :title="`来源 IP: ${log.actorIp}`">
+                  <Globe class="w-3 h-3 mr-1" />
+                  {{ log.actorIp }}
+                </span>
                 <span
                   v-if="log.triggerSource === 'rollback'"
                   class="ml-auto text-[10px] font-mono px-1 py-0 rounded bg-yellow-400/10 border border-yellow-400/30 text-yellow-400"
@@ -562,6 +566,14 @@ async function confirmMark() {
             <template v-else>等待选择...</template>
           </div>
           <div v-if="selectedLog" class="flex items-center gap-1.5">
+            <span
+              v-if="selectedLog.actorIp"
+              class="flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-base border border-border text-textMuted"
+              :title="`来源 IP: ${selectedLog.actorIp}`"
+            >
+              <Globe class="w-3 h-3" />
+              {{ selectedLog.actorIp }}
+            </span>
             <span
               v-if="isCurrentVersion(selectedLog)"
               class="text-[10px] font-medium px-1.5 py-0.5 rounded bg-success/10 border border-success/30 text-success"

@@ -176,6 +176,8 @@ const initDb = async () => {
   // Migration: hook 命令快照（供「一键填入最近成功指令」）
   try { await client.execute(`ALTER TABLE deployments ADD COLUMN pre_deploy_script TEXT`); } catch { /* exists */ }
   try { await client.execute(`ALTER TABLE deployments ADD COLUMN post_deploy_script TEXT`); } catch { /* exists */ }
+  // Migration: 部署来源 IP
+  try { await client.execute(`ALTER TABLE deployments ADD COLUMN actor_ip TEXT`); } catch { /* exists */ }
   await client.execute(`CREATE INDEX IF NOT EXISTS idx_deployments_artifact_path ON deployments(artifact_path);`);
   await client.execute(`CREATE INDEX IF NOT EXISTS idx_deployments_project_id ON deployments(project_id);`);
   await client.execute(`CREATE INDEX IF NOT EXISTS idx_deployments_start_time ON deployments(start_time);`);

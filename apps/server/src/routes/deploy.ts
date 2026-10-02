@@ -30,6 +30,7 @@ import {
   pickClientKey,
 } from '../lib/auth.js';
 import { notifyDeployment } from '../lib/webhook.js';
+import { resolveActorIp } from '../lib/client-ip.js';
 
 const deployLog = moduleLogger('deploy');
 
@@ -970,6 +971,7 @@ export const deployRoutes = new Elysia()
         output: '',
         preDeployScript: preDeployCmd || null,
         postDeployScript: postDeployCmd || null,
+        actorIp: resolveActorIp(headers as any),
       });
 
       await db.projects.update(project.id, { status: 'running' });
@@ -1571,6 +1573,7 @@ export const deployRoutes = new Elysia()
       // Share the same artifact file (reference-counted GC handles unlink safely)
       artifactPath: source.artifactPath,
       artifactSize: source.artifactSize ?? null,
+      actorIp: resolveActorIp(headers as any),
     });
     void deploymentRow;
     await db.projects.update(project.id, { status: 'running' });

@@ -132,6 +132,20 @@ function isLocalHost(host: string): boolean {
   return host === '127.0.0.1' || host === 'localhost' || host === '::1';
 }
 
+function buildAccessUrl(host: string, port: number, base?: string): string {
+  const hostPart = host.includes(':') ? `[${host}]` : host;
+  return `http://${hostPart}:${port}${base || ''}`;
+}
+
+function hyperlink(text: string, url: string): string {
+  return `\u001b]8;;${url}\u0007${text}\u001b]8;;\u0007`;
+}
+
+function printAccessAddress(host: string, port: number, base?: string): void {
+  const url = buildAccessUrl(host, port, base);
+  console.log(chalk.gray('  Address: ') + hyperlink(chalk.cyan.underline(url), url));
+}
+
 function warnRemoteHost(host: string): void {
   if (!isLocalHost(host)) {
     console.warn(chalk.yellow(`[warn] 当前监听 host=${host}，将对外网络暴露 Kite 管理端。请确保已在前置代理（Nginx/Caddy）配置 TLS 与限速，否则建议使用 --host 127.0.0.1。`));
@@ -148,9 +162,9 @@ function startForeground(options: ServeOptions, env: Record<string, string>, run
   }
 
   console.log(chalk.green('Starting Kite Server...'));
+  console.log(chalk.gray(`  Version: ${env.KITE_SERVER_VERSION}`));
   console.log(chalk.gray(`  Runtime: ${runtime.name} ${runtime.version}`));
-  console.log(chalk.gray(`  Host: ${options.host}`));
-  console.log(chalk.gray(`  Port: ${options.port}`));
+  printAccessAddress(options.host, options.port, env.KITE_BASE);
   console.log(chalk.gray(`  Base path: ${env.KITE_BASE || '(root)'}`));
   console.log(chalk.gray(`  Web Dir: ${env.KITE_WEB_DIR}`));
   console.log(chalk.gray(`  DB Dir: ${env.KITE_DB_DIR}`));
@@ -262,9 +276,9 @@ function startPm2(options: ServeOptions, env: Record<string, string>, runtime: {
   console.log();
   console.log(chalk.green('Kite Server started with pm2!'));
   console.log(chalk.gray(`  Name: kite-server`));
+  console.log(chalk.gray(`  Version: ${env.KITE_SERVER_VERSION}`));
   console.log(chalk.gray(`  Runtime: ${runtime.name} ${runtime.version}`));
-  console.log(chalk.gray(`  Host: ${options.host}`));
-  console.log(chalk.gray(`  Port: ${options.port}`));
+  printAccessAddress(options.host, options.port, env.KITE_BASE);
   console.log(chalk.gray(`  Base path: ${env.KITE_BASE || '(root)'}`));
   console.log(chalk.gray(`  Web Dir: ${env.KITE_WEB_DIR}`));
   console.log(chalk.gray(`  DB Dir: ${env.KITE_DB_DIR}`));

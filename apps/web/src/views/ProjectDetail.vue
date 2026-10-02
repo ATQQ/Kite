@@ -695,12 +695,15 @@ const tokenSetProjectCommand = computed(() => cliEnv.value.trim()
   : `kite config:set token ${tokenPlaceholder.value}`)
 const tokenSetGlobalCommand = computed(() => `kite config:set token ${tokenPlaceholder.value} --global`)
 const tokenEnvLocalLine = computed(() => `KITE_DEPLOY_TOKEN=${tokenPlaceholder.value}`)
-const configExample = computed(() => JSON.stringify({
-  projectId: projectId.value,
-  outputDir: './dist',
-  files: ['**/*'],
-  postDeploy: project.value?.postDeploy || 'pm2 restart your-service'
-}, null, 2))
+const configExample = computed(() => {
+  const example: Record<string, unknown> = {
+    projectId: projectId.value,
+    outputDir: './dist',
+    files: ['**/*'],
+  }
+  if (project.value?.postDeploy) example.postDeploy = project.value.postDeploy
+  return JSON.stringify(example, null, 2)
+})
 
 const configFilesExamples = computed(() => [
   { label: t('project.detail.filesExampleAll'), files: ['**/*'] },
@@ -1586,6 +1589,9 @@ function switchTab(tab: DetailTab) {
         </div>
         
         <div class="p-6 space-y-6">
+          <div class="rounded-md bg-primary/5 border border-primary/10 p-3">
+            <p class="text-xs text-textMuted leading-relaxed">{{ t('project.detail.scriptsPriorityNote') }}</p>
+          </div>
           <div>
             <label class="block text-sm font-medium text-textMain mb-2">{{ t('project.detail.destPathLabel') }}</label>
             <input

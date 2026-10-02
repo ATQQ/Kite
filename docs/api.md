@@ -241,10 +241,13 @@ Authorization: Bearer <YOUR_ADMIN_TOKEN>
       "startTime": "2026-04-12T10:45:00Z",
       "endTime": "2026-04-12T10:45:01.2Z",
       "duration": "1.2s",
-      "output": "[Kite Deploy] Starting deployment..."
+      "output": "[Kite Deploy] Starting deployment...",
+      "actorIp": "203.0.113.7"
     }
   ]
   ```
+
+> `actorIp` 为发起本次部署的来源 IP（best-effort）：反代场景取 `X-Forwarded-For` / `X-Real-IP`，直连取 TCP 对端地址；无法解析时为 `null`。CLI push 与回滚都会记录。
 
 ### 4.2 获取单条部署记录
 * **URL**: `/api/logs/:deployId`
