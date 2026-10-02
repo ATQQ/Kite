@@ -5,7 +5,7 @@ import { useProjectStore } from '../store/project'
 import { useThemeStore } from '../store/theme'
 import type { ThemeMode } from '../store/theme'
 import { useLocaleStore, SUPPORTED_LOCALES, type SupportedLocale } from '../store/locale'
-import { Settings, Server, Key, HardDrive, Webhook, Save, CheckCircle2, AlertTriangle, Activity, Sun, Moon, Monitor, RefreshCw, Eye, EyeOff, Copy, HeartPulse, Terminal as TerminalIcon, Plus, X, Languages } from 'lucide-vue-next'
+import { Settings, Server, Key, HardDrive, Webhook, Save, CheckCircle2, AlertTriangle, Activity, Sun, Moon, SunMoon, RefreshCw, Eye, EyeOff, Copy, HeartPulse, Terminal as TerminalIcon, Plus, X, Languages } from 'lucide-vue-next'
 
 const { t } = useI18n()
 const projectStore = useProjectStore()
@@ -15,7 +15,7 @@ const localeStore = useLocaleStore()
 const themeOptions = computed<{ value: ThemeMode; label: string; icon: typeof Sun; desc: string }[]>(() => [
   { value: 'light', label: t('settings.themeLight'), icon: Sun, desc: t('theme.light') },
   { value: 'dark', label: t('settings.themeDark'), icon: Moon, desc: t('theme.dark') },
-  { value: 'system', label: t('settings.themeSystem'), icon: Monitor, desc: t('theme.system') },
+  { value: 'system', label: t('settings.themeSystem'), icon: SunMoon, desc: t('theme.system') },
 ])
 
 const localeOptions = computed<{ value: SupportedLocale; label: string }[]>(() =>

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { LayoutDashboard, FolderArchive, TerminalSquare, ScrollText, Database, HardDrive, Settings, LogOut, Sun, Moon, Monitor, Menu, X, Terminal as TerminalIcon, Languages, Github, Scale, Star, Search, BarChart3, FileText } from 'lucide-vue-next'
+import { LayoutDashboard, FolderArchive, TerminalSquare, ScrollText, Database, HardDrive, Settings, LogOut, Sun, Moon, SunMoon, Menu, X, Terminal as TerminalIcon, Languages, Github, Scale, Star, Search, BarChart3, FileText } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { useProjectStore } from '../store/project'
 import { useThemeStore, type ThemeMode } from '../store/theme'
@@ -32,7 +32,7 @@ const menus = computed(() => [
 
 const THEME_CYCLE: ThemeMode[] = ['light', 'dark', 'system']
 const themeIcon = computed(() => {
-  if (themeStore.mode === 'system') return Monitor
+  if (themeStore.mode === 'system') return SunMoon
   return themeStore.mode === 'dark' ? Moon : Sun
 })
 const themeLabel = computed(() => t(`theme.${themeStore.mode}`))
