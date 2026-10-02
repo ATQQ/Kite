@@ -63,6 +63,10 @@ Server 会：
 6. 在目标目录执行 `postDeploy` 后置命令。
 7. 将状态更新为 `success` 或 `failed`，并记录完整终端输出。
 
+> **脚本来源与安全开关**
+>
+> 第 4 / 6 步执行的脚本来自「平台脚本（项目配置的 `preDeployScript` / `postDeployScript`）」或「CLI 请求体内联脚本」。内联脚本受项目级开关 `allowCliHooks` 控制，**默认关闭**：关闭时若请求体携带内联脚本，服务端直接返回 `403` 拒绝部署。详见下方[命令覆盖优先级](#命令覆盖优先级)。
+
 > **`postDeploy` 同步 / 异步执行**
 >
 > 默认情况下，第 6 步会**阻塞等待** `postDeploy` 全部子进程结束。当 `postDeploy` 中包含「重启自身」「PM2 重启 Kite 自己」「热重载守护进程」等会让 stdout/stderr 一直挂起的命令时，可在项目设置中开启「postDeploy 异步执行」，或在 CLI 用 `kite push --post-deploy-async` 单次覆盖。开启后服务端 spawn 之后立即返回 success，子进程输出仍会落到该次部署日志，崩溃会落到 `audit_logs` 的 `deploy.post_deploy_failed`。详见 [CLI 文档 `postDeployAsync`](../cli.md#九、配置文件详解)。
@@ -99,6 +103,17 @@ kite serve --runtime bun
 3. Web 管理端项目默认配置
 
 > **`preDeploy` / `postDeploy` / `postDeployAsync` 例外**：脚本内容与异步开关**以 Web 管理端项目配置为准**。项目在 Web 端配置了 `preDeployScript` / `postDeployScript` 时，CLI 通过 `--pre` / `--post` 或本地配置上传的同名字段**不生效**（部署日志会打印 `using platform script (CLI-provided script ignored)` 提示）。仅当 Web 端未配置脚本时，才 fallback 到 CLI 上传值。Web 端开启 `postDeployAsync`（true）时强制异步，CLI `--post-deploy-async=false` 无法改回同步（部署日志会打印 `Post-deploy async: forced by platform config (CLI flag ignored)`）；Web 端未开启时 CLI flag 仍可单次开启异步。
+
+> **内联脚本安全开关（`allowCliHooks`，默认关闭）**
+>
+> 为防止 Deploy Token 泄漏后被用于在服务器上执行任意命令（RCE），Kite 对「由 CLI/请求体内联提交的脚本」增加了项目级开关：**默认关闭**（含存量项目，升级后不自动开启）。
+>
+> - **关闭时**：请求体中自带 `preDeploy` / `postDeploy`（内联脚本）会被服务端**直接拒绝**，返回 `403`，错误信息为 `CLI inline hook scripts are disabled for this project. Enable "allow CLI hooks" in project settings, or configure a platform script (preDeployScript / postDeployScript).`。内联 `postDeployAsync` 同样被忽略（静默回退 `false`）。
+> - **开启时**：内联脚本才允许执行，且仍遵循上面的优先级——**平台脚本（`preDeployScript` / `postDeployScript`）优先于内联脚本**。
+> - **不 gate `env`**：`body.env` 不受此开关影响，但危险键（`PATH`、`LD_PRELOAD`、`NODE_OPTIONS`、`BASH_ENV`、`IFS` 等）会被服务端过滤。
+> - **推荐做法**：在项目设置的「执行脚本」中配置平台脚本（随项目持久化、不随 token 传输），而不是用 CLI 内联脚本。
+>
+> 开关位于项目详情的「执行脚本」卡片，也可在项目列表勾选多个项目后批量开启/关闭。
 
 `--command` 是 `--post` 的别名。
 

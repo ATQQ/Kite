@@ -10,6 +10,7 @@ export const projects = sqliteTable('projects', {
   preDeployScript: text('pre_deploy_script'),
   postDeployScript: text('post_deploy_script'),
   postDeployAsync: integer('post_deploy_async', { mode: 'boolean' }).default(false),
+  allowCliHooks: integer('allow_cli_hooks', { mode: 'boolean' }).default(false), // 允许 CLI 内联提交 pre/post 脚本（默认关闭）
   env: text('env'),                          // optional environment label, e.g. 'test', 'prod'
   status: text('status').default('idle'), // 'idle' | 'success' | 'failed' | 'running'
   cleanMode: text('clean_mode'),             // 'merge' (default/null) | 'clean' | 'clean-all'
@@ -45,6 +46,8 @@ export const deployments = sqliteTable('deployments', {
   triggerSource: text('trigger_source').notNull(), // 'cli' | 'webhook' | 'rollback'
   duration: text('duration'),
   output: text('output'),
+  preDeployScript: text('pre_deploy_script'),   // 本次实际生效的 pre 命令快照
+  postDeployScript: text('post_deploy_script'), // 本次实际生效的 post 命令快照
   startTime: text('start_time').notNull(),
   endTime: text('end_time'),
   artifactPath: text('artifact_path'),         // absolute path to ~/.kite/deployments/<projectId>/artifacts/<id>.zip (null = unarchived / cleaned)

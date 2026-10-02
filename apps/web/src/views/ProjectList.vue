@@ -4,7 +4,7 @@ import { useRouter, onBeforeRouteLeave } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useProjectStore } from '../store/project'
 import type { Category, Tag as TagType } from '../store/project'
-import { Plus, MoreVertical, Server, Clock, ScrollText, FolderPlus, Trash2, RefreshCw, XCircle, AlertTriangle, Pencil, FolderOpen, LayoutGrid, List as ListIcon, Tag, FolderTree, ChevronRight, Tags as TagsIcon, X as XIcon, Activity, CheckSquare, Square, MinusSquare } from 'lucide-vue-next'
+import { Plus, MoreVertical, Server, Clock, ScrollText, FolderPlus, Trash2, RefreshCw, XCircle, AlertTriangle, Pencil, FolderOpen, LayoutGrid, List as ListIcon, Tag, FolderTree, ChevronRight, Tags as TagsIcon, X as XIcon, Activity, CheckSquare, Square, MinusSquare, History, ShieldCheck, ShieldOff } from 'lucide-vue-next'
 import { useToast } from '../composables/useToast'
 import FolderPickerDialog from '../components/FolderPickerDialog.vue'
 import ProjectTagsEditor from '../components/ProjectTagsEditor.vue'
@@ -912,7 +912,14 @@ const isBulkSubmitting = ref(false)
 const showBulkDelete = ref(false)
 const bulkCategoryPanelOpen = ref(false)
 const bulkTagPanelOpen = ref<null | 'add' | 'remove'>(null)
+const bulkAllowHooksPanelOpen = ref(false)
 const bulkPendingTagIds = ref<string[]>([])
+
+const showBulkAllowHooks = ref(false)
+const bulkAllowHooksTarget = ref(true)
+const showBulkFillRecent = ref(false)
+const isLoadingBulkFillRecent = ref(false)
+const bulkFillRecentPreview = ref<{ items: any[]; failed: any[] } | null>(null)
 
 onBeforeRouteLeave(() => {
   bulk.clear()
@@ -941,21 +948,30 @@ function toggleAllSelection() {
 function closeBulkPanels() {
   bulkCategoryPanelOpen.value = false
   bulkTagPanelOpen.value = null
+  bulkAllowHooksPanelOpen.value = false
 }
 
 function openBulkCategoryPanel() {
   bulkTagPanelOpen.value = null
+  bulkAllowHooksPanelOpen.value = false
   bulkCategoryPanelOpen.value = !bulkCategoryPanelOpen.value
 }
 
 function openBulkTagPanel(mode: 'add' | 'remove') {
   bulkCategoryPanelOpen.value = false
+  bulkAllowHooksPanelOpen.value = false
   if (bulkTagPanelOpen.value === mode) {
     bulkTagPanelOpen.value = null
     return
   }
   bulkPendingTagIds.value = []
   bulkTagPanelOpen.value = mode
+}
+
+function openBulkAllowHooksPanel() {
+  bulkCategoryPanelOpen.value = false
+  bulkTagPanelOpen.value = null
+  bulkAllowHooksPanelOpen.value = !bulkAllowHooksPanelOpen.value
 }
 
 function toggleBulkPendingTag(id: string) {
@@ -1087,6 +1103,83 @@ async function confirmBulkDelete() {
     toast.error(t('project.list.bulkPartial'), t('project.list.bulkPartialDetail', { ok: success, fail: failed }))
   }
   showBulkDelete.value = false
+  bulk.clear()
+  await projectStore.fetchProjects()
+}
+
+function openBulkAllowHooks(target: boolean) {
+  if (bulk.selectedCount.value === 0) return
+  if (!ensureWithinBulkLimit()) return
+  closeBulkPanels()
+  bulkAllowHooksTarget.value = target
+  showBulkAllowHooks.value = true
+}
+
+async function confirmBulkAllowHooks() {
+  if (isBulkSubmitting.value) return
+  if (bulk.selectedCount.value === 0) return
+  isBulkSubmitting.value = true
+  const ids = Array.from(bulk.selectedIds.value)
+  const target = bulkAllowHooksTarget.value
+  const result = await callBulkProjectsApi({ ids, action: 'setAllowCliHooks', allowCliHooks: target })
+  isBulkSubmitting.value = false
+  if (!result.ok) {
+    toast.error(t('project.list.bulkAllowHooksFailed'), result.error)
+    return
+  }
+  const { success, failed } = summarizeBulkResult(result.data)
+  if (failed === 0) {
+    toast.success(t(target ? 'project.list.bulkAllowHooksOnSuccess' : 'project.list.bulkAllowHooksOffSuccess', { n: success }))
+  } else {
+    toast.error(t('project.list.bulkPartial'), t('project.list.bulkPartialDetail', { ok: success, fail: failed }))
+  }
+  showBulkAllowHooks.value = false
+  bulk.clear()
+  await projectStore.fetchProjects()
+}
+
+async function openBulkFillRecent() {
+  if (bulk.selectedCount.value === 0) return
+  if (!ensureWithinBulkLimit()) return
+  closeBulkPanels()
+  isLoadingBulkFillRecent.value = true
+  const ids = Array.from(bulk.selectedIds.value)
+  const result = await callBulkProjectsApi({ ids, action: 'previewLatestScripts' })
+  isLoadingBulkFillRecent.value = false
+  if (!result.ok) {
+    toast.error(t('project.list.bulkFillRecentFailed'), result.error)
+    return
+  }
+  bulkFillRecentPreview.value = {
+    items: Array.isArray(result.data?.items) ? result.data.items : [],
+    failed: Array.isArray(result.data?.failed) ? result.data.failed : [],
+  }
+  showBulkFillRecent.value = true
+}
+
+async function confirmBulkFillRecent() {
+  if (isBulkSubmitting.value) return
+  if (bulk.selectedCount.value === 0) return
+  isBulkSubmitting.value = true
+  const ids = Array.from(bulk.selectedIds.value)
+  const result = await callBulkProjectsApi({ ids, action: 'applyLatestScripts' })
+  isBulkSubmitting.value = false
+  if (!result.ok) {
+    toast.error(t('project.list.bulkFillRecentFailed'), result.error)
+    return
+  }
+  const { success, failed } = summarizeBulkResult(result.data)
+  const skipped = Array.isArray(result.data?.skipped) ? result.data.skipped.length : 0
+  if (failed === 0 && skipped === 0) {
+    toast.success(t('project.list.bulkFillRecentSuccess', { n: success }))
+  } else {
+    toast.error(
+      t('project.list.bulkFillRecentPartial'),
+      t('project.list.bulkFillRecentPartialDetail', { ok: success, skip: skipped, fail: failed })
+    )
+  }
+  showBulkFillRecent.value = false
+  bulkFillRecentPreview.value = null
   bulk.clear()
   await projectStore.fetchProjects()
 }
@@ -2341,6 +2434,54 @@ async function confirmBulkDelete() {
 
         <button
           type="button"
+          :disabled="isBulkSubmitting || isLoadingBulkFillRecent"
+          class="flex items-center px-2.5 py-1.5 text-xs rounded-md border border-border hover:border-primary/50 text-textMain transition-colors disabled:opacity-50"
+          @click="openBulkFillRecent"
+        >
+          <RefreshCw v-if="isLoadingBulkFillRecent" class="w-3.5 h-3.5 mr-1.5 animate-spin" />
+          <History v-else class="w-3.5 h-3.5 mr-1.5" />
+          {{ t('project.list.bulkFillRecent') }}
+        </button>
+
+        <div class="relative">
+          <button
+            type="button"
+            :disabled="isBulkSubmitting"
+            class="flex items-center px-2.5 py-1.5 text-xs rounded-md border border-border hover:border-primary/50 text-textMain transition-colors disabled:opacity-50"
+            @click="openBulkAllowHooksPanel"
+          >
+            <ShieldCheck class="w-3.5 h-3.5 mr-1.5" />
+            {{ t('project.list.bulkAllowHooks') }}
+          </button>
+          <div
+            v-if="bulkAllowHooksPanelOpen"
+            class="absolute bottom-full left-0 mb-2 bg-panel border border-border rounded-lg shadow-xl py-1 min-w-[200px]"
+            style="z-index: 70"
+            @click.stop
+          >
+            <button
+              type="button"
+              class="flex items-center w-full px-3 py-2 text-sm text-textMain hover:bg-white/5 transition-colors"
+              :disabled="isBulkSubmitting"
+              @click="openBulkAllowHooks(true)"
+            >
+              <ShieldCheck class="w-3.5 h-3.5 mr-2 text-success" />
+              {{ t('project.list.bulkAllowHooksOn') }}
+            </button>
+            <button
+              type="button"
+              class="flex items-center w-full px-3 py-2 text-sm text-textMain hover:bg-white/5 transition-colors"
+              :disabled="isBulkSubmitting"
+              @click="openBulkAllowHooks(false)"
+            >
+              <ShieldOff class="w-3.5 h-3.5 mr-2 text-textMuted" />
+              {{ t('project.list.bulkAllowHooksOff') }}
+            </button>
+          </div>
+        </div>
+
+        <button
+          type="button"
           :disabled="isBulkSubmitting"
           class="flex items-center px-2.5 py-1.5 text-xs rounded-md border border-danger/40 text-danger hover:bg-danger/10 transition-colors disabled:opacity-50"
           @click="openBulkDelete"
@@ -2363,6 +2504,57 @@ async function confirmBulkDelete() {
       :loading="isBulkSubmitting"
       @confirm="confirmBulkDelete"
     />
+
+    <ConfirmDialog
+      v-model:open="showBulkAllowHooks"
+      :tone="bulkAllowHooksTarget ? 'warning' : 'info'"
+      :title="t(bulkAllowHooksTarget ? 'project.list.bulkAllowHooksOnTitle' : 'project.list.bulkAllowHooksOffTitle')"
+      :message="t(bulkAllowHooksTarget ? 'project.list.bulkAllowHooksOnMessage' : 'project.list.bulkAllowHooksOffMessage', { n: bulk.selectedCount.value })"
+      :confirm-text="t('common.confirm')"
+      :cancel-text="t('common.cancel')"
+      :loading="isBulkSubmitting"
+      @confirm="confirmBulkAllowHooks"
+    />
+
+    <ConfirmDialog
+      v-model:open="showBulkFillRecent"
+      tone="warning"
+      :title="t('project.list.bulkFillRecentTitle')"
+      :message="t('project.list.bulkFillRecentMessage', { n: bulk.selectedCount.value })"
+      :confirm-text="t('project.list.bulkFillRecentConfirm')"
+      :cancel-text="t('common.cancel')"
+      :loading="isBulkSubmitting"
+      @confirm="confirmBulkFillRecent"
+    >
+      <div v-if="bulkFillRecentPreview" class="mt-4">
+        <div class="max-h-56 overflow-auto border border-border rounded-md divide-y divide-border">
+          <div
+            v-for="item in bulkFillRecentPreview.items"
+            :key="item.id"
+            class="px-3 py-2 text-xs"
+          >
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-textMain font-medium truncate">{{ item.name }}</span>
+              <span
+                class="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] border"
+                :class="item.source === 'none' ? 'text-textMuted border-border' : 'text-success border-success/40'"
+              >
+                {{ item.source === 'none'
+                  ? t('project.list.bulkFillRecentSourceNone')
+                  : item.source === 'structured'
+                    ? t('project.list.bulkFillRecentSourceStructured')
+                    : t('project.list.bulkFillRecentSourceParsed') }}
+              </span>
+            </div>
+            <div v-if="item.preDeploy" class="mt-1 font-mono text-[11px] text-textMuted truncate">pre: {{ item.preDeploy }}</div>
+            <div v-if="item.postDeploy" class="mt-0.5 font-mono text-[11px] text-textMuted truncate">post: {{ item.postDeploy }}</div>
+          </div>
+        </div>
+        <p v-if="bulkFillRecentPreview.failed.length" class="text-[11px] text-danger mt-2">
+          {{ t('project.list.bulkFillRecentFailedCount', { n: bulkFillRecentPreview.failed.length }) }}
+        </p>
+      </div>
+    </ConfirmDialog>
   </div>
 </template>
 

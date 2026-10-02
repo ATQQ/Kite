@@ -125,6 +125,57 @@ async function* runShellCommand(command: string, cwd: string, env?: Record<strin
   yield `\x00EXIT:${exitCode}`;
 }
 
+// 提取日志行里的 hook 命令（用于存量历史无结构化列时回退解析）
+const HOOK_LOG_PREFIX = /^\d{4}-\d{2}-\d{2}T\S+\s/;
+const PRE_HOOK_RE = /^\[Kite (?:Deploy|Rollback)\] Running Pre-deploy: (.*)$/;
+const POST_HOOK_RE = /^\[Kite (?:Deploy|Rollback)\] (?:Running Post-deploy|Dispatching Post-deploy asynchronously \(not waiting\)): (.*)$/;
+
+function hookCommandSummary(cmd: string): string {
+  const oneLine = cmd.replace(/\s+/g, ' ').trim();
+  return oneLine.length > 200 ? oneLine.slice(0, 200) + '…' : oneLine;
+}
+
+export interface RecentScripts {
+  deployId: string;
+  deployedAt: string;
+  source: 'structured' | 'parsed' | 'none';
+  preDeploy: string | null;
+  postDeploy: string | null;
+}
+
+// 取项目「最近一次成功部署」的实际生效命令：优先结构化快照，其次解析历史日志文本
+export async function resolveRecentScripts(projectId: string): Promise<RecentScripts | null> {
+  const history = await db.deployments.findByProject(projectId);
+  const latest = history.find((d) => d.status === 'success');
+  if (!latest) return null;
+
+  const preSnapshot = latest.preDeployScript ?? null;
+  const postSnapshot = latest.postDeployScript ?? null;
+  if (preSnapshot || postSnapshot) {
+    return {
+      deployId: latest.id,
+      deployedAt: latest.startTime,
+      source: 'structured',
+      preDeploy: preSnapshot,
+      postDeploy: postSnapshot,
+    };
+  }
+
+  let parsedPre: string | null = null;
+  let parsedPost: string | null = null;
+  for (const raw of (latest.output || '').split('\n')) {
+    const line = raw.replace(HOOK_LOG_PREFIX, '');
+    const mPre = line.match(PRE_HOOK_RE);
+    if (mPre) parsedPre = mPre[1].trim();
+    const mPost = line.match(POST_HOOK_RE);
+    if (mPost) parsedPost = mPost[1].trim();
+  }
+  if (!parsedPre && !parsedPost) {
+    return { deployId: latest.id, deployedAt: latest.startTime, source: 'none', preDeploy: null, postDeploy: null };
+  }
+  return { deployId: latest.id, deployedAt: latest.startTime, source: 'parsed', preDeploy: parsedPre, postDeploy: parsedPost };
+}
+
 export const deployRoutes = new Elysia()
   .post('/api/auth/login', async ({ body, headers, set }) => {
     const clientKey = pickClientKey(headers as Record<string, string | undefined>);
@@ -252,6 +303,16 @@ export const deployRoutes = new Elysia()
     if (!project) { set.status = 404; return { error: 'Project not found' }; }
     const tagIds = await db.projectTags.listByProject(params.id);
     return { ...project, tagIds };
+  })
+  .get('/api/projects/:id/recent-scripts', async ({ headers, params, set }) => {
+    if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
+    const project = await db.projects.findById(params.id);
+    if (!project) { set.status = 404; return { error: 'Project not found' }; }
+    const recent = await resolveRecentScripts(params.id);
+    return {
+      current: { preDeploy: project.preDeployScript ?? null, postDeploy: project.postDeployScript ?? null },
+      recent,
+    };
   })
   .put('/api/projects/:id', async ({ headers, params, body, set }) => {
     if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
@@ -388,6 +449,7 @@ export const deployRoutes = new Elysia()
       preDeployScript: t.Optional(t.String()),
       postDeployScript: t.Optional(t.String()),
       postDeployAsync: t.Optional(t.Boolean()),
+      allowCliHooks: t.Optional(t.Boolean()),
       deployPath: t.Optional(t.String()),
       description: t.Optional(t.String()),
       env: t.Optional(t.String()),
@@ -571,14 +633,123 @@ export const deployRoutes = new Elysia()
       return { success: succeeded.length, failed };
     }
 
+    if (action === 'setAllowCliHooks') {
+      const raw = b?.allowCliHooks;
+      if (typeof raw !== 'boolean') {
+        set.status = 400;
+        return { error: 'allowCliHooks must be boolean' };
+      }
+      const succeeded: Array<{ id: string; name: string; from: boolean; to: boolean }> = [];
+      const failed: Array<{ id: string; error: string }> = [];
+      for (const id of missing) failed.push({ id, error: 'Project not found' });
+      for (const id of ids) {
+        const p = projectMap.get(id);
+        if (!p) continue;
+        try {
+          const from = Boolean((p as any).allowCliHooks);
+          if (from !== raw) {
+            await db.projects.update(id, { allowCliHooks: raw } as any);
+          }
+          succeeded.push({ id: p.id, name: p.name, from, to: raw });
+        } catch (err: any) {
+          failed.push({ id, error: err?.message || 'update failed' });
+        }
+      }
+      await writeAudit({ headers }, {
+        action: 'project.bulk.setAllowCliHooks',
+        targetType: 'project',
+        targetId: null,
+        targetName: null,
+        before: succeeded.map(s => ({ id: s.id, allowCliHooks: s.from })),
+        after: succeeded.map(s => ({ id: s.id, allowCliHooks: s.to })),
+        summary: `批量${raw ? '开启' : '关闭'} ${succeeded.length} 个项目的 CLI 内联脚本${failed.length ? `（失败 ${failed.length}）` : ''}`,
+        status: succeeded.length > 0 ? 'success' : 'failed',
+      });
+      return { success: succeeded.length, failed };
+    }
+
+    if (action === 'previewLatestScripts') {
+      const items: Array<{
+        id: string; name: string; source: string;
+        preDeploy: string | null; postDeploy: string | null;
+        deployId: string | null; deployedAt: string | null;
+      }> = [];
+      const failed: Array<{ id: string; error: string }> = [];
+      for (const id of missing) failed.push({ id, error: 'Project not found' });
+      for (const id of ids) {
+        const p = projectMap.get(id);
+        if (!p) continue;
+        try {
+          const recent = await resolveRecentScripts(id);
+          items.push({
+            id: p.id,
+            name: p.name,
+            source: recent?.source ?? 'none',
+            preDeploy: recent?.preDeploy ?? null,
+            postDeploy: recent?.postDeploy ?? null,
+            deployId: recent?.deployId ?? null,
+            deployedAt: recent?.deployedAt ?? null,
+          });
+        } catch (err: any) {
+          failed.push({ id, error: err?.message || 'resolve failed' });
+        }
+      }
+      return { items, failed };
+    }
+
+    if (action === 'applyLatestScripts') {
+      const succeeded: Array<{ id: string; name: string; before: Record<string, unknown>; after: Record<string, unknown> }> = [];
+      const skipped: Array<{ id: string; name: string; reason: string }> = [];
+      const failed: Array<{ id: string; error: string }> = [];
+      for (const id of missing) failed.push({ id, error: 'Project not found' });
+      for (const id of ids) {
+        const p = projectMap.get(id);
+        if (!p) continue;
+        try {
+          const recent = await resolveRecentScripts(id);
+          if (!recent || recent.source === 'none' || (!recent.preDeploy && !recent.postDeploy)) {
+            skipped.push({ id: p.id, name: p.name, reason: 'no recent successful scripts' });
+            continue;
+          }
+          const patch: Record<string, string> = {};
+          if (recent.preDeploy) patch.preDeployScript = recent.preDeploy;
+          if (recent.postDeploy) patch.postDeployScript = recent.postDeploy;
+          if (Object.keys(patch).length === 0) {
+            skipped.push({ id: p.id, name: p.name, reason: 'no non-empty scripts' });
+            continue;
+          }
+          const before = {
+            preDeployScript: (p as any).preDeployScript ?? null,
+            postDeployScript: (p as any).postDeployScript ?? null,
+          };
+          await db.projects.update(id, patch as any);
+          succeeded.push({ id: p.id, name: p.name, before, after: patch });
+        } catch (err: any) {
+          failed.push({ id, error: err?.message || 'apply failed' });
+        }
+      }
+      await writeAudit({ headers }, {
+        action: 'project.bulk.applyLatestScripts',
+        targetType: 'project',
+        targetId: null,
+        targetName: null,
+        before: succeeded.map(s => ({ id: s.id, ...s.before })),
+        after: succeeded.map(s => ({ id: s.id, ...s.after })),
+        summary: `批量回填最近成功指令：成功 ${succeeded.length}，跳过 ${skipped.length}${failed.length ? `，失败 ${failed.length}` : ''}`,
+        status: succeeded.length > 0 ? 'success' : 'failed',
+      });
+      return { success: succeeded.length, skipped, failed };
+    }
+
     set.status = 400;
-    return { error: 'action must be one of: delete, setCategory, addTags, removeTags' };
+    return { error: 'action must be one of: delete, setCategory, addTags, removeTags, setAllowCliHooks, previewLatestScripts, applyLatestScripts' };
   }, {
     body: t.Object({
       ids: t.Array(t.String()),
       action: t.String(),
       categoryId: t.Optional(t.Union([t.String(), t.Null()])),
       tagIds: t.Optional(t.Array(t.String())),
+      allowCliHooks: t.Optional(t.Boolean()),
     }),
   })
   .post('/api/log-sources/bulk', async ({ headers, body, set }) => {
@@ -729,13 +900,28 @@ export const deployRoutes = new Elysia()
         return { error: 'Project ID mismatch' };
       }
 
+      // 权限闸门：默认禁止 CLI 内联脚本，避免 Deploy Token 泄漏导致任意命令执行。
+      // 仅 gate 内联 pre/post 脚本；平台脚本始终可运行；body.env 不 gate（危险键由 runtime 过滤）。
+      const allowCliHooks = Boolean(project.allowCliHooks);
+      const hasInlinePre = Boolean(body.preDeploy);
+      const hasInlinePost = Boolean(body.postDeploy);
+      if (!allowCliHooks && (hasInlinePre || hasInlinePost)) {
+        set.status = 403;
+        return {
+          error: 'CLI inline hook scripts are disabled for this project. '
+            + 'Enable "allow CLI hooks" in project settings, or configure a platform script (preDeployScript / postDeployScript).',
+        };
+      }
+
       // Platform config wins over CLI-uploaded scripts; CLI value is fallback when platform unset.
       const preDeployOverride = Boolean(project.preDeployScript) && Boolean(body.preDeploy);
       const preDeployCmd = project.preDeployScript || body.preDeploy;
       const postDeployOverride = Boolean(project.postDeployScript) && Boolean(body.postDeploy);
       const postDeployCmd = project.postDeployScript || body.postDeploy;
+      const preHookSource = project.preDeployScript ? 'platform' : 'cli-inline';
+      const postHookSource = project.postDeployScript ? 'platform' : 'cli-inline';
       // postDeployAsync: 平台优先 —— 项目级开启 (true) 时以平台为准，CLI 单次覆盖不生效；
-      // 项目级未开启 (false/默认) 时 fallback 到 CLI 单次值。FormData 传字符串 'true'/'false'，需归一化
+      // 项目级未开启 (false/默认) 时 fallback 到 CLI 单次值（仅在允许 CLI 内联脚本时）。FormData 传字符串 'true'/'false'，需归一化
       const parseBool = (v: unknown): boolean | undefined => {
         if (typeof v === 'boolean') return v;
         if (typeof v === 'string') {
@@ -746,8 +932,8 @@ export const deployRoutes = new Elysia()
       };
       const platformAsync = Boolean(project.postDeployAsync);
       const cliAsync = parseBool(body.postDeployAsync);
-      const postDeployAsync = platformAsync || (cliAsync ?? false);
-      const postDeployAsyncOverride = platformAsync && cliAsync === false;
+      const postDeployAsync = platformAsync || (allowCliHooks ? (cliAsync ?? false) : false);
+      const postDeployAsyncOverride = platformAsync && allowCliHooks && cliAsync === false;
       // env 通过 FormData 传输为 JSON 字符串，需手动解析
       let deployEnv: Record<string, string> | undefined;
       if (body.env) {
@@ -781,7 +967,9 @@ export const deployRoutes = new Elysia()
         status: 'running',
         triggerSource: 'cli',
         startTime: startTimeIso,
-        output: ''
+        output: '',
+        preDeployScript: preDeployCmd || null,
+        postDeployScript: postDeployCmd || null,
       });
 
       await db.projects.update(project.id, { status: 'running' });
@@ -807,6 +995,19 @@ export const deployRoutes = new Elysia()
       const stream = new ReadableStream({
         async start(controller) {
           const startTime = Date.now();
+
+          // 每次 hook 执行都记审计（actor=deploy-token 以区分管理员操作）
+          const auditHook = async (phase: 'pre' | 'post', cmd: string, exitCode: number, source: string) => {
+            await writeAudit({ headers, traceId: deployTraceId }, {
+              action: phase === 'pre' ? 'deploy.pre_hook' : 'deploy.post_hook',
+              actor: 'deploy-token',
+              targetType: 'project',
+              targetId: project.id,
+              targetName: project.name,
+              summary: `${phase === 'pre' ? 'pre' : 'post'} hook ${exitCode === 0 ? '成功' : `退出码 ${exitCode}`}（来源 ${source}，部署 ${deploymentRow.id.slice(0, 8)}）：${hookCommandSummary(cmd)}`,
+              status: exitCode === 0 ? 'success' : 'failed',
+            });
+          };
 
           try {
             sendEvent(controller, 'log', { data: `[Kite Deploy] Starting deployment for ${project.name}...` });
@@ -853,15 +1054,17 @@ export const deployRoutes = new Elysia()
               sendEvent(controller, 'log', { data: `[Kite Deploy] Running Pre-deploy: ${preDeployCmd}` });
               await appendLog(`[Kite Deploy] Running Pre-deploy: ${preDeployCmd}`);
               let failed = false;
+              let hookExit = 0;
               for await (const line of runShellCommand(preDeployCmd, destPath, deployEnv)) {
                 if (line.startsWith('\x00EXIT:')) {
-                  const exitCode = parseInt(line.slice(6));
-                  if (exitCode !== 0) { failed = true; }
+                  hookExit = parseInt(line.slice(6));
+                  if (hookExit !== 0) { failed = true; }
                 } else {
                   sendEvent(controller, 'log', { data: line });
                   await appendLog(line);
                 }
               }
+              await auditHook('pre', preDeployCmd, hookExit, preHookSource);
               if (failed) throw new Error('Pre-deploy failed');
             }
 
@@ -909,6 +1112,7 @@ export const deployRoutes = new Elysia()
                           ? `[Kite Deploy] (async) Post-deploy exited with code 0`
                           : `[Kite Deploy] (async) Post-deploy exited with code ${exitCode}`;
                         await appendLog(exitMsg);
+                        await auditHook('post', postDeployCmd, exitCode, postHookSource);
                         if (exitCode !== 0) {
                           try {
                             await writeAudit({ headers }, {
@@ -948,15 +1152,17 @@ export const deployRoutes = new Elysia()
                 sendEvent(controller, 'log', { data: `[Kite Deploy] Running Post-deploy: ${postDeployCmd}` });
                 await appendLog(`[Kite Deploy] Running Post-deploy: ${postDeployCmd}`);
                 let failed = false;
+                let hookExit = 0;
                 for await (const line of runShellCommand(postDeployCmd, destPath, deployEnv)) {
                   if (line.startsWith('\x00EXIT:')) {
-                    const exitCode = parseInt(line.slice(6));
-                    if (exitCode !== 0) { failed = true; }
+                    hookExit = parseInt(line.slice(6));
+                    if (hookExit !== 0) { failed = true; }
                   } else {
                     sendEvent(controller, 'log', { data: line });
                     await appendLog(line);
                   }
                 }
+                await auditHook('post', postDeployCmd, hookExit, postHookSource);
                 if (failed) throw new Error('Post-deploy failed');
               }
             }
@@ -1360,6 +1566,8 @@ export const deployRoutes = new Elysia()
       startTime: startedAt,
       output: '',
       rollbackOf: source.id,
+      preDeployScript: project.preDeployScript || null,
+      postDeployScript: project.postDeployScript || null,
       // Share the same artifact file (reference-counted GC handles unlink safely)
       artifactPath: source.artifactPath,
       artifactSize: source.artifactSize ?? null,
@@ -1387,13 +1595,23 @@ export const deployRoutes = new Elysia()
       if (project.preDeployScript) {
         await appendLog(`[Kite Rollback] Running Pre-deploy: ${project.preDeployScript}`);
         let failed = false;
+        let hookExit = 0;
         for await (const line of runShellCommand(project.preDeployScript, destPath, env)) {
           if (line.startsWith('\x00EXIT:')) {
-            if (parseInt(line.slice(6)) !== 0) failed = true;
+            hookExit = parseInt(line.slice(6));
+            if (hookExit !== 0) failed = true;
           } else {
             await appendLog(line);
           }
         }
+        await writeAudit({ headers, traceId: rollbackTraceId }, {
+          action: 'deploy.pre_hook',
+          targetType: 'project',
+          targetId: project.id,
+          targetName: project.name,
+          summary: `pre hook ${hookExit === 0 ? '成功' : `退出码 ${hookExit}`}（来源 platform，回滚 ${newDeployId.slice(0, 8)}）：${hookCommandSummary(project.preDeployScript)}`,
+          status: hookExit === 0 ? 'success' : 'failed',
+        });
         if (failed) throw new Error('Pre-deploy failed');
       }
 
@@ -1409,13 +1627,23 @@ export const deployRoutes = new Elysia()
       if (project.postDeployScript) {
         await appendLog(`[Kite Rollback] Running Post-deploy: ${project.postDeployScript}`);
         let failed = false;
+        let hookExit = 0;
         for await (const line of runShellCommand(project.postDeployScript, destPath, env)) {
           if (line.startsWith('\x00EXIT:')) {
-            if (parseInt(line.slice(6)) !== 0) failed = true;
+            hookExit = parseInt(line.slice(6));
+            if (hookExit !== 0) failed = true;
           } else {
             await appendLog(line);
           }
         }
+        await writeAudit({ headers, traceId: rollbackTraceId }, {
+          action: 'deploy.post_hook',
+          targetType: 'project',
+          targetId: project.id,
+          targetName: project.name,
+          summary: `post hook ${hookExit === 0 ? '成功' : `退出码 ${hookExit}`}（来源 platform，回滚 ${newDeployId.slice(0, 8)}）：${hookCommandSummary(project.postDeployScript)}`,
+          status: hookExit === 0 ? 'success' : 'failed',
+        });
         if (failed) throw new Error('Post-deploy failed');
       }
 

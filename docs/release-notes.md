@@ -1,5 +1,22 @@
 # 更新日志
 
+## Unreleased
+
+### Breaking
+
+- **部署内联脚本默认关闭（`allowCliHooks`）**：为降低 Deploy Token 泄漏导致的任意命令执行（RCE）风险，请求体内联提交的 `preDeploy` / `postDeploy` 现在默认被服务端拒绝（返回 `403`），**存量项目升级后同样默认关闭**。受影响的用户需在项目详情「执行脚本」中开启「允许 CLI 内联脚本」，或改用平台脚本（`preDeployScript` / `postDeployScript`）——推荐后者。
+- 内联 `postDeployAsync` 同步受该开关约束，未开启时静默回退 `false`。
+
+### Feature
+
+- 新增项目级「允许 CLI 内联脚本」开关（`allowCliHooks`），可在项目详情配置，也可在项目列表批量开启/关闭。
+- 项目详情与项目列表新增「一键填入最近成功部署的脚本」，自动读取最近一次成功部署的 `preDeploy` / `postDeploy`（结构化快照优先，历史数据回退解析部署日志），经二次确认后写回项目配置。
+- 部署 hook 执行接入审计日志（`deploy.pre_hook` / `deploy.post_hook`），记录来源、退出码与命令摘要，`actor` 标记为 `deploy-token`。
+
+### Security
+
+- 部署脚本注入的 `env` 增加危险键黑名单过滤（`PATH`、`LD_PRELOAD`、`NODE_OPTIONS`、`BASH_ENV`、`IFS` 等）。
+
 ## v1.7.3 (2026/08/04)
 
 ### Bugfix

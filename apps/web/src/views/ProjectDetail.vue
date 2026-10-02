@@ -2,7 +2,7 @@
 import { computed, ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { useProjectStore, type CleanPreviewResult, type DeploymentLog, type Pm2AppStatus } from '../store/project'
+import { useProjectStore, type CleanPreviewResult, type DeploymentLog, type Pm2AppStatus, type RecentScriptsResult } from '../store/project'
 import { ArrowLeft, Save, Key, Copy, RefreshCw, Trash2, CheckCircle2, TerminalSquare, FolderOpen, AlertTriangle, XCircle, ScrollText, Eye, Shield, ShieldAlert, Plus, History, RotateCcw, Archive, ArchiveX, CheckCheck, FileText, Activity, Cpu, MemoryStick, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Pencil, Check, SlidersHorizontal, LayoutDashboard } from 'lucide-vue-next'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import CleanPreviewDialog from '../components/CleanPreviewDialog.vue'
@@ -25,6 +25,7 @@ const formData = ref({
   preDeploy: '',
   postDeploy: '',
   postDeployAsync: false,
+  allowCliHooks: false,
   categoryId: '' as string,
   pm2AppName: '',
   tagIds: [] as string[],
@@ -279,17 +280,56 @@ async function savePm2Binding() {
 
 const isSavingScripts = ref(false)
 async function saveScripts() {
-  if (isSavingScripts.value) return
+  if (isSavingScripts.value) return false
   isSavingScripts.value = true
   try {
-    await savePartial({
+    return await savePartial({
       destPath: formData.value.destPath,
       preDeploy: formData.value.preDeploy,
       postDeploy: formData.value.postDeploy,
       postDeployAsync: formData.value.postDeployAsync,
+      allowCliHooks: formData.value.allowCliHooks,
     }, t('project.detail.scriptsSaved'))
   } finally {
     isSavingScripts.value = false
+  }
+}
+
+const showFillRecentConfirm = ref(false)
+const isLoadingRecentScripts = ref(false)
+const isApplyingRecentScripts = ref(false)
+const recentScripts = ref<RecentScriptsResult['recent']>(null)
+
+async function openFillRecent() {
+  if (isLoadingRecentScripts.value) return
+  isLoadingRecentScripts.value = true
+  try {
+    const res = await projectStore.fetchRecentScripts(projectId.value)
+    const recent = res?.recent || null
+    if (!recent || recent.source === 'none' || (!recent.preDeploy && !recent.postDeploy)) {
+      toast.error(t('project.detail.fillRecentNone'), t('project.detail.fillRecentNoneHint'))
+      return
+    }
+    recentScripts.value = recent
+    showFillRecentConfirm.value = true
+  } catch (e: any) {
+    toast.error(t('project.detail.fillRecentFailed'), e?.message || t('project.detail.retryLater'))
+  } finally {
+    isLoadingRecentScripts.value = false
+  }
+}
+
+async function confirmFillRecent() {
+  const recent = recentScripts.value
+  if (!recent) return
+  isApplyingRecentScripts.value = true
+  try {
+    formData.value.preDeploy = recent.preDeploy || ''
+    formData.value.postDeploy = recent.postDeploy || ''
+    const ok = await saveScripts()
+    if (ok) showFillRecentConfirm.value = false
+  } finally {
+    isApplyingRecentScripts.value = false
   }
 }
 
@@ -339,6 +379,7 @@ function applyOptimisticPatch(payload: Record<string, any>) {
     p.postDeployScript = payload.postDeploy
   }
   if (payload.postDeployAsync !== undefined) p.postDeployAsync = Boolean(payload.postDeployAsync)
+  if (payload.allowCliHooks !== undefined) p.allowCliHooks = Boolean(payload.allowCliHooks)
   if (payload.categoryId !== undefined) p.categoryId = payload.categoryId
   if (payload.env !== undefined) p.env = payload.env
   if (payload.pm2AppName !== undefined) p.pm2AppName = payload.pm2AppName
@@ -411,6 +452,7 @@ function applyProjectToForm() {
   formData.value.preDeploy = p.preDeploy || ''
   formData.value.postDeploy = p.postDeploy || ''
   formData.value.postDeployAsync = Boolean((p as any).postDeployAsync)
+  formData.value.allowCliHooks = Boolean((p as any).allowCliHooks)
   formData.value.categoryId = p.categoryId || ''
   formData.value.pm2AppName = (p as any).pm2AppName || ''
   formData.value.tagIds = Array.isArray((p as any).tagIds) ? [...(p as any).tagIds] : []
@@ -1599,7 +1641,30 @@ function switchTab(tab: DetailTab) {
             </label>
           </div>
 
-          <div class="pt-4 border-t border-border flex justify-end">
+          <div class="pt-4 border-t border-border">
+            <label class="flex items-start space-x-2 cursor-pointer select-none">
+              <input
+                v-model="formData.allowCliHooks"
+                type="checkbox"
+                class="mt-0.5 w-4 h-4 rounded border-border bg-base text-primary focus:ring-1 focus:ring-primary/50"
+              />
+              <span class="text-xs text-textMuted leading-relaxed">
+                <span class="text-textMain font-medium">{{ t('project.detail.allowCliHooksLabel') }}</span>
+                {{ t('project.detail.allowCliHooksHint') }}
+              </span>
+            </label>
+          </div>
+
+          <div class="pt-4 border-t border-border flex items-center justify-between gap-3">
+            <button
+              @click="openFillRecent"
+              :disabled="isLoadingRecentScripts"
+              class="flex items-center px-4 py-2 text-sm text-textMuted hover:text-textMain border border-border hover:border-textMuted/50 rounded-md transition-all disabled:opacity-50"
+            >
+              <RefreshCw v-if="isLoadingRecentScripts" class="w-4 h-4 mr-2 animate-spin" />
+              <History v-else class="w-4 h-4 mr-2" />
+              {{ t('project.detail.fillRecentBtn') }}
+            </button>
             <button 
               @click="saveScripts"
               :disabled="isSavingScripts"
@@ -1873,6 +1938,35 @@ function switchTab(tab: DetailTab) {
       :loading="isRollingBack"
       @confirm="confirmRollback"
     />
+
+    <ConfirmDialog
+      v-model:open="showFillRecentConfirm"
+      tone="warning"
+      :title="t('project.detail.fillRecentConfirmTitle')"
+      :message="t('project.detail.fillRecentConfirmMessage')"
+      :confirm-text="t('project.detail.fillRecentApplyBtn')"
+      :cancel-text="t('project.detail.cancel')"
+      :loading="isApplyingRecentScripts"
+      @confirm="confirmFillRecent"
+    >
+      <div v-if="recentScripts" class="mt-4 space-y-3">
+        <div class="text-xs text-textMuted">
+          {{ t('project.detail.fillRecentSource') }}
+          <span class="text-textMain font-medium">
+            {{ recentScripts.source === 'structured' ? t('project.detail.fillRecentSourceStructured') : t('project.detail.fillRecentSourceParsed') }}
+          </span>
+          <span v-if="recentScripts.deployedAt"> · {{ recentScripts.deployedAt }}</span>
+        </div>
+        <div>
+          <div class="text-xs font-medium text-textMain mb-1">{{ t('project.detail.preDeployLabel') }}</div>
+          <pre class="bg-base border border-border rounded-md px-3 py-2 text-xs font-mono text-success whitespace-pre-wrap break-all max-h-32 overflow-auto">{{ recentScripts.preDeploy || t('project.detail.fillRecentEmpty') }}</pre>
+        </div>
+        <div>
+          <div class="text-xs font-medium text-textMain mb-1">{{ t('project.detail.postDeployLabel') }}</div>
+          <pre class="bg-base border border-border rounded-md px-3 py-2 text-xs font-mono text-success whitespace-pre-wrap break-all max-h-32 overflow-auto">{{ recentScripts.postDeploy || t('project.detail.fillRecentEmpty') }}</pre>
+        </div>
+      </div>
+    </ConfirmDialog>
   </div>
 
   <div v-else class="max-w-7xl mx-auto py-16 text-center space-y-4">

@@ -22,6 +22,7 @@ const initDb = async () => {
       pre_deploy_script TEXT,
       post_deploy_script TEXT,
       post_deploy_async INTEGER DEFAULT 0,
+      allow_cli_hooks INTEGER DEFAULT 0,
       env TEXT,
       status TEXT DEFAULT 'idle',
       created_at TEXT NOT NULL,
@@ -47,6 +48,9 @@ const initDb = async () => {
 
   // Migration: add pm2_app_name for PM2 process resource binding
   try { await client.execute(`ALTER TABLE projects ADD COLUMN pm2_app_name TEXT`); } catch { /* exists */ }
+
+  // Migration: add allow_cli_hooks (默认 0，禁止 CLI 内联脚本，避免 Token 泄漏导致任意命令执行)
+  try { await client.execute(`ALTER TABLE projects ADD COLUMN allow_cli_hooks INTEGER DEFAULT 0`); } catch { /* exists */ }
 
   await client.execute(`
     CREATE TABLE IF NOT EXISTS categories (
@@ -158,6 +162,8 @@ const initDb = async () => {
       trigger_source TEXT NOT NULL,
       duration TEXT,
       output TEXT,
+      pre_deploy_script TEXT,
+      post_deploy_script TEXT,
       start_time TEXT NOT NULL,
       end_time TEXT
     );
@@ -167,6 +173,9 @@ const initDb = async () => {
   try { await client.execute(`ALTER TABLE deployments ADD COLUMN artifact_path TEXT`); } catch { /* exists */ }
   try { await client.execute(`ALTER TABLE deployments ADD COLUMN artifact_size INTEGER`); } catch { /* exists */ }
   try { await client.execute(`ALTER TABLE deployments ADD COLUMN rollback_of TEXT`); } catch { /* exists */ }
+  // Migration: hook 命令快照（供「一键填入最近成功指令」）
+  try { await client.execute(`ALTER TABLE deployments ADD COLUMN pre_deploy_script TEXT`); } catch { /* exists */ }
+  try { await client.execute(`ALTER TABLE deployments ADD COLUMN post_deploy_script TEXT`); } catch { /* exists */ }
   await client.execute(`CREATE INDEX IF NOT EXISTS idx_deployments_artifact_path ON deployments(artifact_path);`);
   await client.execute(`CREATE INDEX IF NOT EXISTS idx_deployments_project_id ON deployments(project_id);`);
   await client.execute(`CREATE INDEX IF NOT EXISTS idx_deployments_start_time ON deployments(start_time);`);

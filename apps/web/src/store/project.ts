@@ -13,6 +13,7 @@ export interface Project {
   preDeployScript?: string
   postDeployScript?: string
   postDeployAsync?: boolean
+  allowCliHooks?: boolean
   token?: string
   env?: string
   cleanMode?: 'merge' | 'clean' | 'clean-all' | null
@@ -105,6 +106,8 @@ export interface DeploymentLog {
   triggerSource: string
   duration: string
   output: string
+  preDeployScript?: string | null
+  postDeployScript?: string | null
   startTime: string
   endTime?: string
   artifactPath?: string | null
@@ -132,6 +135,17 @@ export interface CleanPreviewResult {
   }
   mode: 'merge' | 'clean' | 'clean-all'
   cached?: boolean
+}
+
+export interface RecentScriptsResult {
+  current: { preDeploy: string | null; postDeploy: string | null }
+  recent: {
+    deployId: string
+    deployedAt: string
+    source: 'structured' | 'parsed' | 'none'
+    preDeploy: string | null
+    postDeploy: string | null
+  } | null
 }
 
 export const useProjectStore = defineStore('project', () => {
@@ -179,6 +193,7 @@ export const useProjectStore = defineStore('project', () => {
       destPath: p.deployPath,
       preDeploy: p.preDeployScript,
       postDeploy: p.postDeployScript,
+      allowCliHooks: Boolean(p.allowCliHooks),
       env: p.env || '',
       cleanMode: p.cleanMode ?? null,
       protectPaths: p.protectPaths ?? null,
@@ -296,6 +311,7 @@ export const useProjectStore = defineStore('project', () => {
       if (payload.preDeploy !== undefined) apiPayload.preDeployScript = payload.preDeploy
       if (payload.postDeploy !== undefined) apiPayload.postDeployScript = payload.postDeploy
       if (payload.postDeployAsync !== undefined) apiPayload.postDeployAsync = Boolean(payload.postDeployAsync)
+      if (payload.allowCliHooks !== undefined) apiPayload.allowCliHooks = Boolean(payload.allowCliHooks)
       if (payload.destPath !== undefined) apiPayload.deployPath = payload.destPath
       if (payload.cleanMode !== undefined) apiPayload.cleanMode = payload.cleanMode
       if (payload.protectPaths !== undefined) apiPayload.protectPaths = payload.protectPaths
@@ -327,6 +343,10 @@ export const useProjectStore = defineStore('project', () => {
       method: 'POST',
       body: JSON.stringify(payload),
     }) as CleanPreviewResult
+  }
+
+  async function fetchRecentScripts(id: string) {
+    return await apiFetch(`/projects/${id}/recent-scripts`) as RecentScriptsResult
   }
 
   async function rollbackDeployment(deploymentId: string) {
@@ -850,6 +870,7 @@ export const useProjectStore = defineStore('project', () => {
     updateProject,
     removeProject,
     cleanPreview,
+    fetchRecentScripts,
     rollbackDeployment,
     markDeploymentStatus,
     fetchDiskOverview,

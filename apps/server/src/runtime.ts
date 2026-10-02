@@ -46,6 +46,28 @@ const KITE_INTERNAL_ENV_KEYS = [
   'KITE_ARTIFACT_KEEP_N',
 ] as const;
 
+// 危险 env 键：只对调用方传入的 overrides 生效（继承的 base env 需保留 PATH 等）。
+// 避免 CLI 借 body.env 劫持子进程（加载恶意库 / 覆盖可执行文件查找路径等）。
+const DANGEROUS_ENV_KEYS = new Set([
+  'PATH',
+  'SHELL',
+  'IFS',
+  'ENV',
+  'BASH_ENV',
+  'CDPATH',
+  'ZDOTDIR',
+  'LD_PRELOAD',
+  'LD_LIBRARY_PATH',
+  'DYLD_INSERT_LIBRARIES',
+  'DYLD_LIBRARY_PATH',
+  'NODE_OPTIONS',
+  'PYTHONSTARTUP',
+  'PYTHONPATH',
+  'PERL5OPT',
+  'RUBYOPT',
+  'GIT_SSH_COMMAND',
+]);
+
 function buildChildEnv(overrides?: Record<string, string>): Record<string, string> {
   const base: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env)) {
@@ -53,7 +75,13 @@ function buildChildEnv(overrides?: Record<string, string>): Record<string, strin
     if ((KITE_INTERNAL_ENV_KEYS as readonly string[]).includes(k)) continue;
     base[k] = v;
   }
-  return overrides ? { ...base, ...overrides } : base;
+  if (!overrides) return base;
+  const safeOverrides: Record<string, string> = {};
+  for (const [k, v] of Object.entries(overrides)) {
+    if (DANGEROUS_ENV_KEYS.has(k.toUpperCase())) continue;
+    safeOverrides[k] = v;
+  }
+  return { ...base, ...safeOverrides };
 }
 
 export async function spawn(cmd: string, args: string[], options: { cwd?: string; env?: Record<string, string> }): Promise<SpawnResult> {

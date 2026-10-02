@@ -87,6 +87,7 @@ export interface AuditContext {
 
 export interface AuditPayload {
   action: string;
+  actor?: string;
   targetType?: string;
   targetId?: string;
   targetName?: string;
@@ -123,6 +124,7 @@ export async function writeAudit(ctx: AuditContext, payload: AuditPayload): Prom
   try {
     await db.auditLogs.create({
       action: payload.action,
+      actor: payload.actor,
       targetType: payload.targetType ?? null,
       targetId: payload.targetId ?? null,
       targetName: payload.targetName ?? null,

@@ -342,7 +342,7 @@ onBeforeUnmount(() => {
       <div class="flex-1 overflow-auto p-4 sm:p-6 md:p-8">
         <router-view v-slot="{ Component }">
           <transition name="fade" mode="out-in">
-            <component :is="Component" :key="route.fullPath" />
+            <component :is="Component" :key="route.path" />
           </transition>
         </router-view>
       </div>

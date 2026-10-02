@@ -102,6 +102,7 @@ Authorization: Bearer <YOUR_ADMIN_TOKEN>
     "postDeployScript": "string",  // 可选
     "deployPath": "string",        // 可选
     "postDeployAsync": false,      // 可选；true 时 postDeploy 异步执行（fire-and-forget），默认 false 保留旧行为
+    "allowCliHooks": false,        // 可选；是否允许 CLI 在上传请求体中内联提交 pre/post 脚本。默认 false（拒绝内联脚本，见 4.4）
     "categoryId": "string|null",   // 可选
     "pm2AppName": "string|null",   // 可选；传空字符串等同于解绑（null）
     "tagIds": ["string"]           // 可选；传入即覆盖该项目的全部标签关联
@@ -139,6 +140,38 @@ Authorization: Bearer <YOUR_ADMIN_TOKEN>
     "token": "kt_1a2b3c4d5e6f7g8h"
   }
   ```
+
+### 2.7 获取最近成功部署的脚本
+用于「一键填入最近成功的指令」：返回项目当前配置的脚本，以及最近一次成功部署实际生效的 pre/post 脚本快照。
+
+* **URL**: `/api/projects/:id/recent-scripts`
+* **Method**: `GET`
+* **Headers**: `Authorization: Bearer <ADMIN_TOKEN>`
+* **Response**:
+  ```json
+  {
+    "current": { "preDeploy": "string|null", "postDeploy": "string|null" },
+    "recent": {
+      "deployId": "log_9x8f7a",
+      "deployedAt": "2026-10-02T12:00:00.000Z",
+      "source": "structured",
+      "preDeploy": "string|null",
+      "postDeploy": "string|null"
+    }
+  }
+  ```
+  * `source`: `structured`（来自部署行的结构化快照）/ `parsed`（从历史部署日志回退解析）/ `none`（无记录）。
+  * `recent` 为 `null` 时表示该项目没有任何成功部署记录。
+
+### 2.8 批量操作项目
+* **URL**: `/api/projects/bulk`
+* **Method**: `POST`
+* **Headers**: `Authorization: Bearer <ADMIN_TOKEN>`
+* **Body**: `{ "ids": ["string"], "action": "string", ... }`（单次最多 200 个 id）
+  * `action = "setAllowCliHooks"`：额外传 `"allowCliHooks": boolean`，批量开启/关闭项目的内联脚本开关。
+  * `action = "previewLatestScripts"`：只读预览每个项目最近成功部署的脚本，返回 `{ items, failed }`，`items[]` 含 `{ id, name, source, preDeploy, postDeploy, deployId, deployedAt }`。
+  * `action = "applyLatestScripts"`：把最近成功部署的 pre/post 指令回填到各项目配置，返回 `{ success, skipped, failed }`。无有效记录的项进入 `skipped`。
+  * 其余既有 action：`delete` / `setCategory` / `addTags` / `removeTags`。
 
 ---
 
@@ -237,10 +270,12 @@ Authorization: Bearer <YOUR_ADMIN_TOKEN>
 * **FormData 参数**:
   * `file`: 压缩包文件 (File)
   * `projectId`: 项目 ID (String)
-  * `preDeploy`: 前置脚本，**当项目未配置 `preDeployScript` 时才生效** (String, 可选)。项目在 Web 端配置了 `preDeployScript` 时，本字段被忽略，部署日志会打印 `Pre-deploy: using platform script (CLI-provided script ignored)`。
-  * `postDeploy`: 后置脚本，**当项目未配置 `postDeployScript` 时才生效** (String, 可选)。覆盖规则同 `preDeploy`。
-  * `postDeployAsync`: 单次部署的 async 覆盖 (String, 可选；接受 `"true"|"false"|"1"|"0"`)。**当 Web 端项目设置未开启 `postDeployAsync` 时才生效**：CLI 传 `true` 时本次部署异步执行；CLI 传 `false` 同步执行。Web 端开启 `postDeployAsync`（true）时强制异步，CLI `false` 被忽略（部署日志会打印 `Post-deploy async: forced by platform config (CLI flag ignored)`）。
-  * `env`: 部署时注入到 pre/post 脚本的环境变量，**JSON 字符串** 形式 (String, 可选)
+  * `preDeploy`: 前置脚本 (String, 可选)。**仅当项目开启 `allowCliHooks` 且未配置平台 `preDeployScript` 时才会执行**；否则被忽略，部署日志会打印 `Pre-deploy: using platform script (CLI-provided script ignored)`。
+  * `postDeploy`: 后置脚本 (String, 可选)。覆盖规则同 `preDeploy`。
+  * `postDeployAsync`: 单次部署的 async 覆盖 (String, 可选；接受 `"true"|"false"|"1"|"0"`)。**必须项目开启 `allowCliHooks` 才生效**，且当 Web 端项目设置未开启 `postDeployAsync` 时才生效：CLI 传 `true` 时本次部署异步执行；CLI 传 `false` 同步执行。Web 端开启 `postDeployAsync`（true）时强制异步，CLI `false` 被忽略（部署日志会打印 `Post-deploy async: forced by platform config (CLI flag ignored)`）。
+  * `env`: 部署时注入到 pre/post 脚本的环境变量，**JSON 字符串** 形式 (String, 可选)。危险键（`PATH`/`LD_PRELOAD`/`NODE_OPTIONS`/`BASH_ENV`/`IFS` 等）会被服务端过滤。
+
+* **安全约束（默认拒绝内联脚本）**：当项目 `allowCliHooks` 为 `false`（默认，含存量项目）时，请求体若携带非空的 `preDeploy` / `postDeploy`，接口直接返回 **403**，错误信息为 `CLI inline hook scripts are disabled for this project. Enable "allow CLI hooks" in project settings, or configure a platform script (preDeployScript / postDeployScript).`。这是为了避免 Deploy Token 泄漏后演变为任意命令执行（RCE）；内联 `postDeployAsync` 在未开启时会被静默忽略（回退为 `false`）。开启方式见 `PUT /api/projects/:id` 的 `allowCliHooks`，或在管理端项目设置中勾选「允许 CLI 内联脚本」。
 * **Response**: NDJSON 流（`Content-Type: application/x-ndjson`），每行一个 JSON 对象：
 
   ```json
