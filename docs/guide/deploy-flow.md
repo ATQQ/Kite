@@ -79,6 +79,10 @@ Server 会：
 >
 > 第 2 步创建部署日志时会记录发起本次部署的来源 IP（`actorIp`，best-effort）：反向代理场景取 `X-Forwarded-For`（首段）/ `X-Real-IP`，直连时取 TCP 对端地址，无法解析时为 `null`。CLI `kite push` 与 Web 端「回滚」都会记录，可在「部署日志」列表项与详情中查看。若使用 Nginx 反代，请确保按下方模板透传 `X-Forwarded-For` / `X-Real-IP`，否则记录到的将是代理自身地址。
 
+> **IP 白名单拦截 push / 回滚**
+>
+> 在「设置 → 终端与部署 IP 白名单」配置来源 IP（支持 IPv4 / IPv6 / CIDR）后，除 Web 终端外，CLI `kite push` 部署（`POST /api/deploy/upload`）与 Web 端「回滚」也会受同一名单约束：来源 IP 不在名单内时返回 `403`（`code: IP_NOT_ALLOWED`），并分别写入 `deploy.denied` / `rollback.denied` 审计记录。名单留空表示不启用。判定使用与 `actorIp` 相同的来源 IP（反代取 `X-Forwarded-For` / `X-Real-IP`，直连取 TCP 对端），因此需部署在可信反向代理之后。注意：启用后若自身 IP 未列入名单，将无法 push / 回滚 / 使用终端，但仍可登录后台修改名单。
+
 ## 运行日志与 PM2 应用
 
 Web 管理端的「运行日志」页面用于查看项目关联的日志文件（PM2 stdout/stderr、自定义日志等），支持实时跟随、历史分页浏览与关键词/正则搜索。

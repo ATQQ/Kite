@@ -49,6 +49,9 @@ const actionOptions = [
   { value: 'migration.export', label: '导出迁移包' },
   { value: 'migration.import', label: '导入迁移包' },
   { value: 'auth.login_failed', label: '登录失败' },
+  { value: 'deploy.denied', label: '部署被 IP 白名单拒绝' },
+  { value: 'rollback.denied', label: '回滚被 IP 白名单拒绝' },
+  { value: 'terminal.denied', label: '终端被 IP 白名单拒绝' },
 ]
 
 const actionLabel = (action: string) => {
@@ -57,6 +60,7 @@ const actionLabel = (action: string) => {
 
 const actionTone = (action: string) => {
   if (action.endsWith('.delete')) return 'text-danger bg-danger/10 border-danger/30'
+  if (action.endsWith('.denied')) return 'text-danger bg-danger/10 border-danger/30'
   if (action.endsWith('.create')) return 'text-success bg-success/10 border-success/30'
   if (action.includes('token') || action.includes('admin_token')) return 'text-yellow-400 bg-yellow-400/10 border-yellow-400/30'
   if (action.startsWith('migration.')) return 'text-primary bg-primary/10 border-primary/30'

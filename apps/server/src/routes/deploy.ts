@@ -31,6 +31,7 @@ import {
 } from '../lib/auth.js';
 import { notifyDeployment } from '../lib/webhook.js';
 import { resolveActorIp } from '../lib/client-ip.js';
+import { checkIpAllowlist } from '../lib/ip-guard.js';
 
 const deployLog = moduleLogger('deploy');
 
@@ -901,6 +902,23 @@ export const deployRoutes = new Elysia()
         return { error: 'Project ID mismatch' };
       }
 
+      // IP 白名单：与 Web 终端共用一份（terminal.ipAllowlist），空 = 不启用。
+      const ipCheck = await checkIpAllowlist(headers as any);
+      if (ipCheck.enabled && !ipCheck.allowed) {
+        const deniedIp = ipCheck.ip || 'unknown';
+        set.status = 403;
+        await writeAudit({ headers: headers as any, ip: ipCheck.ip || undefined }, {
+          action: 'deploy.denied',
+          targetType: 'deployment',
+          targetId: project.id,
+          targetName: project.name,
+          summary: `部署被 IP 白名单拒绝：${deniedIp}`,
+          status: 'failed',
+          errorMessage: `IP ${deniedIp} 不在白名单中`,
+        });
+        return { error: 'IP not allowed', code: 'IP_NOT_ALLOWED' };
+      }
+
       // 权限闸门：默认禁止 CLI 内联脚本，避免 Deploy Token 泄漏导致任意命令执行。
       // 仅 gate 内联 pre/post 脚本；平台脚本始终可运行；body.env 不 gate（危险键由 runtime 过滤）。
       const allowCliHooks = Boolean(project.allowCliHooks);
@@ -1528,6 +1546,22 @@ export const deployRoutes = new Elysia()
   })
   .post('/api/deployments/:id/rollback', async ({ headers, params, set }) => {
     if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
+
+    // IP 白名单：与 Web 终端 / push 共用一份（terminal.ipAllowlist），空 = 不启用。
+    const ipCheck = await checkIpAllowlist(headers as any);
+    if (ipCheck.enabled && !ipCheck.allowed) {
+      const deniedIp = ipCheck.ip || 'unknown';
+      set.status = 403;
+      await writeAudit({ headers: headers as any, ip: ipCheck.ip || undefined }, {
+        action: 'rollback.denied',
+        targetType: 'deployment',
+        targetId: params.id,
+        summary: `回滚被 IP 白名单拒绝：${deniedIp}`,
+        status: 'failed',
+        errorMessage: `IP ${deniedIp} 不在白名单中`,
+      });
+      return { error: 'IP not allowed', code: 'IP_NOT_ALLOWED' };
+    }
 
     const source = await db.deployments.findById(params.id);
     if (!source) { set.status = 404; return { error: 'Deployment not found' }; }

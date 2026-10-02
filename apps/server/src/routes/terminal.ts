@@ -2,8 +2,9 @@ import { Elysia } from 'elysia';
 import { verifyAdminToken, verifyAdminTokenValue, safeEqual, loginGuard, loginFailure, loginSuccess } from '../lib/auth.js';
 import { writeAudit } from '../lib/audit.js';
 import { db } from '../db/index.js';
-import { resolveClientIp } from '../lib/client-ip.js';
+import { detectClientIp, resolveClientIp } from '../lib/client-ip.js';
 import { ipAllowed, parseAllowlist } from '../lib/ip-allowlist.js';
+import { loadIpAllowlist, saveIpAllowlist } from '../lib/ip-guard.js';
 import {
   loadPty,
   isPlatformSupported,
@@ -19,24 +20,7 @@ import { moduleLogger } from '../lib/logger.js';
 
 const termLog = moduleLogger('terminal-route');
 
-export const TERMINAL_ALLOWLIST_KEY = 'terminal.ipAllowlist';
 export const TERMINAL_SUBPROTOCOL = 'kite-admin-token';
-
-export async function loadTerminalAllowlist(): Promise<string[]> {
-  try {
-    const raw = await db.settings.get(TERMINAL_ALLOWLIST_KEY);
-    if (!raw) return [];
-    const v = JSON.parse(raw);
-    if (Array.isArray(v)) return v.map((x) => String(x)).filter(Boolean);
-    return [];
-  } catch {
-    return [];
-  }
-}
-
-async function saveTerminalAllowlist(entries: string[]): Promise<void> {
-  await db.settings.set(TERMINAL_ALLOWLIST_KEY, JSON.stringify(entries));
-}
 
 export const terminalRoutes = new Elysia()
   .get('/api/terminal/whoami', ({ request, headers, set }) => {
@@ -58,7 +42,7 @@ export const terminalRoutes = new Elysia()
     if (!verifyAdminToken(headers as any)) { set.status = 401; return { error: 'Unauthorized' }; }
     const platformOk = isPlatformSupported();
     const load = platformOk ? await loadPty() : { available: false, error: `当前平台不支持终端能力：${process.platform}` };
-    const allowlist = await loadTerminalAllowlist();
+    const allowlist = await loadIpAllowlist();
     const counts = listSessionsCounts();
     return {
       available: load.available,
@@ -74,7 +58,7 @@ export const terminalRoutes = new Elysia()
   })
   .get('/api/terminal/allowlist', async ({ headers, set }) => {
     if (!verifyAdminToken(headers as any)) { set.status = 401; return { error: 'Unauthorized' }; }
-    const allowlist = await loadTerminalAllowlist();
+    const allowlist = await loadIpAllowlist();
     const { invalid } = parseAllowlist(allowlist);
     return { entries: allowlist, invalid };
   })
@@ -96,8 +80,8 @@ export const terminalRoutes = new Elysia()
       set.status = 400;
       return { error: `存在无效的 IP / CIDR：${invalid.join(', ')}` };
     }
-    const before = await loadTerminalAllowlist();
-    await saveTerminalAllowlist(normalized);
+    const before = await loadIpAllowlist();
+    await saveIpAllowlist(normalized);
     await writeAudit({ headers: headers as any }, {
       action: 'terminal.allowlist.update',
       targetType: 'settings',
@@ -147,7 +131,7 @@ export async function decideTerminalUpgrade(ctx: TerminalUpgradeContext): Promis
   }
   // 2. Origin check — only enforced when an IP allowlist is configured (defense-in-depth).
   //    Skipped otherwise to avoid false rejections behind reverse proxies.
-  const allowlist = await loadTerminalAllowlist();
+  const allowlist = await loadIpAllowlist();
   if (allowlist.length > 0 && ctx.origin && ctx.expectedOrigin) {
     try {
       const a = new URL(ctx.origin);
@@ -169,12 +153,11 @@ export async function decideTerminalUpgrade(ctx: TerminalUpgradeContext): Promis
   }
   const token = subs[protoIdx + 1];
 
-  // 4. Resolve client IP
-  const ipInfo = resolveClientIp({
-    socketRemoteAddress: ctx.socketRemoteAddress || undefined,
+  // 4. Resolve client IP — forwarded header first, then TCP peer (consistent with actorIp).
+  const ip = detectClientIp({
+    socketRemoteAddress: ctx.socketRemoteAddress || null,
     headers: ctx.headers,
-  });
-  const ip = ipInfo.socketIp || ipInfo.forwardedIp || 'unknown';
+  }) || 'unknown';
 
   // 5. Brute-force guard
   const guard = await loginGuard(ip);
@@ -192,7 +175,7 @@ export async function decideTerminalUpgrade(ctx: TerminalUpgradeContext): Promis
 
   // 7. IP allowlist check (allowlist already loaded at step 2)
   if (allowlist.length > 0 && !ipAllowed(ip, allowlist)) {
-    await writeAudit({ headers: ctx.headers as any }, {
+    await writeAudit({ headers: ctx.headers as any, ip: ip === 'unknown' ? undefined : ip }, {
       action: 'terminal.denied',
       targetType: 'terminal',
       summary: `终端访问被 IP 白名单拒绝：${ip}`,
