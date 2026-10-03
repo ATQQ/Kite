@@ -308,7 +308,6 @@ export default {
       searchClear: 'Clear search',
       filters: 'Filters',
       display: 'Display',
-      filterDone: 'Done',
       clearFiltersAll: 'Clear all filters',
       matchCount: '{n} projects match',
       activeFilters: '{n} filters active',

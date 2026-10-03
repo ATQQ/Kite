@@ -308,7 +308,6 @@ export default {
       searchClear: '清空搜索',
       filters: '筛选',
       display: '显示',
-      filterDone: '完成',
       clearFiltersAll: '清空全部筛选',
       matchCount: '匹配 {n} 个项目',
       activeFilters: '已启用 {n} 个筛选条件',

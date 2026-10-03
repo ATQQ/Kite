@@ -3,7 +3,7 @@ import { computed, ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useProjectStore, type CleanPreviewResult, type DeploymentLog, type Pm2AppStatus, type RecentScriptsResult } from '../store/project'
-import { ArrowLeft, Save, Key, Copy, RefreshCw, Trash2, CheckCircle2, TerminalSquare, FolderOpen, AlertTriangle, XCircle, ScrollText, Eye, Shield, ShieldAlert, Plus, History, RotateCcw, Archive, ArchiveX, CheckCheck, FileText, Activity, Cpu, MemoryStick, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Pencil, Check, SlidersHorizontal, LayoutDashboard, Star } from 'lucide-vue-next'
+import { ArrowLeft, Save, Key, Copy, RefreshCw, Trash2, CheckCircle2, TerminalSquare, FolderOpen, AlertTriangle, XCircle, ScrollText, Eye, Shield, ShieldAlert, Plus, History, RotateCcw, Archive, ArchiveX, CheckCheck, FileText, Activity, Cpu, MemoryStick, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Pencil, Check, SlidersHorizontal, LayoutDashboard, Pin } from 'lucide-vue-next'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import CleanPreviewDialog from '../components/CleanPreviewDialog.vue'
 import ProjectTagsEditor from '../components/ProjectTagsEditor.vue'
@@ -910,7 +910,7 @@ function switchTab(tab: DetailTab) {
             :class="isPinned ? 'border-primary/50 text-primary' : 'border-border text-textMuted hover:border-primary/50 hover:text-primary'"
             :title="isPinned ? t('project.detail.unpin') : t('project.detail.pin')"
           >
-            <Star class="w-3.5 h-3.5 mr-1.5" :class="isPinned ? 'fill-current' : ''" />
+            <Pin class="w-3.5 h-3.5 mr-1.5" :class="isPinned ? 'fill-current' : ''" />
             {{ isPinned ? t('project.detail.pinned') : t('project.detail.pin') }}
           </button>
           <router-link

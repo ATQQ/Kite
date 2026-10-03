@@ -4,7 +4,7 @@ import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useProjectStore } from '../store/project'
 import type { Category, Tag as TagType, Project, ProjectSavedView, ProjectViewConfig } from '../store/project'
-import { Plus, MoreVertical, Server, Clock, ScrollText, FolderPlus, Trash2, RefreshCw, XCircle, AlertTriangle, Pencil, FolderOpen, LayoutGrid, List as ListIcon, Tag, FolderTree, ChevronRight, Tags as TagsIcon, X as XIcon, Activity, CheckSquare, Square, MinusSquare, History, ShieldCheck, ShieldOff, Search, SlidersHorizontal, Star, Bookmark, BookmarkPlus, ArrowUpDown } from 'lucide-vue-next'
+import { Plus, MoreVertical, Server, Clock, ScrollText, FolderPlus, Trash2, RefreshCw, XCircle, AlertTriangle, Pencil, FolderOpen, LayoutGrid, List as ListIcon, Tag, FolderTree, ChevronRight, Tags as TagsIcon, X as XIcon, Activity, CheckSquare, Square, MinusSquare, History, ShieldCheck, ShieldOff, Search, SlidersHorizontal, Pin, Bookmark, BookmarkPlus, ArrowUpDown } from 'lucide-vue-next'
 import { useToast } from '../composables/useToast'
 import FolderPickerDialog from '../components/FolderPickerDialog.vue'
 import ProjectTagsEditor from '../components/ProjectTagsEditor.vue'
@@ -66,6 +66,10 @@ const viewMode = ref<LayoutMode>(initialQuery.layout)
 const searchInputEl = ref<HTMLInputElement | null>(null)
 const filtersOpen = ref(false)
 const displayOpen = ref(false)
+const filtersButtonEl = ref<HTMLElement | null>(null)
+const displayButtonEl = ref<HTMLElement | null>(null)
+const filterPanelEl = ref<HTMLElement | null>(null)
+const displayPanelEl = ref<HTMLElement | null>(null)
 let applyingFromRoute = false
 let urlSyncTimer: number | undefined
 
@@ -155,9 +159,43 @@ function onGlobalKeydown(e: KeyboardEvent) {
     return
   }
   if (e.key === 'Escape') {
+    if (showFolderPicker.value) {
+      showFolderPicker.value = false
+      return
+    }
+    if (showBatchModal.value) {
+      closeBatchModal()
+      return
+    }
+    if (showCreateModal.value) {
+      showCreateModal.value = false
+      return
+    }
+    if (showCategoryModal.value) {
+      showCategoryModal.value = false
+      return
+    }
+    if (showTagModal.value) {
+      showTagModal.value = false
+      return
+    }
     if (target === searchInputEl.value && searchQuery.value) searchQuery.value = ''
     if (filtersOpen.value) filtersOpen.value = false
     if (displayOpen.value) displayOpen.value = false
+  }
+}
+
+function containsTarget(target: EventTarget | null, el: HTMLElement | null): boolean {
+  return !!el && target instanceof Node && el.contains(target)
+}
+
+function onDocumentPointerDown(e: MouseEvent) {
+  const target = e.target
+  if (filtersOpen.value && !containsTarget(target, filterPanelEl.value) && !containsTarget(target, filtersButtonEl.value)) {
+    filtersOpen.value = false
+  }
+  if (displayOpen.value && !containsTarget(target, displayPanelEl.value) && !containsTarget(target, displayButtonEl.value)) {
+    displayOpen.value = false
   }
 }
 
@@ -190,6 +228,7 @@ async function restoreListContext() {
 
 onMounted(async () => {
   window.addEventListener('keydown', onGlobalKeydown)
+  window.addEventListener('mousedown', onDocumentPointerDown)
   await Promise.all([
     projectStore.fetchProjects(),
     projectStore.fetchCategories(),
@@ -201,6 +240,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onGlobalKeydown)
+  window.removeEventListener('mousedown', onDocumentPointerDown)
   if (urlSyncTimer) window.clearTimeout(urlSyncTimer)
 })
 
@@ -334,7 +374,7 @@ function clearSearch() {
 
 const quickViews = computed<Array<{ key: QuickView; label: string; icon: any }>>(() => ([
   { key: 'all', label: t('project.list.quickAll'), icon: LayoutGrid },
-  { key: 'pinned', label: t('project.list.quickPinned'), icon: Star },
+  { key: 'pinned', label: t('project.list.quickPinned'), icon: Pin },
   { key: 'recent', label: t('project.list.quickRecent'), icon: Clock },
   { key: 'undeployed', label: t('project.list.quickUndeployed'), icon: ShieldOff },
   { key: 'abnormal', label: t('project.list.quickAbnormal'), icon: AlertTriangle },
@@ -960,6 +1000,10 @@ function openPickerForAppend() {
   pickerForAppend.value = true
   showFolderPicker.value = true
 }
+
+watch(showFolderPicker, (open) => {
+  if (!open) pickerForAppend.value = false
+})
 
 function onPickerConfirm(paths: string[]) {
   if (pickerForAppend.value) {
@@ -1592,7 +1636,7 @@ async function confirmBulkFillRecent() {
 
 <template>
   <div class="max-w-7xl mx-auto">
-    <div class="flex flex-col md:flex-row md:justify-between md:items-center gap-3 mb-6">
+    <div class="flex flex-col md:flex-row md:justify-between md:items-center gap-3 mb-4 sm:mb-6 md:mb-8">
       <div>
         <h1 class="text-2xl font-bold text-textMain tracking-tight">{{ t('project.list.pageTitle') }}</h1>
         <p class="text-textMuted text-sm mt-1">{{ t('project.list.pageSubtitle') }}</p>
@@ -1632,7 +1676,7 @@ async function confirmBulkFillRecent() {
     </div>
 
     <!-- Sticky command bar -->
-    <div class="sticky top-0 z-30 -mt-4 sm:-mt-6 md:-mt-8 -mx-4 sm:-mx-6 md:-mx-8 mb-4 bg-base/95 border-b border-border">
+    <div class="sticky -top-4 sm:-top-6 md:-top-8 z-30 -mt-4 sm:-mt-6 md:-mt-8 -mx-4 sm:-mx-6 md:-mx-8 mb-4 bg-base/95 border-b border-border">
       <div class="absolute inset-0 backdrop-blur pointer-events-none" aria-hidden="true"></div>
       <div class="max-w-7xl mx-auto px-4 sm:px-6 md:px-8 py-3">
         <div class="relative">
@@ -1661,6 +1705,7 @@ async function confirmBulkFillRecent() {
               </button>
             </div>
             <button
+              ref="filtersButtonEl"
               type="button"
               @click="filtersOpen = !filtersOpen"
               :aria-expanded="filtersOpen"
@@ -1672,6 +1717,7 @@ async function confirmBulkFillRecent() {
               <span v-if="activeFilterCount" class="inline-flex items-center justify-center min-w-[1rem] h-4 px-1 rounded-full bg-primary text-white text-[10px]">{{ activeFilterCount }}</span>
             </button>
             <button
+              ref="displayButtonEl"
               type="button"
               @click="displayOpen = !displayOpen"
               :aria-expanded="displayOpen"
@@ -1742,6 +1788,7 @@ async function confirmBulkFillRecent() {
 
           <!-- Filter panel (bottom drawer on mobile, dropdown on desktop) -->
           <div
+            ref="filterPanelEl"
             v-if="filtersOpen"
             data-filter-panel
             role="dialog"
@@ -1875,14 +1922,12 @@ async function confirmBulkFillRecent() {
               >
                 {{ t('project.list.clearFiltersAll') }}
               </button>
-              <button type="button" @click="filtersOpen = false" class="px-4 py-2 text-sm font-medium bg-primary text-white rounded-md hover:bg-primary/90 transition-colors">
-                {{ t('project.list.filterDone') }}
-              </button>
             </div>
           </div>
 
           <!-- Display panel (sort / group / layout) -->
           <div
+            ref="displayPanelEl"
             v-if="displayOpen"
             role="dialog"
             :aria-label="t('project.list.display')"
@@ -1935,9 +1980,6 @@ async function confirmBulkFillRecent() {
                 </button>
               </div>
             </div>
-            <button type="button" @click="displayOpen = false" class="w-full px-4 py-2 text-sm font-medium bg-primary text-white rounded-md hover:bg-primary/90 transition-colors">
-              {{ t('project.list.filterDone') }}
-            </button>
           </div>
         </div>
       </div>
@@ -1946,7 +1988,7 @@ async function confirmBulkFillRecent() {
     <Teleport to="body">
       <div
         v-if="filtersOpen || displayOpen"
-        class="fixed inset-0 z-20 bg-black/50 sm:hidden"
+        class="fixed inset-0 z-20 bg-black/50 sm:bg-transparent"
         @click="filtersOpen = false; displayOpen = false"
       ></div>
     </Teleport>
@@ -1972,7 +2014,7 @@ async function confirmBulkFillRecent() {
               class="inline-flex items-center px-2 py-0.5 rounded text-[11px] border font-medium"
               :class="groupHeaderChipClass(g)"
             >
-              <Star v-if="g.pinned" class="w-3 h-3 mr-1 fill-current" />
+              <Pin v-if="g.pinned" class="w-3 h-3 mr-1 fill-current" />
               <FolderTree v-else-if="groupBy === 'category'" class="w-3 h-3 mr-1" />
               <Activity v-else class="w-3 h-3 mr-1" />
               {{ g.label }}
@@ -1982,14 +2024,15 @@ async function confirmBulkFillRecent() {
           </button>
           <div
             v-if="groupBy === 'none' || !isGroupCollapsed(g.key)"
-            class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6"
+            class="grid gap-4 sm:gap-6"
+            style="grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));"
           >
             <div
               v-for="project in g.projects"
               :key="project.id"
               :data-project-id="project.id"
               tabindex="-1"
-              class="group bg-panel border rounded-xl p-5 transition-all shadow-sm cursor-pointer relative overflow-hidden outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+              class="group bg-panel border rounded-xl p-5 transition-all shadow-sm cursor-pointer relative overflow-hidden outline-none focus-visible:ring-2 focus-visible:ring-primary/60 w-full max-w-[420px] justify-self-start"
               :class="bulk.isSelected(project.id) ? 'border-primary/60 ring-1 ring-primary/40' : 'border-border hover:border-primary/50'"
               @click="goToDetail(project.id)"
             >
@@ -2034,7 +2077,7 @@ async function confirmBulkFillRecent() {
                     :aria-pressed="Boolean(project.pinnedAt)"
                     @click.stop="togglePinned(project)"
                   >
-                    <Star class="w-4 h-4" :class="project.pinnedAt ? 'fill-current' : ''" />
+                    <Pin class="w-4 h-4" :class="project.pinnedAt ? 'fill-current' : ''" />
                   </button>
                   <div class="relative">
                     <button class="p-1 dark:hover:bg-white/10 hover:bg-black/10 rounded-md transition-colors text-textMuted hover:text-textMain" @click.stop="toggleDropdown(project.id, $event)">
@@ -2061,15 +2104,15 @@ async function confirmBulkFillRecent() {
                 />
               </div>
 
-              <div class="flex items-center justify-between border-t border-border pt-4 text-xs text-textMuted">
-                <div class="flex items-center" :title="project.lastDeployAt ? new Date(project.lastDeployAt).toLocaleString() : t('project.list.noDeploy')">
+              <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-border pt-4 text-xs text-textMuted">
+                <div class="flex shrink-0 items-center whitespace-nowrap" :title="project.lastDeployAt ? new Date(project.lastDeployAt).toLocaleString() : t('project.list.noDeploy')">
                   <Clock class="w-3.5 h-3.5 mr-1.5" />
                   <span>{{ formatRelativeTime(project.lastDeployAt) }}</span>
                 </div>
-                <div class="flex items-center space-x-3">
+                <div class="flex flex-wrap items-center gap-x-3 gap-y-2">
                   <button
                     @click.stop="goToLogs(project.id)"
-                    class="flex items-center text-textMuted hover:text-primary transition-colors"
+                    class="flex shrink-0 items-center whitespace-nowrap text-textMuted hover:text-primary transition-colors"
                     :title="t('project.list.deployLogTitle')"
                   >
                     <ScrollText class="w-3.5 h-3.5 mr-1" />
@@ -2077,13 +2120,13 @@ async function confirmBulkFillRecent() {
                   </button>
                   <button
                     @click.stop="goToRunLogs(project.id)"
-                    class="flex items-center text-textMuted hover:text-primary transition-colors"
+                    class="flex shrink-0 items-center whitespace-nowrap text-textMuted hover:text-primary transition-colors"
                     :title="t('project.list.runLogTitle')"
                   >
                     <Activity class="w-3.5 h-3.5 mr-1" />
                     <span>{{ t('project.list.runLog') }}</span>
                   </button>
-                  <span class="flex items-center" :class="project.status === 'success' ? 'text-success' : project.status === 'failed' ? 'text-danger' : 'text-primary'">
+                  <span class="flex shrink-0 items-center whitespace-nowrap" :class="project.status === 'success' ? 'text-success' : project.status === 'failed' ? 'text-danger' : 'text-primary'">
                     <span class="w-2 h-2 rounded-full mr-1.5" :class="project.status === 'success' ? 'bg-success shadow-[0_0_8px_#10b981]' : project.status === 'failed' ? 'bg-danger' : 'bg-primary'"></span>
                     {{ project.status === 'success' ? t('project.list.statusNormal') : project.status === 'failed' ? t('project.list.statusAbnormal') : t('project.list.statusIdle') }}
                   </span>
@@ -2144,7 +2187,7 @@ async function confirmBulkFillRecent() {
                     class="inline-flex items-center px-2 py-0.5 rounded text-[11px] border font-medium"
                     :class="groupHeaderChipClass(g)"
                   >
-                    <Star v-if="g.pinned" class="w-3 h-3 mr-1 fill-current" />
+                    <Pin v-if="g.pinned" class="w-3 h-3 mr-1 fill-current" />
                     <FolderTree v-else-if="groupBy === 'category'" class="w-3 h-3 mr-1" />
                     <Activity v-else class="w-3 h-3 mr-1" />
                     {{ g.label }}
@@ -2224,7 +2267,7 @@ async function confirmBulkFillRecent() {
                     :aria-pressed="Boolean(project.pinnedAt)"
                     @click.stop="togglePinned(project)"
                   >
-                    <Star class="w-4 h-4" :class="project.pinnedAt ? 'fill-current' : ''" />
+                    <Pin class="w-4 h-4" :class="project.pinnedAt ? 'fill-current' : ''" />
                   </button>
                   <button class="p-1 dark:hover:bg-white/10 hover:bg-black/10 rounded-md text-textMuted hover:text-textMain" @click.stop="toggleDropdown(project.id, $event)">
                     <MoreVertical class="w-4 h-4" />
@@ -2258,7 +2301,7 @@ async function confirmBulkFillRecent() {
             class="flex items-center w-full px-3 py-2 text-sm text-textMain hover:bg-white/5 transition-colors"
             @click="(() => { const p = projectStore.projects.find(x => x.id === openDropdownId); closeDropdown(); if (p) togglePinned(p) })()"
           >
-            <Star
+            <Pin
               class="w-3.5 h-3.5 mr-2"
               :class="projectStore.projects.find(x => x.id === openDropdownId)?.pinnedAt ? 'text-primary fill-current' : 'text-textMuted'"
             />
