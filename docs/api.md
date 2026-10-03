@@ -90,7 +90,7 @@ Authorization: Bearer <YOUR_ADMIN_TOKEN>
 ### 2.3 获取单个项目详情
 * **URL**: `/api/projects/:id`
 * **Method**: `GET`
-* **Response**: 返回单个项目对象（含 `categoryId / pm2AppName / tagIds`），如不存在则返回 404。
+* **Response**: 返回单个项目对象（含 `categoryId / pm2AppName / tagIds / pinnedAt / lastOpenedAt`），如不存在则返回 404。
 
 ### 2.4 更新项目配置
 * **URL**: `/api/projects/:id`
@@ -163,7 +163,63 @@ Authorization: Bearer <YOUR_ADMIN_TOKEN>
   * `source`: `structured`（来自部署行的结构化快照）/ `parsed`（从历史部署日志回退解析，兼容 `[Kite Deploy]` / `[Kite Rollback]` 及旧版 `[Deploy]` 前缀）/ `none`（无记录）。
   * `recent` 为 `null` 时表示该项目没有任何成功部署记录。
 
-### 2.8 批量操作项目
+### 2.8 置顶项目
+项目工作台的「置顶」是实例级状态，仅写入 `pinned_at`，不会修改项目的 `updatedAt`，也不产生高频审计日志。
+
+* **URL**: `/api/projects/:id/pin`
+* **Method**: `PUT`
+* **Headers**: `Authorization: Bearer <ADMIN_TOKEN>`
+* **Body**:
+  ```json
+  { "pinned": true }
+  ```
+  * `pinned: true` 写入当前时间到 `pinnedAt`；`pinned: false` 置为 `null`。
+* **Response**:
+  ```json
+  { "success": true, "project": { /* 更新后的项目对象 */ } }
+  ```
+  * 项目不存在返回 404，未认证返回 401。
+
+### 2.9 记录最近打开
+进入项目详情页时由前端调用，服务端写入当前时间到 `last_opened_at`，用于「最近打开」快捷视图。同样不修改 `updatedAt`。
+
+* **URL**: `/api/projects/:id/last-opened`
+* **Method**: `PUT`
+* **Headers**: `Authorization: Bearer <ADMIN_TOKEN>`
+* **Body**: 无（可传空对象 `{}`）
+* **Response**:
+  ```json
+  { "success": true, "project": { /* 更新后的项目对象 */ } }
+  ```
+
+### 2.10 项目工作台自定义视图
+保存搜索、筛选、排序、分组与布局配置，供工作台一键套用。配置只接受允许的状态键，服务端校验并存储 JSON，前端不拼接 SQL。
+
+* `GET /api/project-views` — 列出全部视图（按 `sortOrder`、`createdAt` 升序）
+* `POST /api/project-views` — 新建视图
+  * Body:
+    ```json
+    {
+      "name": "待发布前端",
+      "config": {
+        "quickView": "all|pinned|recent|undeployed|abnormal",
+        "q": "string",
+        "category": "all|default|<categoryId>",
+        "env": "all|default|<envName>",
+        "tags": ["tagId"],
+        "sort": "updated|created|name|lastDeploy",
+        "group": "none|category|env",
+        "layout": "card|list"
+      }
+    }
+    ```
+  * 名称限制 1–50 字符且唯一；最多保存 20 个视图。
+  * 未通过白名单校验的配置项会被归一化为默认值，未知字段会被丢弃。
+  * 名称重复返回 `409`，名称为空/超长或超出视图数量上限返回 `400`。
+* `PUT /api/project-views/:id` — 重命名或更新配置（`{ "name"?: string, "config"?: object }`）
+* `DELETE /api/project-views/:id` — 删除视图
+
+### 2.11 批量操作项目
 * **URL**: `/api/projects/bulk`
 * **Method**: `POST`
 * **Headers**: `Authorization: Bearer <ADMIN_TOKEN>`
@@ -656,4 +712,3 @@ Authorization: Bearer <YOUR_ADMIN_TOKEN>
   { "bound": true, "found": false, "name": "kite-web" }
   ```
 * **说明**: cluster 模式多实例会自动聚合（cpu/memory 求和，uptime 取最大）。结果在服务端有 1.5 秒短缓存，避免高频拉取。
-

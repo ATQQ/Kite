@@ -17,6 +17,8 @@ export const projects = sqliteTable('projects', {
   protectPaths: text('protect_paths'),       // JSON string array of globs
   categoryId: text('category_id'),           // nullable: NULL = 默认（未分类）
   pm2AppName: text('pm2_app_name'),          // nullable: 绑定的 PM2 应用名，用于拉取进程资源
+  pinnedAt: text('pinned_at'),               // nullable: 置顶时间，NULL = 未置顶
+  lastOpenedAt: text('last_opened_at'),      // nullable: 最近一次进入详情页的时间
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 });
@@ -83,6 +85,16 @@ export const projectTags = sqliteTable('project_tags', {
   projectId: text('project_id').references(() => projects.id).notNull(),
   tagId: text('tag_id').references(() => tags.id).notNull(),
   createdAt: text('created_at').notNull(),
+});
+
+// 项目工作台自定义视图（搜索、筛选、排序与展示配置）
+export const projectSavedViews = sqliteTable('project_saved_views', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull().unique(),
+  config: text('config').notNull(),          // JSON string
+  sortOrder: integer('sort_order').default(0),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
 });
 
 // CLI 匿名遥测事件（来自 packages/cli/src/telemetry.ts 上报）

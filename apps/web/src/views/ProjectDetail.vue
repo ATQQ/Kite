@@ -3,13 +3,14 @@ import { computed, ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useProjectStore, type CleanPreviewResult, type DeploymentLog, type Pm2AppStatus, type RecentScriptsResult } from '../store/project'
-import { ArrowLeft, Save, Key, Copy, RefreshCw, Trash2, CheckCircle2, TerminalSquare, FolderOpen, AlertTriangle, XCircle, ScrollText, Eye, Shield, ShieldAlert, Plus, History, RotateCcw, Archive, ArchiveX, CheckCheck, FileText, Activity, Cpu, MemoryStick, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Pencil, Check, SlidersHorizontal, LayoutDashboard } from 'lucide-vue-next'
+import { ArrowLeft, Save, Key, Copy, RefreshCw, Trash2, CheckCircle2, TerminalSquare, FolderOpen, AlertTriangle, XCircle, ScrollText, Eye, Shield, ShieldAlert, Plus, History, RotateCcw, Archive, ArchiveX, CheckCheck, FileText, Activity, Cpu, MemoryStick, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Pencil, Check, SlidersHorizontal, LayoutDashboard, Star } from 'lucide-vue-next'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import CleanPreviewDialog from '../components/CleanPreviewDialog.vue'
 import ProjectTagsEditor from '../components/ProjectTagsEditor.vue'
 import { useToast } from '../composables/useToast'
 import { useIntervalRaf } from '../composables/useIntervalRaf'
 import { BASE_PATH } from '../lib/base'
+import { readProjectListReturnContext } from '../utils/project-list-return'
 
 const route = useRoute()
 const router = useRouter()
@@ -19,6 +20,31 @@ const { t } = useI18n()
 
 const projectId = computed(() => String(route.params.id || ''))
 const project = computed(() => projectStore.getProjectById(projectId.value))
+const isPinned = computed(() => Boolean(project.value?.pinnedAt))
+const isTogglingPin = ref(false)
+const markedOpenedIds = new Set<string>()
+
+function goBackToList() {
+  const ctx = readProjectListReturnContext()
+  if (ctx && ctx.href.startsWith('/projects')) {
+    router.back()
+  } else {
+    router.replace('/projects')
+  }
+}
+
+async function togglePin() {
+  if (!project.value || isTogglingPin.value) return
+  isTogglingPin.value = true
+  try {
+    await projectStore.setProjectPinned(projectId.value, !isPinned.value)
+    toast.success(isPinned.value ? t('project.detail.unpinSuccess') : t('project.detail.pinSuccess'))
+  } catch (e: any) {
+    toast.error(t('project.detail.pinFailed'), e?.message)
+  } finally {
+    isTogglingPin.value = false
+  }
+}
 
 const formData = ref({
   destPath: '',
@@ -488,6 +514,10 @@ async function loadDetail() {
     }
     if (project.value) {
       applyProjectToForm()
+      if (!markedOpenedIds.has(projectId.value)) {
+        markedOpenedIds.add(projectId.value)
+        void projectStore.markProjectOpened(projectId.value)
+      }
       Promise.all([loadDeployments(), refreshPm2Status()]).catch(() => {})
     } else {
       loadError.value = t('project.detail.notFoundOrFailed')
@@ -855,8 +885,10 @@ function switchTab(tab: DetailTab) {
     <!-- Header -->
     <div class="flex items-start gap-3 sm:gap-4 mb-8">
       <button 
-        @click="router.back()"
+        @click="goBackToList"
         class="p-2 dark:hover:bg-white/10 hover:bg-black/10 rounded-full transition-colors text-textMuted hover:text-textMain shrink-0"
+        :title="t('project.detail.backToList')"
+        :aria-label="t('project.detail.backToList')"
       >
         <ArrowLeft class="w-5 h-5" />
       </button>
@@ -869,6 +901,18 @@ function switchTab(tab: DetailTab) {
           >
             {{ project.status }}
           </span>
+          <button
+            type="button"
+            @click="togglePin"
+            :disabled="isTogglingPin"
+            :aria-pressed="isPinned"
+            class="inline-flex items-center px-3 py-1.5 text-xs font-medium bg-base border rounded-md transition-all disabled:opacity-50"
+            :class="isPinned ? 'border-primary/50 text-primary' : 'border-border text-textMuted hover:border-primary/50 hover:text-primary'"
+            :title="isPinned ? t('project.detail.unpin') : t('project.detail.pin')"
+          >
+            <Star class="w-3.5 h-3.5 mr-1.5" :class="isPinned ? 'fill-current' : ''" />
+            {{ isPinned ? t('project.detail.pinned') : t('project.detail.pin') }}
+          </button>
           <router-link
             :to="`/projects/${projectId}/files`"
             class="inline-flex items-center px-3 py-1.5 text-xs font-medium bg-base border border-border hover:border-primary/50 hover:text-primary text-textMuted rounded-md transition-all"

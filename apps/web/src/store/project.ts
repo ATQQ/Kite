@@ -22,7 +22,10 @@ export interface Project {
   pm2AppName?: string | null
   tagIds?: string[]
   lastDeployAt?: string | null
+  pinnedAt?: string | null
+  lastOpenedAt?: string | null
   status: 'running' | 'success' | 'failed' | 'idle'
+  createdAt?: string
   updatedAt: string
 }
 
@@ -41,6 +44,26 @@ export interface Tag {
   color?: string | null
   sortOrder?: number
   projectCount?: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ProjectViewConfig {
+  quickView: 'all' | 'pinned' | 'recent' | 'undeployed' | 'abnormal'
+  q: string
+  category: string
+  env: string
+  tags: string[]
+  sort: 'updated' | 'created' | 'name' | 'lastDeploy'
+  group: 'none' | 'category' | 'env'
+  layout: 'card' | 'list'
+}
+
+export interface ProjectSavedView {
+  id: string
+  name: string
+  config: ProjectViewConfig
+  sortOrder?: number
   createdAt: string
   updatedAt: string
 }
@@ -156,6 +179,7 @@ export const useProjectStore = defineStore('project', () => {
   const logs = ref<DeploymentLog[]>([])
   const categories = ref<Category[]>([])
   const tags = ref<Tag[]>([])
+  const projectViews = ref<ProjectSavedView[]>([])
   const systemResources = ref<SystemResources | null>(null)
 
   // Helper fetch function
@@ -202,6 +226,8 @@ export const useProjectStore = defineStore('project', () => {
       pm2AppName: p.pm2AppName ?? null,
       tagIds: Array.isArray(p.tagIds) ? p.tagIds : [],
       lastDeployAt: p.lastDeployAt ?? null,
+      pinnedAt: p.pinnedAt ?? null,
+      lastOpenedAt: p.lastOpenedAt ?? null,
     }
   }
 
@@ -337,6 +363,69 @@ export const useProjectStore = defineStore('project', () => {
       console.error('Failed to update project', e)
       throw e
     }
+  }
+
+  async function setProjectPinned(id: string, pinned: boolean) {
+    const data = await apiFetch(`/projects/${id}/pin`, {
+      method: 'PUT',
+      body: JSON.stringify({ pinned })
+    })
+    if (data?.project) {
+      upsertProject(mapProject(data.project))
+    }
+    return data?.project ? mapProject(data.project) : null
+  }
+
+  async function markProjectOpened(id: string) {
+    try {
+      const data = await apiFetch(`/projects/${id}/last-opened`, {
+        method: 'PUT',
+        body: JSON.stringify({})
+      })
+      if (data?.project) {
+        upsertProject(mapProject(data.project))
+      }
+    } catch (e) {
+      console.warn('Failed to update project last opened time', e)
+    }
+  }
+
+  async function fetchProjectViews() {
+    try {
+      const data = await apiFetch('/project-views')
+      projectViews.value = Array.isArray(data) ? data : []
+    } catch (e) {
+      console.error('Failed to fetch project views', e)
+    }
+  }
+
+  async function createProjectView(name: string, config: ProjectViewConfig) {
+    const data = await apiFetch('/project-views', {
+      method: 'POST',
+      body: JSON.stringify({ name, config })
+    })
+    if (data?.view) {
+      projectViews.value = [...projectViews.value, data.view]
+      return data.view as ProjectSavedView
+    }
+    throw new Error('Failed to create project view')
+  }
+
+  async function updateProjectView(id: string, patch: { name?: string; config?: ProjectViewConfig }) {
+    const data = await apiFetch(`/project-views/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(patch)
+    })
+    if (data?.view) {
+      projectViews.value = projectViews.value.map((view) => view.id === id ? data.view : view)
+      return data.view as ProjectSavedView
+    }
+    throw new Error('Failed to update project view')
+  }
+
+  async function deleteProjectView(id: string) {
+    await apiFetch(`/project-views/${id}`, { method: 'DELETE' })
+    projectViews.value = projectViews.value.filter((view) => view.id !== id)
   }
 
   async function cleanPreview(id: string, payload: { cleanMode: 'clean' | 'clean-all'; protectPaths: string[] }) {
@@ -862,6 +951,7 @@ export const useProjectStore = defineStore('project', () => {
     logs,
     categories,
     tags,
+    projectViews,
     systemResources,
     fetchProjects,
     fetchProjectById,
@@ -869,6 +959,12 @@ export const useProjectStore = defineStore('project', () => {
     getProjectById,
     addProject,
     updateProject,
+    setProjectPinned,
+    markProjectOpened,
+    fetchProjectViews,
+    createProjectView,
+    updateProjectView,
+    deleteProjectView,
     removeProject,
     cleanPreview,
     fetchRecentScripts,

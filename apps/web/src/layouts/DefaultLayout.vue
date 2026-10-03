@@ -339,7 +339,7 @@ onBeforeUnmount(() => {
       </header>
       
       <!-- Content Scrollable Area -->
-      <div class="flex-1 overflow-auto p-4 sm:p-6 md:p-8">
+      <div data-kite-scroll-container class="flex-1 overflow-auto p-4 sm:p-6 md:p-8">
         <router-view v-slot="{ Component }">
           <transition name="fade" mode="out-in">
             <component :is="Component" :key="route.path" />

@@ -49,6 +49,10 @@ const initDb = async () => {
   // Migration: add pm2_app_name for PM2 process resource binding
   try { await client.execute(`ALTER TABLE projects ADD COLUMN pm2_app_name TEXT`); } catch { /* exists */ }
 
+  // Migration: project workspace metadata
+  try { await client.execute(`ALTER TABLE projects ADD COLUMN pinned_at TEXT`); } catch { /* exists */ }
+  try { await client.execute(`ALTER TABLE projects ADD COLUMN last_opened_at TEXT`); } catch { /* exists */ }
+
   // Migration: add allow_cli_hooks (默认 0，禁止 CLI 内联脚本，避免 Token 泄漏导致任意命令执行)
   try { await client.execute(`ALTER TABLE projects ADD COLUMN allow_cli_hooks INTEGER DEFAULT 0`); } catch { /* exists */ }
 
@@ -87,6 +91,18 @@ const initDb = async () => {
   `);
   await client.execute(`CREATE INDEX IF NOT EXISTS idx_project_tags_project_id ON project_tags(project_id);`);
   await client.execute(`CREATE INDEX IF NOT EXISTS idx_project_tags_tag_id ON project_tags(tag_id);`);
+
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS project_saved_views (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      config TEXT NOT NULL,
+      sort_order INTEGER DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_project_saved_views_sort_order ON project_saved_views(sort_order);`);
 
   await client.execute(`
     CREATE TABLE IF NOT EXISTS settings (
@@ -360,6 +376,20 @@ export const db = {
         .where(eq(schema.projects.id, id));
       return this.findById(id);
     },
+    async setPinnedAt(id: string, pinnedAt: string | null) {
+      await ensureDbReady();
+      await ormDb.update(schema.projects)
+        .set({ pinnedAt })
+        .where(eq(schema.projects.id, id));
+      return this.findById(id);
+    },
+    async setLastOpenedAt(id: string, lastOpenedAt: string) {
+      await ensureDbReady();
+      await ormDb.update(schema.projects)
+        .set({ lastOpenedAt })
+        .where(eq(schema.projects.id, id));
+      return this.findById(id);
+    },
     async remove(id: string) {
       await ensureDbReady();
       // Find the project first
@@ -612,6 +642,58 @@ export const db = {
       await ensureDbReady();
       await ormDb.delete(schema.projectTags)
         .where(and(eq(schema.projectTags.projectId, projectId), eq(schema.projectTags.tagId, tagId)));
+    },
+  },
+  projectSavedViews: {
+    async findAll() {
+      await ensureDbReady();
+      return await ormDb.select().from(schema.projectSavedViews)
+        .orderBy(asc(schema.projectSavedViews.sortOrder), asc(schema.projectSavedViews.createdAt));
+    },
+    async findById(id: string) {
+      await ensureDbReady();
+      const result = await ormDb.select().from(schema.projectSavedViews)
+        .where(eq(schema.projectSavedViews.id, id)).limit(1);
+      return result[0] || null;
+    },
+    async findByName(name: string) {
+      await ensureDbReady();
+      const result = await ormDb.select().from(schema.projectSavedViews)
+        .where(eq(schema.projectSavedViews.name, name)).limit(1);
+      return result[0] || null;
+    },
+    async count() {
+      await ensureDbReady();
+      const result = await client.execute('SELECT COUNT(*) AS count FROM project_saved_views');
+      return Number(result.rows[0]?.count ?? 0);
+    },
+    async create(data: { name: string; config: string; sortOrder?: number }) {
+      await ensureDbReady();
+      const now = new Date().toISOString();
+      const row = {
+        id: 'pv_' + randomUUID().replace(/-/g, '').substring(0, 12),
+        name: data.name,
+        config: data.config,
+        sortOrder: data.sortOrder ?? 0,
+        createdAt: now,
+        updatedAt: now,
+      };
+      await ormDb.insert(schema.projectSavedViews).values(row);
+      return row;
+    },
+    async update(id: string, data: { name?: string; config?: string; sortOrder?: number }) {
+      await ensureDbReady();
+      const patch = {
+        ...data,
+        updatedAt: new Date().toISOString(),
+      };
+      await ormDb.update(schema.projectSavedViews).set(patch).where(eq(schema.projectSavedViews.id, id));
+      return this.findById(id);
+    },
+    async remove(id: string) {
+      await ensureDbReady();
+      const result = await ormDb.delete(schema.projectSavedViews).where(eq(schema.projectSavedViews.id, id));
+      return result.rowsAffected > 0;
     },
   },
   deployments: {

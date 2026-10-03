@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
-import { useRouter, onBeforeRouteLeave } from 'vue-router'
+import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useProjectStore } from '../store/project'
-import type { Category, Tag as TagType } from '../store/project'
-import { Plus, MoreVertical, Server, Clock, ScrollText, FolderPlus, Trash2, RefreshCw, XCircle, AlertTriangle, Pencil, FolderOpen, LayoutGrid, List as ListIcon, Tag, FolderTree, ChevronRight, Tags as TagsIcon, X as XIcon, Activity, CheckSquare, Square, MinusSquare, History, ShieldCheck, ShieldOff } from 'lucide-vue-next'
+import type { Category, Tag as TagType, Project, ProjectSavedView, ProjectViewConfig } from '../store/project'
+import { Plus, MoreVertical, Server, Clock, ScrollText, FolderPlus, Trash2, RefreshCw, XCircle, AlertTriangle, Pencil, FolderOpen, LayoutGrid, List as ListIcon, Tag, FolderTree, ChevronRight, Tags as TagsIcon, X as XIcon, Activity, CheckSquare, Square, MinusSquare, History, ShieldCheck, ShieldOff, Search, SlidersHorizontal, Star, Bookmark, BookmarkPlus, ArrowUpDown } from 'lucide-vue-next'
 import { useToast } from '../composables/useToast'
 import FolderPickerDialog from '../components/FolderPickerDialog.vue'
 import ProjectTagsEditor from '../components/ProjectTagsEditor.vue'
@@ -13,28 +13,62 @@ import ConfirmDialog from '../components/ConfirmDialog.vue'
 import { useBulkSelection } from '../composables/useBulkSelection'
 import { CHIP_COLOR_PALETTE, chipClass as tagChipClass, pickFreeColor as pickFreeChipColor } from '../utils/color-chip'
 import { apiUrl } from '../lib/base'
+import { saveProjectListReturnContext, readProjectListReturnContext, clearProjectListReturnContext } from '../utils/project-list-return'
 
 const projectStore = useProjectStore()
+const route = useRoute()
 const router = useRouter()
 const toast = useToast()
 const { t } = useI18n()
 
-const VIEW_KEY = 'kite:projectList:viewMode'
-const viewMode = ref<'card' | 'list'>(((): 'card' | 'list' => {
-  const v = localStorage.getItem(VIEW_KEY)
-  return v === 'list' ? 'list' : 'card'
-})())
-watch(viewMode, (v) => localStorage.setItem(VIEW_KEY, v))
-
+type QuickView = 'all' | 'pinned' | 'recent' | 'undeployed' | 'abnormal'
 type GroupBy = 'none' | 'category' | 'env'
-const GROUP_BY_KEY = 'kite:projectList:groupBy'
+type SortBy = 'updated' | 'created' | 'name' | 'lastDeploy'
+type LayoutMode = 'card' | 'list'
+
+const QUICK_VIEWS: QuickView[] = ['all', 'pinned', 'recent', 'undeployed', 'abnormal']
+const SORT_VALUES: SortBy[] = ['updated', 'created', 'name', 'lastDeploy']
+const GROUP_VALUES: GroupBy[] = ['none', 'category', 'env']
+const LAYOUT_VALUES: LayoutMode[] = ['card', 'list']
+
 const GROUP_COLLAPSED_KEY = 'kite:projectList:collapsedGroups'
 const DEFAULT_GROUP_SUFFIX = '__default__'
-const groupBy = ref<GroupBy>(((): GroupBy => {
-  const v = localStorage.getItem(GROUP_BY_KEY)
-  return v === 'category' || v === 'env' ? v : 'none'
-})())
-watch(groupBy, (v) => localStorage.setItem(GROUP_BY_KEY, v))
+const PINNED_GROUP_KEY = '__pinned__'
+
+function pickQueryString(value: unknown, allowed: string[], fallback: string): string {
+  return typeof value === 'string' && allowed.includes(value) ? value : fallback
+}
+
+function readQuerySnapshot() {
+  const q = route.query
+  return {
+    q: typeof q.q === 'string' ? q.q : '',
+    quickView: pickQueryString(q.view, QUICK_VIEWS, 'all') as QuickView,
+    category: typeof q.category === 'string' && q.category ? q.category : 'all',
+    env: typeof q.env === 'string' && q.env ? q.env : 'all',
+    tags: typeof q.tags === 'string' ? q.tags.split(',').map((s) => s.trim()).filter(Boolean) : [],
+    sort: pickQueryString(q.sort, SORT_VALUES, 'updated') as SortBy,
+    group: pickQueryString(q.group, GROUP_VALUES, 'none') as GroupBy,
+    layout: pickQueryString(q.layout, LAYOUT_VALUES, 'card') as LayoutMode,
+  }
+}
+
+const initialQuery = readQuerySnapshot()
+const searchQuery = ref(initialQuery.q)
+const quickView = ref<QuickView>(initialQuery.quickView)
+const selectedCategoryFilter = ref<string>(initialQuery.category) // 'all' | 'default' | <categoryId>
+const selectedEnvFilter = ref<string>(initialQuery.env) // 'all' | 'default'(no env) | <envName>
+const selectedTagIds = ref<string[]>(initialQuery.tags)
+const sortBy = ref<SortBy>(initialQuery.sort)
+const groupBy = ref<GroupBy>(initialQuery.group)
+const viewMode = ref<LayoutMode>(initialQuery.layout)
+
+const searchInputEl = ref<HTMLInputElement | null>(null)
+const filtersOpen = ref(false)
+const displayOpen = ref(false)
+let applyingFromRoute = false
+let urlSyncTimer: number | undefined
+
 const collapsedGroups = ref<Record<string, boolean>>(((): Record<string, boolean> => {
   try {
     const raw = localStorage.getItem(GROUP_COLLAPSED_KEY)
@@ -54,14 +88,120 @@ const collapsedGroups = ref<Record<string, boolean>>(((): Record<string, boolean
 })())
 watch(collapsedGroups, (v) => localStorage.setItem(GROUP_COLLAPSED_KEY, JSON.stringify(v)), { deep: true })
 
-const selectedCategoryFilter = ref<string>('all') // 'all' | 'default' | <categoryId>
-const selectedEnvFilter = ref<string>('all') // 'all' | 'default'(no env) | <envName>
-const selectedTagIds = ref<string[]>([])
+function buildQuery(): Record<string, string> {
+  const query: Record<string, string> = {}
+  const term = searchQuery.value.trim()
+  if (term) query.q = term
+  if (quickView.value !== 'all') query.view = quickView.value
+  if (selectedCategoryFilter.value !== 'all') query.category = selectedCategoryFilter.value
+  if (selectedEnvFilter.value !== 'all') query.env = selectedEnvFilter.value
+  if (selectedTagIds.value.length > 0) query.tags = [...selectedTagIds.value].sort().join(',')
+  if (sortBy.value !== 'updated') query.sort = sortBy.value
+  if (groupBy.value !== 'none') query.group = groupBy.value
+  if (viewMode.value !== 'card') query.layout = viewMode.value
+  return query
+}
 
-onMounted(() => {
-  projectStore.fetchProjects()
-  projectStore.fetchCategories()
-  projectStore.fetchTags()
+function syncToUrl() {
+  if (applyingFromRoute) return
+  const query = buildQuery()
+  const params = new URLSearchParams()
+  for (const key of Object.keys(query)) params.set(key, query[key])
+  const qs = params.toString()
+  const target = qs ? `/projects?${qs}` : '/projects'
+  if (target === route.fullPath) return
+  router.replace({ path: '/projects', query })
+}
+
+function scheduleUrlSync() {
+  if (applyingFromRoute) return
+  if (urlSyncTimer) window.clearTimeout(urlSyncTimer)
+  urlSyncTimer = window.setTimeout(() => {
+    urlSyncTimer = undefined
+    syncToUrl()
+  }, 120)
+}
+
+function applyQuerySnapshot() {
+  const snap = readQuerySnapshot()
+  applyingFromRoute = true
+  searchQuery.value = snap.q
+  quickView.value = snap.quickView
+  selectedCategoryFilter.value = snap.category
+  selectedEnvFilter.value = snap.env
+  selectedTagIds.value = snap.tags
+  sortBy.value = snap.sort
+  groupBy.value = snap.group
+  viewMode.value = snap.layout
+  nextTick(() => { applyingFromRoute = false })
+}
+
+watch(
+  [searchQuery, quickView, selectedCategoryFilter, selectedEnvFilter, selectedTagIds, sortBy, groupBy, viewMode],
+  scheduleUrlSync,
+)
+watch(() => route.query, () => {
+  if (!route.path.startsWith('/projects')) return
+  applyQuerySnapshot()
+})
+
+function onGlobalKeydown(e: KeyboardEvent) {
+  const target = e.target as HTMLElement | null
+  const tag = target?.tagName
+  const isEditable = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || Boolean(target?.isContentEditable)
+  if (e.key === '/' && !isEditable) {
+    e.preventDefault()
+    searchInputEl.value?.focus()
+    return
+  }
+  if (e.key === 'Escape') {
+    if (target === searchInputEl.value && searchQuery.value) searchQuery.value = ''
+    if (filtersOpen.value) filtersOpen.value = false
+    if (displayOpen.value) displayOpen.value = false
+  }
+}
+
+async function restoreListContext() {
+  const ctx = readProjectListReturnContext()
+  if (!ctx) return
+  if (!ctx.href.startsWith('/projects')) {
+    clearProjectListReturnContext()
+    return
+  }
+  if (route.fullPath !== ctx.href) {
+    const [path, qs] = ctx.href.split('?')
+    const query: Record<string, string> = {}
+    if (qs) new URLSearchParams(qs).forEach((value, key) => { query[key] = value })
+    await router.replace({ path: path || '/projects', query })
+    applyQuerySnapshot()
+  }
+  await nextTick()
+  window.requestAnimationFrame(() => {
+    const scroller = document.querySelector('[data-kite-scroll-container]') as HTMLElement | null
+    if (scroller) scroller.scrollTop = ctx.scrollTop
+    const el = document.querySelector(`[data-project-id="${ctx.projectId}"]`) as HTMLElement | null
+    if (el) {
+      if (!el.hasAttribute('tabindex')) el.setAttribute('tabindex', '-1')
+      el.focus({ preventScroll: true })
+    }
+    clearProjectListReturnContext()
+  })
+}
+
+onMounted(async () => {
+  window.addEventListener('keydown', onGlobalKeydown)
+  await Promise.all([
+    projectStore.fetchProjects(),
+    projectStore.fetchCategories(),
+    projectStore.fetchTags(),
+    projectStore.fetchProjectViews(),
+  ])
+  await restoreListContext()
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onGlobalKeydown)
+  if (urlSyncTimer) window.clearTimeout(urlSyncTimer)
 })
 
 const categoryMap = computed<Map<string, Category>>(() => {
@@ -70,10 +210,82 @@ const categoryMap = computed<Map<string, Category>>(() => {
   return m
 })
 
-const filteredProjects = computed(() => {
-  const list = projectStore.projects
+const tagMap = computed<Map<string, TagType>>(() => {
+  const m = new Map<string, TagType>()
+  for (const tag of projectStore.tags) m.set(tag.id, tag)
+  return m
+})
+
+function statusLabel(status: string): string {
+  if (status === 'success') return t('project.list.statusNormal')
+  if (status === 'failed') return t('project.list.statusAbnormal')
+  return t('project.list.statusIdle')
+}
+
+function timeValue(iso?: string | null): number {
+  if (!iso) return 0
+  const ts = new Date(iso).getTime()
+  return isNaN(ts) ? 0 : ts
+}
+
+const searchTerms = computed(() => searchQuery.value.trim().toLowerCase().split(/\s+/).filter(Boolean))
+
+const searchedProjects = computed<Project[]>(() => {
+  const terms = searchTerms.value
+  if (terms.length === 0) return projectStore.projects
+  return projectStore.projects.filter((p) => {
+    const tagNames = (p.tagIds || []).map((id) => tagMap.value.get(id)?.name || '')
+    const haystack = [
+      p.name,
+      p.id,
+      p.destPath || '',
+      p.description || '',
+      p.env || '',
+      categoryMap.value.get(p.categoryId || '')?.name || '',
+      ...tagNames,
+      p.status,
+      statusLabel(p.status),
+    ].join(' ').toLowerCase()
+    return terms.every((term) => haystack.includes(term))
+  })
+})
+
+function matchesQuickView(p: Project): boolean {
+  switch (quickView.value) {
+    case 'pinned': return Boolean(p.pinnedAt)
+    case 'recent': return Boolean(p.lastOpenedAt)
+    case 'undeployed': return !p.lastDeployAt
+    case 'abnormal': return p.status === 'failed'
+    default: return true
+  }
+}
+
+function sortProjects(list: Project[]): Project[] {
+  const arr = [...list]
+  if (quickView.value === 'recent') {
+    arr.sort((a, b) => timeValue(b.lastOpenedAt) - timeValue(a.lastOpenedAt))
+    return arr
+  }
+  switch (sortBy.value) {
+    case 'name':
+      arr.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN'))
+      break
+    case 'created':
+      arr.sort((a, b) => timeValue(b.createdAt) - timeValue(a.createdAt))
+      break
+    case 'lastDeploy':
+      arr.sort((a, b) => timeValue(b.lastDeployAt) - timeValue(a.lastDeployAt))
+      break
+    default:
+      arr.sort((a, b) => timeValue(b.updatedAt) - timeValue(a.updatedAt))
+  }
+  return arr
+}
+
+const filteredProjects = computed<Project[]>(() => {
   const tagIds = selectedTagIds.value
-  return list.filter((p) => {
+  const list = searchedProjects.value.filter((p) => {
+    if (!matchesQuickView(p)) return false
     if (selectedCategoryFilter.value === 'default') {
       if (p.categoryId) return false
     } else if (selectedCategoryFilter.value !== 'all') {
@@ -93,7 +305,164 @@ const filteredProjects = computed(() => {
     }
     return true
   })
+  return sortProjects(list)
 })
+
+const pinnedProjects = computed<Project[]>(() =>
+  quickView.value === 'all' ? filteredProjects.value.filter((p) => Boolean(p.pinnedAt)) : [])
+const listProjects = computed<Project[]>(() =>
+  quickView.value === 'all' ? filteredProjects.value.filter((p) => !p.pinnedAt) : filteredProjects.value)
+
+const activeFilterCount = computed(() => {
+  let n = 0
+  if (selectedCategoryFilter.value !== 'all') n++
+  if (selectedEnvFilter.value !== 'all') n++
+  n += selectedTagIds.value.length
+  return n
+})
+const hasActiveFilters = computed(() => activeFilterCount.value > 0)
+
+function clearAllFilters() {
+  selectedCategoryFilter.value = 'all'
+  selectedEnvFilter.value = 'all'
+  selectedTagIds.value = []
+}
+
+function clearSearch() {
+  searchQuery.value = ''
+}
+
+const quickViews = computed<Array<{ key: QuickView; label: string; icon: any }>>(() => ([
+  { key: 'all', label: t('project.list.quickAll'), icon: LayoutGrid },
+  { key: 'pinned', label: t('project.list.quickPinned'), icon: Star },
+  { key: 'recent', label: t('project.list.quickRecent'), icon: Clock },
+  { key: 'undeployed', label: t('project.list.quickUndeployed'), icon: ShieldOff },
+  { key: 'abnormal', label: t('project.list.quickAbnormal'), icon: AlertTriangle },
+]))
+
+const sortOptions = computed<Array<{ key: SortBy; label: string }>>(() => ([
+  { key: 'updated', label: t('project.list.sortUpdated') },
+  { key: 'created', label: t('project.list.sortCreated') },
+  { key: 'name', label: t('project.list.sortName') },
+  { key: 'lastDeploy', label: t('project.list.sortLastDeploy') },
+]))
+
+const groupOptions = computed<Array<{ key: GroupBy; label: string }>>(() => ([
+  { key: 'none', label: t('project.list.groupByNone') },
+  { key: 'category', label: t('project.list.groupByCategory') },
+  { key: 'env', label: t('project.list.groupByEnv') },
+]))
+
+function currentViewConfig(): ProjectViewConfig {
+  return {
+    quickView: quickView.value,
+    q: searchQuery.value.trim(),
+    category: selectedCategoryFilter.value,
+    env: selectedEnvFilter.value,
+    tags: [...selectedTagIds.value],
+    sort: sortBy.value,
+    group: groupBy.value,
+    layout: viewMode.value,
+  }
+}
+
+function applySavedView(view: ProjectSavedView) {
+  const cfg = view.config
+  searchQuery.value = cfg.q || ''
+  quickView.value = QUICK_VIEWS.includes(cfg.quickView) ? cfg.quickView : 'all'
+  selectedCategoryFilter.value = cfg.category || 'all'
+  selectedEnvFilter.value = cfg.env || 'all'
+  selectedTagIds.value = Array.isArray(cfg.tags) ? [...cfg.tags] : []
+  sortBy.value = SORT_VALUES.includes(cfg.sort) ? cfg.sort : 'updated'
+  groupBy.value = GROUP_VALUES.includes(cfg.group) ? cfg.group : 'none'
+  viewMode.value = LAYOUT_VALUES.includes(cfg.layout) ? cfg.layout : 'card'
+  filtersOpen.value = false
+  displayOpen.value = false
+}
+
+const activeViewId = computed<string | null>(() => {
+  const cfg = currentViewConfig()
+  const tagsA = JSON.stringify(cfg.tags)
+  const match = projectStore.projectViews.find((v) => {
+    const c = v.config
+    return (c.quickView || 'all') === cfg.quickView
+      && (c.q || '') === cfg.q
+      && (c.category || 'all') === cfg.category
+      && (c.env || 'all') === cfg.env
+      && (c.sort || 'updated') === cfg.sort
+      && (c.group || 'none') === cfg.group
+      && (c.layout || 'card') === cfg.layout
+      && JSON.stringify(c.tags || []) === tagsA
+  })
+  return match?.id ?? null
+})
+
+const showViewNameModal = ref(false)
+const viewNameInput = ref('')
+const viewNameMode = ref<'create' | 'rename'>('create')
+const viewNameTargetId = ref<string | null>(null)
+const isSavingViewName = ref(false)
+
+function openCreateView() {
+  viewNameMode.value = 'create'
+  viewNameTargetId.value = null
+  viewNameInput.value = ''
+  showViewNameModal.value = true
+}
+
+function openRenameView(view: ProjectSavedView) {
+  viewNameMode.value = 'rename'
+  viewNameTargetId.value = view.id
+  viewNameInput.value = view.name
+  showViewNameModal.value = true
+}
+
+async function submitViewName() {
+  const name = viewNameInput.value.trim()
+  if (!name || isSavingViewName.value) return
+  isSavingViewName.value = true
+  try {
+    if (viewNameMode.value === 'create') {
+      await projectStore.createProjectView(name, currentViewConfig())
+      toast.success(t('project.list.viewSaveSuccess', { name }))
+    } else if (viewNameTargetId.value) {
+      await projectStore.updateProjectView(viewNameTargetId.value, { name })
+      toast.success(t('project.list.viewRenameSuccess'))
+    }
+    showViewNameModal.value = false
+  } catch (e: any) {
+    toast.error(t('project.list.viewSaveFailed'), e?.data?.error || e?.message || t('project.list.retryHint'))
+  } finally {
+    isSavingViewName.value = false
+  }
+}
+
+async function deleteSavedView(view: ProjectSavedView) {
+  if (!window.confirm(t('project.list.viewDeleteConfirm', { name: view.name }))) return
+  try {
+    await projectStore.deleteProjectView(view.id)
+    toast.success(t('project.list.viewDeleteSuccess'))
+  } catch (e: any) {
+    toast.error(t('project.list.viewDeleteFailed'), e?.message || t('project.list.retryHint'))
+  }
+}
+
+const pinningIds = ref<Set<string>>(new Set())
+
+async function togglePinned(project: Project) {
+  if (pinningIds.value.has(project.id)) return
+  pinningIds.value = new Set(pinningIds.value).add(project.id)
+  try {
+    await projectStore.setProjectPinned(project.id, !project.pinnedAt)
+    toast.success(project.pinnedAt ? t('project.list.unpinSuccess') : t('project.list.pinSuccess'))
+  } catch (e: any) {
+    toast.error(t('project.list.pinFailed'), e?.message || t('project.list.retryHint'))
+  } finally {
+    const next = new Set(pinningIds.value)
+    next.delete(project.id)
+    pinningIds.value = next
+  }
+}
 
 const projectCountByCategory = computed(() => {
   const m: Record<string, number> = { all: projectStore.projects.length, default: 0 }
@@ -135,6 +504,18 @@ watch([envOptions, projectCountByEnv], () => {
   if (!envOptions.value.includes(v)) selectedEnvFilter.value = 'all'
 })
 
+watch([() => projectStore.categories, () => projectStore.tags], () => {
+  const cat = selectedCategoryFilter.value
+  if (cat !== 'all' && cat !== 'default' && !projectStore.categories.some((c) => c.id === cat)) {
+    selectedCategoryFilter.value = 'all'
+  }
+  if (selectedTagIds.value.length > 0) {
+    const valid = new Set(projectStore.tags.map((tg) => tg.id))
+    const next = selectedTagIds.value.filter((id) => valid.has(id))
+    if (next.length !== selectedTagIds.value.length) selectedTagIds.value = next
+  }
+})
+
 const categoryColorClass: Record<string, string> = {
   blue: 'bg-blue-500/15 text-blue-500 border-blue-500/30',
   green: 'bg-green-500/15 text-green-500 border-green-500/30',
@@ -171,12 +552,13 @@ type ProjectGroup = {
   label: string
   color: string | null
   isDefault: boolean
+  pinned?: boolean
   count: number
   projects: typeof projectStore.projects
 }
 
-const groupedProjects = computed<ProjectGroup[]>(() => {
-  const list = filteredProjects.value
+const baseGroupedProjects = computed<ProjectGroup[]>(() => {
+  const list = listProjects.value
   if (groupBy.value === 'none') {
     return [{
       key: 'all',
@@ -258,6 +640,22 @@ const groupedProjects = computed<ProjectGroup[]>(() => {
   return result
 })
 
+const groupedProjects = computed<ProjectGroup[]>(() => {
+  const groups = baseGroupedProjects.value
+  if (pinnedProjects.value.length > 0) {
+    return [{
+      key: PINNED_GROUP_KEY,
+      label: t('project.list.pinnedSection'),
+      color: null,
+      isDefault: false,
+      pinned: true,
+      count: pinnedProjects.value.length,
+      projects: pinnedProjects.value,
+    }, ...groups]
+  }
+  return groups
+})
+
 function isGroupCollapsed(key: string): boolean {
   return collapsedGroups.value[key] === true
 }
@@ -270,6 +668,7 @@ function toggleGroupCollapsed(key: string) {
 }
 
 function groupHeaderChipClass(g: ProjectGroup): string {
+  if (g.pinned) return 'bg-primary/10 text-primary border-primary/40'
   if (groupBy.value === 'category') {
     return categoryChipClass(g.color)
   }
@@ -322,6 +721,12 @@ const createProject = async () => {
 }
 
 const goToDetail = (id: string) => {
+  const scroller = document.querySelector('[data-kite-scroll-container]') as HTMLElement | null
+  saveProjectListReturnContext({
+    href: route.fullPath,
+    scrollTop: scroller ? Math.max(0, scroller.scrollTop) : 0,
+    projectId: id,
+  })
   router.push(`/projects/${id}`)
 }
 
@@ -341,7 +746,7 @@ const goToFiles = (id: string) => {
 const openDropdownId = ref<string | null>(null)
 const dropdownStyle = ref<Record<string, string>>({})
 const DROPDOWN_WIDTH = 160
-const DROPDOWN_HEIGHT = 196
+const DROPDOWN_HEIGHT = 236
 
 async function toggleDropdown(id: string, e: Event) {
   e.stopPropagation()
@@ -1186,66 +1591,20 @@ async function confirmBulkFillRecent() {
 </script>
 
 <template>
-  <div class="max-w-7xl mx-auto space-y-6">
-    <div class="flex flex-col md:flex-row md:justify-between md:items-center gap-3 mb-8">
+  <div class="max-w-7xl mx-auto">
+    <div class="flex flex-col md:flex-row md:justify-between md:items-center gap-3 mb-6">
       <div>
         <h1 class="text-2xl font-bold text-textMain tracking-tight">{{ t('project.list.pageTitle') }}</h1>
         <p class="text-textMuted text-sm mt-1">{{ t('project.list.pageSubtitle') }}</p>
       </div>
       <div class="flex items-center flex-wrap gap-2">
-        <div class="flex items-center border border-border rounded-md overflow-hidden">
-          <button
-            @click="viewMode = 'card'"
-            :class="viewMode === 'card' ? 'bg-primary/15 text-primary' : 'text-textMuted hover:text-textMain'"
-            class="flex items-center px-2.5 py-1.5 text-xs transition-colors"
-            :title="t('project.list.cardView')"
-          >
-            <LayoutGrid class="w-3.5 h-3.5" />
-          </button>
-          <button
-            @click="viewMode = 'list'"
-            :class="viewMode === 'list' ? 'bg-primary/15 text-primary' : 'text-textMuted hover:text-textMain'"
-            class="flex items-center px-2.5 py-1.5 text-xs transition-colors border-l border-border"
-            :title="t('project.list.listView')"
-          >
-            <ListIcon class="w-3.5 h-3.5" />
-          </button>
-        </div>
-        <div class="flex items-center border border-border rounded-md overflow-hidden" :title="t('project.list.groupByLabel')">
-          <button
-            @click="groupBy = 'none'"
-            :class="groupBy === 'none' ? 'bg-primary/15 text-primary' : 'text-textMuted hover:text-textMain'"
-            class="flex items-center px-2.5 py-1.5 text-xs transition-colors"
-            :title="t('project.list.groupByNone')"
-          >
-            {{ t('project.list.groupByNone') }}
-          </button>
-          <button
-            @click="groupBy = 'category'"
-            :class="groupBy === 'category' ? 'bg-primary/15 text-primary' : 'text-textMuted hover:text-textMain'"
-            class="flex items-center px-2.5 py-1.5 text-xs transition-colors border-l border-border"
-            :title="t('project.list.groupByCategory')"
-          >
-            <FolderTree class="w-3.5 h-3.5 mr-1" />
-            {{ t('project.list.groupByCategory') }}
-          </button>
-          <button
-            @click="groupBy = 'env'"
-            :class="groupBy === 'env' ? 'bg-primary/15 text-primary' : 'text-textMuted hover:text-textMain'"
-            class="flex items-center px-2.5 py-1.5 text-xs transition-colors border-l border-border"
-            :title="t('project.list.groupByEnv')"
-          >
-            <Activity class="w-3.5 h-3.5 mr-1" />
-            {{ t('project.list.groupByEnv') }}
-          </button>
-        </div>
         <button
           @click="openCategoryModal"
           class="flex items-center px-3 py-2 border border-border hover:border-primary/50 text-textMain rounded-md transition-all font-medium text-sm"
           :title="t('project.list.manageCategoriesBtn')"
         >
           <FolderTree class="w-4 h-4 mr-2" />
-          {{ t('project.list.manageCategoriesBtn') }}
+          <span class="hidden sm:inline">{{ t('project.list.manageCategoriesBtn') }}</span>
         </button>
         <button
           @click="openTagModal"
@@ -1253,114 +1612,344 @@ async function confirmBulkFillRecent() {
           :title="t('project.list.manageTagsBtn')"
         >
           <TagsIcon class="w-4 h-4 mr-2" />
-          {{ t('project.list.manageTagsBtn') }}
+          <span class="hidden sm:inline">{{ t('project.list.manageTagsBtn') }}</span>
         </button>
         <button
           @click="openFolderPicker"
           class="flex items-center px-4 py-2 bg-primary hover:bg-primary/90 text-white rounded-md shadow-[0_0_15px_rgba(59,130,246,0.3)] transition-all font-medium text-sm"
         >
           <FolderPlus class="w-4 h-4 mr-2" />
-          {{ t('project.list.pickFolderCreate') }}
+          <span class="hidden sm:inline">{{ t('project.list.pickFolderCreate') }}</span>
         </button>
         <button
           @click="showCreateModal = true"
           class="flex items-center px-4 py-2 border border-border hover:border-primary/50 text-textMain rounded-md transition-all font-medium text-sm"
         >
           <Plus class="w-4 h-4 mr-2" />
-          {{ t('project.list.newProjectBtn') }}
+          <span class="hidden sm:inline">{{ t('project.list.newProjectBtn') }}</span>
         </button>
       </div>
     </div>
 
-    <!-- Category filter chips -->
-    <div class="flex items-center flex-wrap gap-2">
-      <span class="text-xs text-textMuted/80 mr-1 shrink-0">{{ t('project.list.filterCategoryLabel') }}</span>
-      <button
-        @click="selectedCategoryFilter = 'all'"
-        class="flex items-center px-3 py-1.5 rounded-full text-xs border transition-colors"
-        :class="selectedCategoryFilter === 'all' ? 'bg-primary/15 text-primary border-primary/40' : 'bg-base text-textMuted border-border hover:text-textMain'"
-      >
-        {{ t('project.list.filterAll') }}
-        <span class="ml-1.5 text-[10px] opacity-75">{{ projectCountByCategory.all }}</span>
-      </button>
-      <button
-        @click="selectedCategoryFilter = 'default'"
-        class="flex items-center px-3 py-1.5 rounded-full text-xs border transition-colors"
-        :class="selectedCategoryFilter === 'default' ? 'bg-primary/15 text-primary border-primary/40' : 'bg-base text-textMuted border-border hover:text-textMain'"
-      >
-        {{ t('project.list.filterDefault') }}
-        <span class="ml-1.5 text-[10px] opacity-75">{{ projectCountByCategory.default }}</span>
-      </button>
-      <button
-        v-for="c in projectStore.categories"
-        :key="c.id"
-        @click="selectedCategoryFilter = c.id"
-        class="flex items-center px-3 py-1.5 rounded-full text-xs border transition-colors"
-        :class="selectedCategoryFilter === c.id ? 'bg-primary/15 text-primary border-primary/40' : `${categoryChipClass(c.color)} hover:opacity-90`"
-      >
-        <Tag class="w-3 h-3 mr-1.5" />
-        {{ c.name }}
-        <span class="ml-1.5 text-[10px] opacity-75">{{ projectCountByCategory[c.id] || 0 }}</span>
-      </button>
+    <!-- Sticky command bar -->
+    <div class="sticky top-0 z-30 -mt-4 sm:-mt-6 md:-mt-8 -mx-4 sm:-mx-6 md:-mx-8 mb-4 bg-base/95 border-b border-border">
+      <div class="absolute inset-0 backdrop-blur pointer-events-none" aria-hidden="true"></div>
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 md:px-8 py-3">
+        <div class="relative">
+          <div class="flex items-center gap-2">
+            <div class="relative flex-1 min-w-0">
+              <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-textMuted pointer-events-none" />
+              <input
+                ref="searchInputEl"
+                v-model="searchQuery"
+                type="search"
+                class="w-full bg-panel border border-border rounded-md pl-9 pr-9 py-2 text-sm text-textMain placeholder:text-textMuted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all"
+                :placeholder="t('project.list.searchPlaceholder')"
+                :aria-label="t('project.list.searchAria')"
+                autocomplete="off"
+                spellcheck="false"
+              />
+              <button
+                v-if="searchQuery"
+                type="button"
+                @click="clearSearch"
+                class="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded text-textMuted hover:text-textMain transition-colors"
+                :title="t('project.list.searchClear')"
+                :aria-label="t('project.list.searchClear')"
+              >
+                <XIcon class="w-3.5 h-3.5" />
+              </button>
+            </div>
+            <button
+              type="button"
+              @click="filtersOpen = !filtersOpen"
+              :aria-expanded="filtersOpen"
+              class="shrink-0 flex items-center gap-1.5 px-3 py-2 text-sm rounded-md border transition-colors"
+              :class="hasActiveFilters || filtersOpen ? 'border-primary/50 text-primary bg-primary/10' : 'border-border text-textMuted hover:text-textMain'"
+            >
+              <SlidersHorizontal class="w-4 h-4" />
+              <span class="hidden sm:inline">{{ t('project.list.filters') }}</span>
+              <span v-if="activeFilterCount" class="inline-flex items-center justify-center min-w-[1rem] h-4 px-1 rounded-full bg-primary text-white text-[10px]">{{ activeFilterCount }}</span>
+            </button>
+            <button
+              type="button"
+              @click="displayOpen = !displayOpen"
+              :aria-expanded="displayOpen"
+              class="shrink-0 flex items-center gap-1.5 px-3 py-2 text-sm rounded-md border transition-colors"
+              :class="displayOpen ? 'border-primary/50 text-primary' : 'border-border text-textMuted hover:text-textMain'"
+            >
+              <ArrowUpDown class="w-4 h-4" />
+              <span class="hidden sm:inline">{{ t('project.list.display') }}</span>
+            </button>
+          </div>
+
+          <!-- Quick views + saved views -->
+          <div class="mt-2.5 flex items-center gap-2 overflow-x-auto no-scrollbar pb-0.5">
+            <button
+              v-for="qv in quickViews"
+              :key="qv.key"
+              type="button"
+              @click="quickView = qv.key"
+              :aria-pressed="quickView === qv.key"
+              class="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs border transition-colors"
+              :class="quickView === qv.key ? 'bg-primary/15 text-primary border-primary/40' : 'bg-panel text-textMuted border-border hover:text-textMain'"
+            >
+              <component :is="qv.icon" class="w-3.5 h-3.5" />
+              {{ qv.label }}
+            </button>
+            <div v-if="projectStore.projectViews.length > 0" class="shrink-0 w-px h-4 bg-border mx-1"></div>
+            <div
+              v-for="v in projectStore.projectViews"
+              :key="v.id"
+              class="shrink-0 group/view inline-flex items-center rounded-full border transition-colors"
+              :class="activeViewId === v.id ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border bg-panel text-textMuted hover:text-textMain'"
+            >
+              <button type="button" class="inline-flex items-center gap-1.5 pl-3 pr-1 py-1.5 text-xs" @click="applySavedView(v)" :title="t('project.list.viewApply')">
+                <Bookmark class="w-3.5 h-3.5" />
+                {{ v.name }}
+              </button>
+              <button type="button" class="p-1 text-textMuted hover:text-textMain transition-opacity" @click.stop="openRenameView(v)" :title="t('project.list.viewRename')" :aria-label="t('project.list.viewRename')">
+                <Pencil class="w-3 h-3" />
+              </button>
+              <button type="button" class="p-1 pr-2 text-textMuted hover:text-danger transition-opacity" @click.stop="deleteSavedView(v)" :title="t('project.list.viewDelete')" :aria-label="t('project.list.viewDelete')">
+                <Trash2 class="w-3 h-3" />
+              </button>
+            </div>
+            <button
+              type="button"
+              @click="openCreateView"
+              class="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs border border-dashed border-border text-textMuted hover:text-primary hover:border-primary/50 transition-colors"
+            >
+              <BookmarkPlus class="w-3.5 h-3.5" />
+              {{ t('project.list.viewSave') }}
+            </button>
+          </div>
+
+          <!-- Result summary + active conditions -->
+          <div class="mt-2 flex items-center flex-wrap gap-x-3 gap-y-1 text-xs text-textMuted">
+            <span class="sr-only" aria-live="polite">{{ t('project.list.matchCount', { n: filteredProjects.length }) }}</span>
+            <span aria-hidden="true">{{ t('project.list.matchCount', { n: filteredProjects.length }) }}</span>
+            <template v-if="hasActiveFilters">
+              <span aria-hidden="true" class="text-border">·</span>
+              <span>{{ t('project.list.activeFilters', { n: activeFilterCount }) }}</span>
+              <button type="button" @click="clearAllFilters" class="text-primary hover:underline">{{ t('project.list.clearFiltersAll') }}</button>
+            </template>
+            <template v-if="searchQuery.trim()">
+              <span aria-hidden="true" class="text-border">·</span>
+              <button type="button" @click="clearSearch" class="text-primary hover:underline">{{ t('project.list.searchClear') }}</button>
+            </template>
+          </div>
+
+          <!-- Filter panel (bottom drawer on mobile, dropdown on desktop) -->
+          <div
+            v-if="filtersOpen"
+            data-filter-panel
+            role="dialog"
+            :aria-label="t('project.list.filters')"
+            class="absolute left-0 right-0 top-full mt-2 z-50 bg-panel border border-border rounded-xl shadow-2xl p-4 space-y-4 max-h-[70vh] overflow-y-auto sm:left-auto sm:right-0 sm:w-[420px] max-sm:fixed max-sm:inset-x-0 max-sm:bottom-0 max-sm:top-auto max-sm:mt-0 max-sm:max-h-[80vh] max-sm:rounded-b-none"
+          >
+            <div class="flex items-center justify-between">
+              <h3 class="text-sm font-semibold text-textMain flex items-center gap-1.5">
+                <SlidersHorizontal class="w-4 h-4" />
+                {{ t('project.list.filters') }}
+              </h3>
+              <button type="button" @click="filtersOpen = false" class="p-1 text-textMuted hover:text-textMain" :aria-label="t('common.close')">
+                <XIcon class="w-4 h-4" />
+              </button>
+            </div>
+
+            <div>
+              <div class="flex items-center justify-between mb-2">
+                <span class="text-xs font-medium text-textMuted">{{ t('project.list.filterCategoryLabel') }}</span>
+                <button v-if="selectedCategoryFilter !== 'all'" type="button" @click="selectedCategoryFilter = 'all'" class="text-[11px] text-primary hover:underline">{{ t('project.list.filterAll') }}</button>
+              </div>
+              <div class="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  @click="selectedCategoryFilter = 'all'"
+                  :aria-pressed="selectedCategoryFilter === 'all'"
+                  class="flex items-center px-3 py-1.5 rounded-full text-xs border transition-colors"
+                  :class="selectedCategoryFilter === 'all' ? 'bg-primary/15 text-primary border-primary/40' : 'bg-base text-textMuted border-border hover:text-textMain'"
+                >
+                  {{ t('project.list.filterAll') }}
+                  <span class="ml-1.5 text-[10px] opacity-75">{{ projectCountByCategory.all }}</span>
+                </button>
+                <button
+                  type="button"
+                  @click="selectedCategoryFilter = 'default'"
+                  :aria-pressed="selectedCategoryFilter === 'default'"
+                  class="flex items-center px-3 py-1.5 rounded-full text-xs border transition-colors"
+                  :class="selectedCategoryFilter === 'default' ? 'bg-primary/15 text-primary border-primary/40' : 'bg-base text-textMuted border-border hover:text-textMain'"
+                >
+                  {{ t('project.list.filterDefault') }}
+                  <span class="ml-1.5 text-[10px] opacity-75">{{ projectCountByCategory.default }}</span>
+                </button>
+                <button
+                  v-for="c in projectStore.categories"
+                  :key="c.id"
+                  type="button"
+                  @click="selectedCategoryFilter = c.id"
+                  :aria-pressed="selectedCategoryFilter === c.id"
+                  class="flex items-center px-3 py-1.5 rounded-full text-xs border transition-colors"
+                  :class="selectedCategoryFilter === c.id ? 'bg-primary/15 text-primary border-primary/40' : `${categoryChipClass(c.color)} hover:opacity-90`"
+                >
+                  <Tag class="w-3 h-3 mr-1.5" />
+                  {{ c.name }}
+                  <span class="ml-1.5 text-[10px] opacity-75">{{ projectCountByCategory[c.id] || 0 }}</span>
+                </button>
+              </div>
+            </div>
+
+            <div v-if="envOptions.length > 0">
+              <div class="flex items-center justify-between mb-2">
+                <span class="text-xs font-medium text-textMuted">{{ t('project.list.filterEnvLabel') }}</span>
+                <button v-if="selectedEnvFilter !== 'all'" type="button" @click="selectedEnvFilter = 'all'" class="text-[11px] text-primary hover:underline">{{ t('project.list.filterAll') }}</button>
+              </div>
+              <div class="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  @click="selectedEnvFilter = 'all'"
+                  :aria-pressed="selectedEnvFilter === 'all'"
+                  class="flex items-center px-3 py-1.5 rounded-full text-xs border transition-colors"
+                  :class="selectedEnvFilter === 'all' ? 'bg-primary/15 text-primary border-primary/40' : 'bg-base text-textMuted border-border hover:text-textMain'"
+                >
+                  {{ t('project.list.filterAll') }}
+                  <span class="ml-1.5 text-[10px] opacity-75">{{ projectCountByEnv.all }}</span>
+                </button>
+                <button
+                  v-if="projectCountByEnv.default > 0"
+                  type="button"
+                  @click="selectedEnvFilter = 'default'"
+                  :aria-pressed="selectedEnvFilter === 'default'"
+                  class="flex items-center px-3 py-1.5 rounded-full text-xs border transition-colors"
+                  :class="selectedEnvFilter === 'default' ? 'bg-primary/15 text-primary border-primary/40' : 'bg-base text-textMuted border-border hover:text-textMain'"
+                  :title="t('project.list.filterEnvUnspecifiedTitle')"
+                >
+                  {{ t('project.list.filterEnvUnspecified') }}
+                  <span class="ml-1.5 text-[10px] opacity-75">{{ projectCountByEnv.default }}</span>
+                </button>
+                <button
+                  v-for="env in envOptions"
+                  :key="env"
+                  type="button"
+                  @click="selectedEnvFilter = env"
+                  :aria-pressed="selectedEnvFilter === env"
+                  class="flex items-center px-3 py-1.5 rounded-full text-xs border transition-colors font-mono"
+                  :class="selectedEnvFilter === env ? 'bg-primary/15 text-primary border-primary/40' : `${envChipClass(env)} hover:opacity-90`"
+                >
+                  {{ env }}
+                  <span class="ml-1.5 text-[10px] opacity-75 font-sans">{{ projectCountByEnv[env] || 0 }}</span>
+                </button>
+              </div>
+            </div>
+
+            <div v-if="projectStore.tags.length > 0">
+              <div class="flex items-center justify-between mb-2">
+                <span class="text-xs font-medium text-textMuted">{{ t('project.list.filterTagsLabel') }}</span>
+                <button v-if="selectedTagIds.length > 0" type="button" @click="clearTagFilters" class="text-[11px] text-primary hover:underline">{{ t('project.list.filterClearTags') }}</button>
+              </div>
+              <div class="flex flex-wrap gap-1.5">
+                <button
+                  v-for="tg in projectStore.tags"
+                  :key="tg.id"
+                  type="button"
+                  @click="toggleTagFilter(tg.id)"
+                  :aria-pressed="selectedTagIds.includes(tg.id)"
+                  class="flex items-center px-3 py-1.5 rounded-full text-xs border transition-colors"
+                  :class="selectedTagIds.includes(tg.id) ? `${tagChipClass(tg.color)} ring-1 ring-primary/40` : 'bg-base text-textMuted border-border hover:text-textMain hover:border-textMuted/40'"
+                  :title="selectedTagIds.includes(tg.id) ? t('project.list.filterTagRemoveTitle') : t('project.list.filterTagAddTitle')"
+                >
+                  <Tag class="w-3 h-3 mr-1.5" />
+                  {{ tg.name }}
+                  <span v-if="tg.projectCount != null" class="ml-1.5 text-[10px] opacity-75">{{ tg.projectCount }}</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="flex items-center justify-between gap-2 pt-3 border-t border-border">
+              <button
+                type="button"
+                @click="clearAllFilters"
+                :disabled="!hasActiveFilters"
+                class="text-xs text-primary hover:underline disabled:opacity-40 disabled:no-underline"
+              >
+                {{ t('project.list.clearFiltersAll') }}
+              </button>
+              <button type="button" @click="filtersOpen = false" class="px-4 py-2 text-sm font-medium bg-primary text-white rounded-md hover:bg-primary/90 transition-colors">
+                {{ t('project.list.filterDone') }}
+              </button>
+            </div>
+          </div>
+
+          <!-- Display panel (sort / group / layout) -->
+          <div
+            v-if="displayOpen"
+            role="dialog"
+            :aria-label="t('project.list.display')"
+            class="absolute left-0 right-0 top-full mt-2 z-50 bg-panel border border-border rounded-xl shadow-2xl p-4 space-y-4 sm:left-auto sm:right-0 sm:w-72 max-sm:fixed max-sm:inset-x-0 max-sm:bottom-0 max-sm:top-auto max-sm:mt-0 max-sm:rounded-b-none"
+          >
+            <div>
+              <label class="block text-xs font-medium text-textMuted mb-1.5" for="kite-project-sort">{{ t('project.list.sortByLabel') }}</label>
+              <select
+                v-if="quickView !== 'recent'"
+                id="kite-project-sort"
+                v-model="sortBy"
+                class="w-full bg-base border border-border rounded-md px-2.5 py-2 text-sm text-textMain focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50"
+              >
+                <option v-for="opt in sortOptions" :key="opt.key" :value="opt.key">{{ opt.label }}</option>
+              </select>
+              <p v-else class="text-xs text-textMuted">{{ t('project.list.sortRecentHint') }}</p>
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-textMuted mb-1.5" for="kite-project-group">{{ t('project.list.groupByLabel') }}</label>
+              <select
+                id="kite-project-group"
+                v-model="groupBy"
+                class="w-full bg-base border border-border rounded-md px-2.5 py-2 text-sm text-textMain focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50"
+              >
+                <option v-for="opt in groupOptions" :key="opt.key" :value="opt.key">{{ opt.label }}</option>
+              </select>
+            </div>
+            <div>
+              <span class="block text-xs font-medium text-textMuted mb-1.5">{{ t('project.list.layoutLabel') }}</span>
+              <div class="flex items-center border border-border rounded-md overflow-hidden w-fit">
+                <button
+                  type="button"
+                  @click="viewMode = 'card'"
+                  :aria-pressed="viewMode === 'card'"
+                  class="flex items-center px-3 py-1.5 text-xs transition-colors"
+                  :class="viewMode === 'card' ? 'bg-primary/15 text-primary' : 'text-textMuted hover:text-textMain'"
+                >
+                  <LayoutGrid class="w-3.5 h-3.5 mr-1.5" />
+                  {{ t('project.list.cardView') }}
+                </button>
+                <button
+                  type="button"
+                  @click="viewMode = 'list'"
+                  :aria-pressed="viewMode === 'list'"
+                  class="flex items-center px-3 py-1.5 text-xs transition-colors border-l border-border"
+                  :class="viewMode === 'list' ? 'bg-primary/15 text-primary' : 'text-textMuted hover:text-textMain'"
+                >
+                  <ListIcon class="w-3.5 h-3.5 mr-1.5" />
+                  {{ t('project.list.listView') }}
+                </button>
+              </div>
+            </div>
+            <button type="button" @click="displayOpen = false" class="w-full px-4 py-2 text-sm font-medium bg-primary text-white rounded-md hover:bg-primary/90 transition-colors">
+              {{ t('project.list.filterDone') }}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
 
-    <!-- Environment filter chips -->
-    <div v-if="envOptions.length > 0" class="flex items-center flex-wrap gap-2">
-      <span class="text-xs text-textMuted/80 mr-1 shrink-0">{{ t('project.list.filterEnvLabel') }}</span>
-      <button
-        @click="selectedEnvFilter = 'all'"
-        class="flex items-center px-3 py-1.5 rounded-full text-xs border transition-colors"
-        :class="selectedEnvFilter === 'all' ? 'bg-primary/15 text-primary border-primary/40' : 'bg-base text-textMuted border-border hover:text-textMain'"
-      >
-        {{ t('project.list.filterAll') }}
-        <span class="ml-1.5 text-[10px] opacity-75">{{ projectCountByEnv.all }}</span>
-      </button>
-      <button
-        v-if="projectCountByEnv.default > 0"
-        @click="selectedEnvFilter = 'default'"
-        class="flex items-center px-3 py-1.5 rounded-full text-xs border transition-colors"
-        :class="selectedEnvFilter === 'default' ? 'bg-primary/15 text-primary border-primary/40' : 'bg-base text-textMuted border-border hover:text-textMain'"
-        :title="t('project.list.filterEnvUnspecifiedTitle')"
-      >
-        {{ t('project.list.filterEnvUnspecified') }}
-        <span class="ml-1.5 text-[10px] opacity-75">{{ projectCountByEnv.default }}</span>
-      </button>
-      <button
-        v-for="env in envOptions"
-        :key="env"
-        @click="selectedEnvFilter = env"
-        class="flex items-center px-3 py-1.5 rounded-full text-xs border transition-colors font-mono"
-        :class="selectedEnvFilter === env ? 'bg-primary/15 text-primary border-primary/40' : `${envChipClass(env)} hover:opacity-90`"
-      >
-        {{ env }}
-        <span class="ml-1.5 text-[10px] opacity-75 font-sans">{{ projectCountByEnv[env] || 0 }}</span>
-      </button>
-    </div>
-
-    <!-- Tag filter chips (multi-select AND) -->
-    <div v-if="projectStore.tags.length > 0" class="flex items-center flex-wrap gap-2">
-      <span class="text-xs text-textMuted/80 mr-1 shrink-0">{{ t('project.list.filterTagsLabel') }}</span>
-      <button
-        v-for="tg in projectStore.tags"
-        :key="tg.id"
-        @click="toggleTagFilter(tg.id)"
-        class="flex items-center px-3 py-1.5 rounded-full text-xs border transition-colors"
-        :class="selectedTagIds.includes(tg.id) ? `${tagChipClass(tg.color)} ring-1 ring-primary/40` : 'bg-base text-textMuted border-border hover:text-textMain hover:border-textMuted/40'"
-        :title="selectedTagIds.includes(tg.id) ? t('project.list.filterTagRemoveTitle') : t('project.list.filterTagAddTitle')"
-      >
-        <Tag class="w-3 h-3 mr-1.5" />
-        {{ tg.name }}
-        <span v-if="tg.projectCount != null" class="ml-1.5 text-[10px] opacity-75">{{ tg.projectCount }}</span>
-      </button>
-      <button
-        v-if="selectedTagIds.length > 0"
-        @click="clearTagFilters"
-        class="flex items-center px-2 py-1.5 rounded-full text-[11px] text-textMuted hover:text-textMain transition-colors"
-        :title="t('project.list.filterClearTagsTitle')"
-      >
-        <XIcon class="w-3 h-3 mr-1" /> {{ t('project.list.filterClearTags') }}
-      </button>
-    </div>
+    <Teleport to="body">
+      <div
+        v-if="filtersOpen || displayOpen"
+        class="fixed inset-0 z-20 bg-black/50 sm:hidden"
+        @click="filtersOpen = false; displayOpen = false"
+      ></div>
+    </Teleport>
 
     <!-- Card view -->
     <div v-if="viewMode === 'card'" class="space-y-6">
@@ -1370,7 +1959,7 @@ async function confirmBulkFillRecent() {
       <template v-else>
         <section v-for="g in groupedProjects" :key="g.key">
           <button
-            v-if="groupBy !== 'none'"
+            v-if="groupBy !== 'none' || g.pinned"
             type="button"
             class="flex items-center w-full mb-3 py-2 px-1 text-left group/gh transition-colors"
             @click.stop="toggleGroupCollapsed(g.key)"
@@ -1383,7 +1972,8 @@ async function confirmBulkFillRecent() {
               class="inline-flex items-center px-2 py-0.5 rounded text-[11px] border font-medium"
               :class="groupHeaderChipClass(g)"
             >
-              <FolderTree v-if="groupBy === 'category'" class="w-3 h-3 mr-1" />
+              <Star v-if="g.pinned" class="w-3 h-3 mr-1 fill-current" />
+              <FolderTree v-else-if="groupBy === 'category'" class="w-3 h-3 mr-1" />
               <Activity v-else class="w-3 h-3 mr-1" />
               {{ g.label }}
             </span>
@@ -1397,7 +1987,9 @@ async function confirmBulkFillRecent() {
             <div
               v-for="project in g.projects"
               :key="project.id"
-              class="group bg-panel border rounded-xl p-5 transition-all shadow-sm cursor-pointer relative overflow-hidden"
+              :data-project-id="project.id"
+              tabindex="-1"
+              class="group bg-panel border rounded-xl p-5 transition-all shadow-sm cursor-pointer relative overflow-hidden outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
               :class="bulk.isSelected(project.id) ? 'border-primary/60 ring-1 ring-primary/40' : 'border-border hover:border-primary/50'"
               @click="goToDetail(project.id)"
             >
@@ -1433,6 +2025,17 @@ async function confirmBulkFillRecent() {
                   >
                     {{ project.env }}
                   </span>
+                  <button
+                    type="button"
+                    class="p-1 rounded-md transition-colors"
+                    :class="project.pinnedAt ? 'text-primary' : 'text-textMuted hover:text-textMain'"
+                    :disabled="pinningIds.has(project.id)"
+                    :title="project.pinnedAt ? t('project.list.unpin') : t('project.list.pin')"
+                    :aria-pressed="Boolean(project.pinnedAt)"
+                    @click.stop="togglePinned(project)"
+                  >
+                    <Star class="w-4 h-4" :class="project.pinnedAt ? 'fill-current' : ''" />
+                  </button>
                   <div class="relative">
                     <button class="p-1 dark:hover:bg-white/10 hover:bg-black/10 rounded-md transition-colors text-textMuted hover:text-textMain" @click.stop="toggleDropdown(project.id, $event)">
                       <MoreVertical class="w-4 h-4" />
@@ -1525,7 +2128,7 @@ async function confirmBulkFillRecent() {
           </tr>
         </tbody>
         <template v-for="g in groupedProjects" :key="g.key">
-          <tbody v-if="filteredProjects.length > 0 && groupBy !== 'none'">
+          <tbody v-if="filteredProjects.length > 0 && (groupBy !== 'none' || g.pinned)">
             <tr class="bg-base/40 border-t border-border">
               <td colspan="8" class="px-3 py-2">
                 <button
@@ -1541,7 +2144,8 @@ async function confirmBulkFillRecent() {
                     class="inline-flex items-center px-2 py-0.5 rounded text-[11px] border font-medium"
                     :class="groupHeaderChipClass(g)"
                   >
-                    <FolderTree v-if="groupBy === 'category'" class="w-3 h-3 mr-1" />
+                    <Star v-if="g.pinned" class="w-3 h-3 mr-1 fill-current" />
+                    <FolderTree v-else-if="groupBy === 'category'" class="w-3 h-3 mr-1" />
                     <Activity v-else class="w-3 h-3 mr-1" />
                     {{ g.label }}
                   </span>
@@ -1554,7 +2158,9 @@ async function confirmBulkFillRecent() {
             <tr
               v-for="project in g.projects"
               :key="project.id"
-              class="border-t border-border cursor-pointer"
+              :data-project-id="project.id"
+              tabindex="-1"
+              class="border-t border-border cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/60"
               :class="bulk.isSelected(project.id) ? 'bg-primary/5 hover:bg-primary/10' : 'hover:bg-white/5'"
               @click="goToDetail(project.id)"
             >
@@ -1608,9 +2214,22 @@ async function confirmBulkFillRecent() {
                 </span>
               </td>
               <td class="px-4 py-3 text-right">
-                <button class="p-1 dark:hover:bg-white/10 hover:bg-black/10 rounded-md text-textMuted hover:text-textMain" @click.stop="toggleDropdown(project.id, $event)">
-                  <MoreVertical class="w-4 h-4" />
-                </button>
+                <div class="flex items-center justify-end gap-1">
+                  <button
+                    type="button"
+                    class="p-1 rounded-md transition-colors"
+                    :class="project.pinnedAt ? 'text-primary' : 'text-textMuted hover:text-textMain'"
+                    :disabled="pinningIds.has(project.id)"
+                    :title="project.pinnedAt ? t('project.list.unpin') : t('project.list.pin')"
+                    :aria-pressed="Boolean(project.pinnedAt)"
+                    @click.stop="togglePinned(project)"
+                  >
+                    <Star class="w-4 h-4" :class="project.pinnedAt ? 'fill-current' : ''" />
+                  </button>
+                  <button class="p-1 dark:hover:bg-white/10 hover:bg-black/10 rounded-md text-textMuted hover:text-textMain" @click.stop="toggleDropdown(project.id, $event)">
+                    <MoreVertical class="w-4 h-4" />
+                  </button>
+                </div>
               </td>
             </tr>
           </tbody>
@@ -1634,6 +2253,16 @@ async function confirmBulkFillRecent() {
           >
             <Pencil class="w-3.5 h-3.5 mr-2 text-textMuted" />
             {{ t('project.list.ddRename') }}
+          </button>
+          <button
+            class="flex items-center w-full px-3 py-2 text-sm text-textMain hover:bg-white/5 transition-colors"
+            @click="(() => { const p = projectStore.projects.find(x => x.id === openDropdownId); closeDropdown(); if (p) togglePinned(p) })()"
+          >
+            <Star
+              class="w-3.5 h-3.5 mr-2"
+              :class="projectStore.projects.find(x => x.id === openDropdownId)?.pinnedAt ? 'text-primary fill-current' : 'text-textMuted'"
+            />
+            {{ projectStore.projects.find(x => x.id === openDropdownId)?.pinnedAt ? t('project.list.unpin') : t('project.list.pin') }}
           </button>
           <button
             class="flex items-center w-full px-3 py-2 text-sm text-textMain hover:bg-white/5 transition-colors"
@@ -2555,10 +3184,58 @@ async function confirmBulkFillRecent() {
         </p>
       </div>
     </ConfirmDialog>
+
+    <!-- Saved view name modal -->
+    <div
+      v-if="showViewNameModal"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+      @click.self="showViewNameModal = false"
+    >
+      <div class="bg-panel border border-border rounded-xl w-full max-w-md p-6 shadow-2xl">
+        <h2 class="text-lg font-semibold text-textMain mb-4">
+          {{ viewNameMode === 'create' ? t('project.list.viewSaveTitle') : t('project.list.viewRenameTitle') }}
+        </h2>
+        <label class="block text-sm font-medium text-textMuted mb-1.5">{{ t('project.list.viewNameLabel') }}</label>
+        <input
+          v-model="viewNameInput"
+          type="text"
+          maxlength="50"
+          :disabled="isSavingViewName"
+          class="w-full bg-base border border-border rounded-md px-3 py-2 text-textMain focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all text-sm disabled:opacity-60"
+          :placeholder="t('project.list.viewNamePlaceholder')"
+          @keydown.enter.prevent="submitViewName"
+        />
+        <p class="text-xs text-textMuted mt-2">{{ t('project.list.viewNameHint') }}</p>
+        <div class="mt-6 flex justify-end space-x-3">
+          <button
+            type="button"
+            @click="showViewNameModal = false"
+            :disabled="isSavingViewName"
+            class="px-4 py-2 text-sm font-medium text-textMuted hover:text-textMain dark:hover:bg-white/5 hover:bg-black/5 rounded-md transition-colors disabled:opacity-50"
+          >{{ t('common.cancel') }}</button>
+          <button
+            type="button"
+            @click="submitViewName"
+            :disabled="isSavingViewName || !viewNameInput.trim()"
+            class="px-4 py-2 text-sm font-medium bg-primary text-white rounded-md hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center"
+          >
+            <RefreshCw v-if="isSavingViewName" class="w-4 h-4 mr-2 animate-spin" />
+            {{ t('common.confirm') }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <style scoped>
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
 .fade-enter-active,
 .fade-leave-active {
   transition: opacity 0.12s ease;
