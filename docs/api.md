@@ -142,7 +142,7 @@ Authorization: Bearer <YOUR_ADMIN_TOKEN>
   ```
 
 ### 2.7 获取最近成功部署的脚本
-用于「一键填入最近成功的指令」：返回项目当前配置的脚本，以及最近一次成功部署实际生效的 pre/post 脚本快照。
+用于「一键填入最近成功的指令」：返回项目当前配置的脚本，以及最近一次**真正执行过脚本**的成功部署实际生效的 pre/post 脚本快照（若最近的成功部署未执行脚本会继续向前回溯）。
 
 * **URL**: `/api/projects/:id/recent-scripts`
 * **Method**: `GET`
@@ -160,7 +160,7 @@ Authorization: Bearer <YOUR_ADMIN_TOKEN>
     }
   }
   ```
-  * `source`: `structured`（来自部署行的结构化快照）/ `parsed`（从历史部署日志回退解析）/ `none`（无记录）。
+  * `source`: `structured`（来自部署行的结构化快照）/ `parsed`（从历史部署日志回退解析，兼容 `[Kite Deploy]` / `[Kite Rollback]` 及旧版 `[Deploy]` 前缀）/ `none`（无记录）。
   * `recent` 为 `null` 时表示该项目没有任何成功部署记录。
 
 ### 2.8 批量操作项目

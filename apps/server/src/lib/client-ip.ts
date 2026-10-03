@@ -51,6 +51,7 @@ export function resolveActorIp(headers: Record<string, string | string[] | undef
 export function resolveClientIp(input: ClientIpInput): ClientIpResult {
   const socketIp = normalizeIp(input.socketRemoteAddress || '');
   const headers = input.headers || {};
+  const injected = headerString(headers[CLIENT_IP_HEADER]) || headerString(headers['X-Kite-Client-Ip' as any]);
   const xff = headerString(headers['x-forwarded-for']) || headerString(headers['X-Forwarded-For' as any]);
   const realIp = headerString(headers['x-real-ip']) || headerString(headers['X-Real-IP' as any]);
 
@@ -61,9 +62,13 @@ export function resolveClientIp(input: ClientIpInput): ClientIpResult {
     forwardedIp = normalizeIp(realIp.trim());
   }
 
+  // 与白名单校验（resolveActorIp）保持一致：优先使用 HTTP 层注入的客户端 IP，
+  // 否则本地直连（无反向代理）时 whoami 会解析为空，导致“当前访问 IP 未知”。
+  const injectedIp = typeof injected === 'string' && injected.length > 0 ? normalizeIp(injected) : '';
+
   return {
     socketIp,
     forwardedIp,
-    trusted: socketIp || forwardedIp || '',
+    trusted: injectedIp || socketIp || forwardedIp || '',
   };
 }

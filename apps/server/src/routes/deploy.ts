@@ -32,6 +32,7 @@ import {
 import { notifyDeployment } from '../lib/webhook.js';
 import { resolveActorIp } from '../lib/client-ip.js';
 import { checkIpAllowlist } from '../lib/ip-guard.js';
+import { pickRecentScripts, type RecentScripts } from '../lib/recent-scripts.js';
 
 const deployLog = moduleLogger('deploy');
 
@@ -127,55 +128,16 @@ async function* runShellCommand(command: string, cwd: string, env?: Record<strin
   yield `\x00EXIT:${exitCode}`;
 }
 
-// 提取日志行里的 hook 命令（用于存量历史无结构化列时回退解析）
-const HOOK_LOG_PREFIX = /^\d{4}-\d{2}-\d{2}T\S+\s/;
-const PRE_HOOK_RE = /^\[Kite (?:Deploy|Rollback)\] Running Pre-deploy: (.*)$/;
-const POST_HOOK_RE = /^\[Kite (?:Deploy|Rollback)\] (?:Running Post-deploy|Dispatching Post-deploy asynchronously \(not waiting\)): (.*)$/;
-
 function hookCommandSummary(cmd: string): string {
   const oneLine = cmd.replace(/\s+/g, ' ').trim();
   return oneLine.length > 200 ? oneLine.slice(0, 200) + '…' : oneLine;
 }
 
-export interface RecentScripts {
-  deployId: string;
-  deployedAt: string;
-  source: 'structured' | 'parsed' | 'none';
-  preDeploy: string | null;
-  postDeploy: string | null;
-}
-
-// 取项目「最近一次成功部署」的实际生效命令：优先结构化快照，其次解析历史日志文本
+// 取项目「最近一次真正执行过 hook 的成功部署」的实际生效命令：
+// 优先结构化快照，其次回退解析历史日志文本；最近的若干次成功部署若无 hook 会继续向前回溯。
 export async function resolveRecentScripts(projectId: string): Promise<RecentScripts | null> {
   const history = await db.deployments.findByProject(projectId);
-  const latest = history.find((d) => d.status === 'success');
-  if (!latest) return null;
-
-  const preSnapshot = latest.preDeployScript ?? null;
-  const postSnapshot = latest.postDeployScript ?? null;
-  if (preSnapshot || postSnapshot) {
-    return {
-      deployId: latest.id,
-      deployedAt: latest.startTime,
-      source: 'structured',
-      preDeploy: preSnapshot,
-      postDeploy: postSnapshot,
-    };
-  }
-
-  let parsedPre: string | null = null;
-  let parsedPost: string | null = null;
-  for (const raw of (latest.output || '').split('\n')) {
-    const line = raw.replace(HOOK_LOG_PREFIX, '');
-    const mPre = line.match(PRE_HOOK_RE);
-    if (mPre) parsedPre = mPre[1].trim();
-    const mPost = line.match(POST_HOOK_RE);
-    if (mPost) parsedPost = mPost[1].trim();
-  }
-  if (!parsedPre && !parsedPost) {
-    return { deployId: latest.id, deployedAt: latest.startTime, source: 'none', preDeploy: null, postDeploy: null };
-  }
-  return { deployId: latest.id, deployedAt: latest.startTime, source: 'parsed', preDeploy: parsedPre, postDeploy: parsedPost };
+  return pickRecentScripts(history);
 }
 
 export const deployRoutes = new Elysia()
