@@ -48,3 +48,106 @@
 ::-webkit-scrollbar-thumb:hover {
   @apply bg-textMuted;
 }
+
+@layer components {
+  .md-preview {
+    @apply text-sm leading-6 text-textMain;
+  }
+
+  .md-preview > :first-child {
+    @apply mt-0;
+  }
+
+  .md-preview > :last-child {
+    @apply mb-0;
+  }
+
+  .md-preview h1 {
+    @apply mb-3 mt-6 border-b border-border pb-2 text-xl font-semibold text-textMain;
+  }
+
+  .md-preview h2 {
+    @apply mb-3 mt-6 border-b border-border pb-1.5 text-lg font-semibold text-textMain;
+  }
+
+  .md-preview h3 {
+    @apply mb-2 mt-5 text-base font-semibold text-textMain;
+  }
+
+  .md-preview h4,
+  .md-preview h5,
+  .md-preview h6 {
+    @apply mb-2 mt-4 text-sm font-semibold text-textMain;
+  }
+
+  .md-preview p {
+    @apply my-3 leading-6 text-textMain;
+  }
+
+  .md-preview a {
+    @apply text-primary underline underline-offset-2;
+  }
+
+  .md-preview a:hover {
+    @apply opacity-80;
+  }
+
+  .md-preview strong {
+    @apply font-semibold text-textMain;
+  }
+
+  .md-preview em {
+    @apply italic;
+  }
+
+  .md-preview ul {
+    @apply my-3 list-disc space-y-1 pl-5;
+  }
+
+  .md-preview ol {
+    @apply my-3 list-decimal space-y-1 pl-5;
+  }
+
+  .md-preview li > ul,
+  .md-preview li > ol {
+    @apply my-1;
+  }
+
+  .md-preview blockquote {
+    @apply my-3 pl-3 text-textMuted;
+    border-left: 2px solid color-mix(in srgb, var(--color-primary) 40%, transparent);
+  }
+
+  .md-preview code {
+    @apply rounded bg-black/[0.06] px-1 py-0.5 font-mono text-[12px] text-textMain dark:bg-white/10;
+  }
+
+  .md-preview pre {
+    @apply my-3 overflow-x-auto rounded-md border border-border bg-black/[0.04] p-3 dark:bg-black/40;
+  }
+
+  .md-preview pre code {
+    @apply bg-transparent p-0 text-[12px] leading-5;
+  }
+
+  .md-preview hr {
+    @apply my-5 border-t border-border;
+  }
+
+  .md-preview table {
+    @apply my-3 w-full border-collapse text-sm;
+  }
+
+  .md-preview th,
+  .md-preview td {
+    @apply border border-border px-3 py-1.5 text-left align-top;
+  }
+
+  .md-preview th {
+    @apply bg-black/[0.03] font-semibold text-textMain dark:bg-white/5;
+  }
+
+  .md-preview img {
+    @apply my-3 max-w-full rounded-md border border-border;
+  }
+}

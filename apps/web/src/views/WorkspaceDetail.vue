@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import DOMPurify from 'dompurify'
@@ -10,9 +10,12 @@ import {
   ArrowLeft,
   Bot,
   Boxes,
+  ChevronDown,
+  ChevronUp,
   ClipboardList,
   Copy,
   FileText,
+  History,
   ImagePlus,
   KeyRound,
   Link2,
@@ -27,6 +30,7 @@ import {
   Unlink,
 } from 'lucide-vue-next'
 import WorkspaceBoard3D from '../components/WorkspaceBoard3D.vue'
+import ProviderLogo from '../components/ProviderLogo.vue'
 import { useToast } from '../composables/useToast'
 import { apiUrl } from '../lib/base'
 import { useProjectStore } from '../store/project'
@@ -86,12 +90,12 @@ const availableProjects = computed(() => {
 })
 
 const showRequirementCreate = ref(false)
+const showAcceptanceFields = ref(false)
 const requirementDraft = reactive({
   title: '',
   description: '',
   priority: 'P2',
   acceptanceCriteria: '',
-  tags: '',
   projectIds: [] as string[],
 })
 const editingRequirementId = ref('')
@@ -102,7 +106,6 @@ const requirementEdit = reactive({
   statusMode: 'auto' as 'auto' | 'manual',
   manualStatus: 'draft' as RequirementStatus,
   acceptanceCriteria: '',
-  tags: '',
   projectIds: [] as string[],
 })
 
@@ -123,8 +126,10 @@ const documentMode = ref<'edit' | 'preview'>('preview')
 const documentLinkRequirement = ref('')
 const documentLinkTask = ref('')
 const conflictLatest = ref<{ id: string; revisionNumber: number } | null>(null)
+const viewingRevisionId = ref('')
 const assetBlobUrls = ref<Record<string, string>>({})
 const imageInput = ref<HTMLInputElement | null>(null)
+const previewPane = ref<HTMLElement | null>(null)
 
 const newDocument = reactive({
   title: '',
@@ -138,6 +143,14 @@ const providerOptions: AgentProvider[] = ['cursor', 'claude', 'codex', 'workbudd
 const requirementStatuses: RequirementStatus[] = ['draft', 'ready', 'in_progress', 'blocked', 'done', 'cancelled']
 const taskStatuses: TaskStatus[] = ['todo', 'claimed', 'in_progress', 'blocked', 'review', 'done', 'cancelled']
 const documentKinds: DocumentKind[] = ['spec', 'design', 'handoff', 'report', 'note']
+
+const taskBoardColumns: Array<{ id: string; labelKey: string; states: TaskStatus[] }> = [
+  { id: 'todo', labelKey: 'workspace.taskTodo', states: ['todo'] },
+  { id: 'active', labelKey: 'workspace.statusInProgress', states: ['claimed', 'in_progress'] },
+  { id: 'review', labelKey: 'workspace.taskReview', states: ['review'] },
+  { id: 'blocked', labelKey: 'workspace.statusBlocked', states: ['blocked'] },
+  { id: 'done', labelKey: 'workspace.statusDone', states: ['done', 'cancelled'] },
+]
 
 let eventAbort: AbortController | null = null
 let pollTimer: number | undefined
@@ -208,6 +221,35 @@ function statusClass(status: string | null | undefined) {
     return 'border-sky-500/40 bg-sky-500/10 text-sky-300'
   }
   return 'border-border bg-base text-textMuted'
+}
+
+function columnDotClass(columnId: string) {
+  if (columnId === 'active') return 'bg-sky-400'
+  if (columnId === 'review') return 'bg-violet-400'
+  if (columnId === 'blocked') return 'bg-amber-400'
+  if (columnId === 'done') return 'bg-emerald-400'
+  return 'bg-slate-400'
+}
+
+function tasksByColumn(states: TaskStatus[]) {
+  return selectedRequirementTasks.value.filter((task) => states.includes(task.status))
+}
+
+function providerLabel(provider: string | null | undefined) {
+  if (!provider) return t('workspace.unassigned')
+  const map: Record<string, string> = {
+    cursor: 'Cursor',
+    claude: 'Claude',
+    codex: 'Codex',
+    workbuddy: 'WorkBuddy',
+    trae: 'Trae',
+    custom: 'Custom',
+  }
+  return map[provider] || provider
+}
+
+function clampProgress(value: number | null | undefined) {
+  return Math.min(100, Math.max(0, Math.round(Number(value) || 0)))
 }
 
 function formatTime(value?: string | null) {
@@ -304,6 +346,7 @@ async function loadDocument(documentId: string) {
     documentKind.value = document.kind
     documentContent.value = document.contentMarkdown || document.latestRevision?.contentMarkdown || ''
     conflictLatest.value = null
+    viewingRevisionId.value = document.currentRevisionId || document.latestRevision?.id || document.revisions[0]?.id || ''
     await loadDocumentAssets(document)
   } catch (error: any) {
     toast.error(error.message || t('common.requestFailed'))
@@ -319,6 +362,38 @@ const previewHtml = computed(() => {
   }
   return DOMPurify.sanitize(html)
 })
+
+const latestRevisionId = computed(() => activeDocument.value?.currentRevisionId || activeDocument.value?.latestRevision?.id || '')
+const viewingRevision = computed(() => activeDocument.value?.revisions.find((revision) => revision.id === viewingRevisionId.value) || null)
+const viewingHistory = computed(() => Boolean(viewingRevisionId.value && viewingRevisionId.value !== latestRevisionId.value))
+
+function scrollPreviewTop() {
+  void nextTick(() => {
+    if (previewPane.value) previewPane.value.scrollTop = 0
+  })
+}
+
+function selectRevision(revision: { id: string; contentMarkdown: string }) {
+  viewingRevisionId.value = revision.id
+  documentContent.value = revision.contentMarkdown
+  documentMode.value = 'preview'
+  scrollPreviewTop()
+}
+
+function backToLatestRevision() {
+  if (!activeDocument.value) return
+  viewingRevisionId.value = latestRevisionId.value
+  documentContent.value = activeDocument.value.latestRevision?.contentMarkdown ?? activeDocument.value.contentMarkdown ?? ''
+  scrollPreviewTop()
+}
+
+async function restoreViewedRevision() {
+  const revision = viewingRevision.value
+  if (!revision) return
+  documentContent.value = revision.contentMarkdown
+  viewingRevisionId.value = latestRevisionId.value
+  await commitRevision()
+}
 
 async function loadWorkspace() {
   if (!workspaceId.value) return
@@ -398,17 +473,14 @@ async function copyIssuedToken() {
 async function createRequirement() {
   if (!requirementDraft.title.trim()) return
   try {
-    const created = await store.createRequirement(workspaceId.value, {
-      ...requirementDraft,
-      tags: requirementDraft.tags.split(',').map((item) => item.trim()).filter(Boolean),
-    })
+    const created = await store.createRequirement(workspaceId.value, { ...requirementDraft })
     selectedRequirementId.value = created.id
     requirementDraft.title = ''
     requirementDraft.description = ''
     requirementDraft.acceptanceCriteria = ''
-    requirementDraft.tags = ''
     requirementDraft.projectIds = []
     showRequirementCreate.value = false
+    showAcceptanceFields.value = false
     await store.fetchBoard(workspaceId.value)
     toast.success(t('common.createSuccess'))
   } catch (error: any) {
@@ -424,17 +496,13 @@ function startRequirementEdit(requirement: Requirement) {
   requirementEdit.statusMode = requirement.statusMode
   requirementEdit.manualStatus = requirement.manualStatus || requirement.effectiveStatus
   requirementEdit.acceptanceCriteria = requirement.acceptanceCriteria || ''
-  requirementEdit.tags = requirement.tags.map((tag) => tag.name).join(', ')
   requirementEdit.projectIds = [...requirement.projectIds]
 }
 
 async function saveRequirementEdit() {
   if (!editingRequirementId.value) return
   try {
-    await store.updateRequirement(workspaceId.value, editingRequirementId.value, {
-      ...requirementEdit,
-      tags: requirementEdit.tags.split(',').map((item) => item.trim()).filter(Boolean),
-    })
+    await store.updateRequirement(workspaceId.value, editingRequirementId.value, { ...requirementEdit })
     editingRequirementId.value = ''
     await store.fetchBoard(workspaceId.value)
     toast.success(t('common.saveSuccess'))
@@ -812,19 +880,17 @@ onBeforeUnmount(() => {
           <form v-if="showRequirementCreate" class="space-y-3 border-b border-border bg-base/60 p-4" @submit.prevent="createRequirement">
             <input v-model="requirementDraft.title" class="h-9 w-full rounded-md border border-border bg-base px-3 text-sm text-textMain outline-none focus:border-primary" :placeholder="t('workspace.titleLabel')" />
             <textarea v-model="requirementDraft.description" rows="3" class="w-full rounded-md border border-border bg-base px-3 py-2 text-sm text-textMain outline-none focus:border-primary" :placeholder="t('workspace.description')" />
-            <div class="grid grid-cols-2 gap-2">
-              <select v-model="requirementDraft.priority" class="h-9 rounded-md border border-border bg-base px-2 text-sm text-textMain">
-                <option v-for="priority in ['P0', 'P1', 'P2', 'P3']" :key="priority" :value="priority">{{ priority }}</option>
-              </select>
-              <input v-model="requirementDraft.tags" class="h-9 rounded-md border border-border bg-base px-3 text-sm text-textMain outline-none focus:border-primary" :placeholder="t('workspace.tags')" />
-            </div>
-            <textarea v-model="requirementDraft.acceptanceCriteria" rows="2" class="w-full rounded-md border border-border bg-base px-3 py-2 text-sm text-textMain outline-none focus:border-primary" :placeholder="t('workspace.acceptance')" />
-            <select v-model="requirementDraft.projectIds" multiple class="min-h-20 w-full rounded-md border border-border bg-base px-2 py-1 text-sm text-textMain">
-              <option v-for="project in current.projects" :key="project.projectId" :value="project.projectId">{{ project.name }}</option>
+            <select v-model="requirementDraft.priority" class="h-9 w-full rounded-md border border-border bg-base px-2 text-sm text-textMain">
+              <option v-for="priority in ['P0', 'P1', 'P2', 'P3']" :key="priority" :value="priority">{{ priority }}</option>
             </select>
+            <textarea v-if="showAcceptanceFields" v-model="requirementDraft.acceptanceCriteria" rows="2" class="w-full rounded-md border border-border bg-base px-3 py-2 text-sm text-textMain outline-none focus:border-primary" :placeholder="t('workspace.acceptance')" />
+            <button type="button" class="inline-flex items-center gap-1 text-xs text-textMuted hover:text-textMain" @click="showAcceptanceFields = !showAcceptanceFields">
+              <component :is="showAcceptanceFields ? ChevronUp : ChevronDown" class="h-3.5 w-3.5" />
+              {{ showAcceptanceFields ? t('workspace.hideAcceptance') : t('workspace.addAcceptance') }}
+            </button>
             <div class="flex justify-end gap-2">
               <button type="button" class="h-8 rounded-md border border-border px-3 text-xs text-textMuted" @click="showRequirementCreate = false">{{ t('common.cancel') }}</button>
-              <button class="h-8 rounded-md bg-primary px-3 text-xs font-medium text-white disabled:opacity-50" :disabled="!requirementDraft.title.trim()">{{ t('workspace.create') }}</button>
+              <button class="h-8 rounded-md bg-primary px-3 text-xs font-medium text-white disabled:opacity-50" :disabled="!requirementDraft.title.trim()">{{ t('workspace.createRequirement') }}</button>
             </div>
           </form>
 
@@ -851,7 +917,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <div v-if="selectedRequirement" class="space-y-5">
+        <div v-if="selectedRequirement" class="min-w-0 space-y-5">
           <div class="rounded-lg border border-border bg-panel p-5">
             <div class="flex flex-wrap items-start justify-between gap-3">
               <div class="min-w-0">
@@ -908,7 +974,6 @@ onBeforeUnmount(() => {
                   <option v-for="status in requirementStatuses" :key="status" :value="status">{{ requirementStatusLabel(status) }}</option>
                 </select>
               </div>
-              <input v-model="requirementEdit.tags" class="h-9 rounded-md border border-border bg-base px-3 text-sm text-textMain outline-none focus:border-primary" :placeholder="t('workspace.tags')" />
               <select v-model="requirementEdit.projectIds" multiple class="min-h-24 rounded-md border border-border bg-base px-2 py-1 text-sm text-textMain lg:col-span-2">
                 <option v-for="project in current.projects" :key="project.projectId" :value="project.projectId">{{ project.name }}</option>
               </select>
@@ -938,32 +1003,61 @@ onBeforeUnmount(() => {
               <input v-model="taskDraft.title" class="h-9 rounded-md border border-border bg-base px-3 text-sm text-textMain outline-none focus:border-primary" :placeholder="t('workspace.titleLabel')" />
               <select v-model="taskDraft.assignedProvider" class="h-9 rounded-md border border-border bg-base px-2 text-sm text-textMain">
                 <option value="">{{ t('workspace.unassigned') }}</option>
-                <option v-for="provider in providerOptions" :key="provider" :value="provider">{{ provider }}</option>
+                <option v-for="provider in providerOptions" :key="provider" :value="provider">{{ providerLabel(provider) }}</option>
               </select>
               <textarea v-model="taskDraft.description" rows="3" class="rounded-md border border-border bg-base px-3 py-2 text-sm text-textMain outline-none focus:border-primary md:col-span-2" :placeholder="t('workspace.description')" />
               <div class="flex justify-end gap-2 md:col-span-2">
                 <button type="button" class="h-8 rounded-md border border-border px-3 text-xs text-textMuted" @click="showTaskCreate = false">{{ t('common.cancel') }}</button>
-                <button class="h-8 rounded-md bg-primary px-3 text-xs font-medium text-white disabled:opacity-50" :disabled="!taskDraft.title.trim()">{{ t('workspace.create') }}</button>
+                <button class="h-8 rounded-md bg-primary px-3 text-xs font-medium text-white disabled:opacity-50" :disabled="!taskDraft.title.trim()">{{ t('workspace.createTask') }}</button>
               </div>
             </form>
 
             <div v-if="selectedRequirementTasks.length === 0" class="px-5 py-12 text-center text-sm text-textMuted">{{ t('workspace.noTasks') }}</div>
-            <div v-else class="divide-y divide-border">
-              <div v-for="task in selectedRequirementTasks" :key="task.id" class="grid gap-3 px-5 py-3 md:grid-cols-[1fr_160px_150px_110px] md:items-center">
-                <button class="min-w-0 text-left" @click="selectTask(task)">
-                  <div class="truncate text-sm font-medium text-textMain">{{ task.title }}</div>
-                  <div class="mt-0.5 truncate text-xs text-textMuted">{{ task.description || '-' }}</div>
-                </button>
-                <select :value="task.assignedProvider || ''" class="h-8 rounded-md border border-border bg-base px-2 text-xs text-textMain" @change="assignTask(task.id, (($event.target as HTMLSelectElement).value || null) as AgentProvider | null)">
-                  <option value="">{{ t('workspace.unassigned') }}</option>
-                  <option v-for="provider in providerOptions" :key="provider" :value="provider">{{ provider }}</option>
-                </select>
-                <select :value="task.status" class="h-8 rounded-md border border-border bg-base px-2 text-xs text-textMain" @change="updateTaskStatus(task.id, ($event.target as HTMLSelectElement).value as TaskStatus)">
-                  <option v-for="status in taskStatuses" :key="status" :value="status">{{ taskStatusLabel(status) }}</option>
-                </select>
-                <div class="flex items-center gap-2 text-xs text-textMuted">
-                  <span>{{ task.progress ?? 0 }}%</span>
-                  <span class="rounded border px-1.5 py-0.5" :class="statusClass(task.status)">{{ taskStatusLabel(task.status) }}</span>
+            <div v-else class="p-4">
+              <div class="grid auto-cols-[minmax(236px,1fr)] grid-flow-col gap-3 overflow-x-auto pb-1">
+                <div v-for="column in taskBoardColumns" :key="column.id" class="flex min-w-0 flex-col rounded-md border border-border bg-base/60">
+                  <div class="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
+                    <span class="inline-flex items-center gap-1.5 text-xs font-semibold text-textMain">
+                      <span class="h-1.5 w-1.5 rounded-full" :class="columnDotClass(column.id)" />
+                      {{ t(column.labelKey) }}
+                    </span>
+                    <span class="text-[11px] tabular-nums text-textMuted">{{ tasksByColumn(column.states).length }}</span>
+                  </div>
+                  <div class="flex-1 space-y-2 p-2">
+                    <div v-if="tasksByColumn(column.states).length === 0" class="rounded-md border border-dashed border-border px-3 py-6 text-center text-[11px] text-textMuted">-</div>
+                    <article v-for="task in tasksByColumn(column.states)" :key="task.id" class="rounded-md border border-border bg-panel p-3 transition-colors hover:border-primary/40">
+                      <div class="flex items-start justify-between gap-2">
+                        <button class="min-w-0 flex-1 text-left" @click="selectTask(task)">
+                          <span class="line-clamp-2 text-sm font-medium text-textMain">{{ task.title }}</span>
+                        </button>
+                        <span class="shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-semibold" :class="statusClass(task.status)">{{ taskStatusLabel(task.status) }}</span>
+                      </div>
+                      <p v-if="task.description" class="mt-2 line-clamp-2 text-xs leading-5 text-textMuted">{{ task.description }}</p>
+                      <div class="mt-3 flex items-center gap-1.5">
+                        <ProviderLogo v-if="task.assignedProvider" :provider="task.assignedProvider" :size="14" />
+                        <Bot v-else class="h-3.5 w-3.5 text-textMuted" />
+                        <span class="truncate text-[11px] text-textMuted">{{ providerLabel(task.assignedProvider) }}</span>
+                      </div>
+                      <div class="mt-3">
+                        <div class="h-1.5 w-full overflow-hidden rounded-full bg-border">
+                          <div class="h-full rounded-full bg-primary" :style="{ width: `${clampProgress(task.progress)}%` }" />
+                        </div>
+                        <div class="mt-1 flex items-center justify-between gap-2 text-[11px] text-textMuted">
+                          <span class="tabular-nums">{{ clampProgress(task.progress) }}%</span>
+                          <span class="truncate">{{ formatTime(task.lastActivityAt) }}</span>
+                        </div>
+                      </div>
+                      <div class="mt-3 grid grid-cols-2 gap-2">
+                        <select :value="task.assignedProvider || ''" class="h-7 w-full rounded border border-border bg-base px-1.5 text-[11px] text-textMain" @change="assignTask(task.id, (($event.target as HTMLSelectElement).value || null) as AgentProvider | null)">
+                          <option value="">{{ t('workspace.unassigned') }}</option>
+                          <option v-for="provider in providerOptions" :key="provider" :value="provider">{{ providerLabel(provider) }}</option>
+                        </select>
+                        <select :value="task.status" class="h-7 w-full rounded border border-border bg-base px-1.5 text-[11px] text-textMain" @change="updateTaskStatus(task.id, ($event.target as HTMLSelectElement).value as TaskStatus)">
+                          <option v-for="status in taskStatuses" :key="status" :value="status">{{ taskStatusLabel(status) }}</option>
+                        </select>
+                      </div>
+                    </article>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1004,7 +1098,7 @@ onBeforeUnmount(() => {
             </select>
             <div class="flex justify-end gap-2">
               <button type="button" class="h-8 rounded-md border border-border px-3 text-xs text-textMuted" @click="showDocumentCreate = false">{{ t('common.cancel') }}</button>
-              <button class="h-8 rounded-md bg-primary px-3 text-xs font-medium text-white disabled:opacity-50" :disabled="!newDocument.title.trim()">{{ t('workspace.create') }}</button>
+              <button class="h-8 rounded-md bg-primary px-3 text-xs font-medium text-white disabled:opacity-50" :disabled="!newDocument.title.trim()">{{ t('workspace.createDocument') }}</button>
             </div>
           </form>
 
@@ -1052,8 +1146,16 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <div class="grid gap-5 p-4 2xl:grid-cols-[1fr_1fr]">
+          <div class="grid gap-5 p-4 2xl:grid-cols-[minmax(0,1fr)_340px]">
             <div class="min-w-0">
+              <div v-if="viewingHistory" class="mb-2 flex flex-wrap items-center gap-2 rounded-md border border-warning/40 bg-warning/5 px-3 py-2 text-xs text-textMain">
+                <History class="h-3.5 w-3.5 shrink-0 text-warning" />
+                <span>{{ t('workspace.viewingHistory', { revision: viewingRevision?.revisionNumber ?? '' }) }}</span>
+                <div class="ml-auto flex shrink-0 gap-2">
+                  <button type="button" class="rounded border border-border px-2 py-1 text-[11px] text-textMuted hover:text-textMain" @click="backToLatestRevision">{{ t('workspace.backToLatest') }}</button>
+                  <button type="button" class="rounded border border-primary/40 bg-primary/10 px-2 py-1 text-[11px] text-primary" @click="restoreViewedRevision">{{ t('workspace.restoreRevision') }}</button>
+                </div>
+              </div>
               <div class="mb-2 flex items-center justify-between">
                 <div class="flex rounded-md border border-border p-0.5">
                   <button class="rounded px-3 py-1.5 text-xs" :class="documentMode === 'edit' ? 'bg-primary/10 text-primary' : 'text-textMuted'" @click="documentMode = 'edit'">{{ t('workspace.edit') }}</button>
@@ -1071,7 +1173,12 @@ onBeforeUnmount(() => {
                 class="h-[560px] w-full resize-none rounded-md border border-border bg-base p-4 font-mono text-sm leading-6 text-textMain outline-none focus:border-primary"
                 :placeholder="t('workspace.content')"
               />
-              <div v-else class="prose prose-invert h-[560px] max-w-none overflow-y-auto rounded-md border border-border bg-base p-5 text-sm text-textMain" v-html="previewHtml" />
+              <div v-else ref="previewPane" class="h-[560px] max-w-none overflow-y-auto rounded-md border border-border bg-base text-sm text-textMain">
+                <div v-if="!documentContent.trim()" class="flex h-full items-center justify-center px-6 text-center text-xs text-textMuted">
+                  {{ t('workspace.emptyRevision') }}
+                </div>
+                <div v-else class="md-preview p-5" v-html="previewHtml" />
+              </div>
             </div>
 
             <aside class="space-y-4">
@@ -1101,11 +1208,23 @@ onBeforeUnmount(() => {
               </div>
 
               <div class="rounded-md border border-border bg-base p-4">
-                <h3 class="text-xs font-semibold text-textMain">{{ t('workspace.revision') }}</h3>
-                <div class="mt-3 space-y-2">
-                  <button v-for="revision in activeDocument.revisions.slice(0, 8)" :key="revision.id" class="flex w-full items-center justify-between gap-3 rounded border px-3 py-2 text-left text-xs" :class="revision.id === activeDocument.currentRevisionId ? 'border-primary/40 bg-primary/5 text-primary' : 'border-border text-textMuted'" @click="documentContent = revision.contentMarkdown">
-                    <span>#{{ revision.revisionNumber }}</span>
-                    <span>{{ formatTime(revision.createdAt) }}</span>
+                <div class="flex items-center justify-between gap-2">
+                  <h3 class="text-xs font-semibold text-textMain">{{ t('workspace.revision') }}</h3>
+                  <span class="text-[11px] tabular-nums text-textMuted">{{ activeDocument.revisions.length }}</span>
+                </div>
+                <div class="mt-3 max-h-72 space-y-2 overflow-y-auto pr-1">
+                  <button
+                    v-for="revision in activeDocument.revisions"
+                    :key="revision.id"
+                    class="flex w-full items-center justify-between gap-3 rounded border px-3 py-2 text-left text-xs transition-colors"
+                    :class="revision.id === viewingRevisionId ? 'border-primary/50 bg-primary/10 text-primary' : 'border-border text-textMuted hover:border-primary/30 hover:text-textMain'"
+                    @click="selectRevision(revision)"
+                  >
+                    <span class="inline-flex items-center gap-2">
+                      <span>#{{ revision.revisionNumber }}</span>
+                      <span v-if="revision.id === latestRevisionId" class="rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-px text-[10px] text-emerald-300">{{ t('workspace.currentRevision') }}</span>
+                    </span>
+                    <span class="truncate">{{ formatTime(revision.createdAt) }}</span>
                   </button>
                 </div>
               </div>
@@ -1119,22 +1238,13 @@ onBeforeUnmount(() => {
       </section>
 
       <section v-else class="space-y-5">
-        <WorkspaceBoard3D class="hidden md:block" :agents="agents" :unassigned="unassignedTasks" @select-agent="selectAgent" @select-task="selectTask" />
-
-        <div class="grid grid-cols-2 gap-3 md:hidden">
-          <button v-for="agent in agents" :key="agent.id" class="rounded-lg border border-border bg-panel p-4 text-left" @click="selectAgent(agent)">
-            <div class="flex items-center justify-between">
-              <span class="text-sm font-medium capitalize text-textMain">{{ agent.provider }}</span>
-              <span class="h-2.5 w-2.5 rounded-full" :class="{
-                'bg-sky-400': agent.state === 'working',
-                'bg-slate-500': agent.state === 'idle',
-                'bg-amber-500': agent.state === 'blocked',
-                'bg-red-500': agent.state === 'stalled',
-              }" />
-            </div>
-            <div class="mt-3 text-xs text-textMuted">{{ agentStateLabel(agent.state) }} · {{ agent.openTaskIds.length }} {{ t('workspace.openTasks') }}</div>
-          </button>
-        </div>
+        <WorkspaceBoard3D
+          :agents="agents"
+          :tasks="workspaceTasks"
+          :unassigned="unassignedTasks"
+          @select-agent="selectAgent"
+          @select-task="selectTask"
+        />
 
         <div class="grid gap-5 xl:grid-cols-[1fr_1fr]">
           <div class="rounded-lg border border-border bg-panel">
@@ -1145,8 +1255,8 @@ onBeforeUnmount(() => {
             <div v-if="agents.length === 0" class="px-5 py-12 text-center text-sm text-textMuted">{{ t('workspace.noAgents') }}</div>
             <div v-else class="divide-y divide-border">
               <button v-for="agent in agents" :key="agent.id" class="flex w-full items-center gap-3 px-5 py-3 text-left hover:bg-white/[0.02]" @click="selectAgent(agent)">
-                <span class="flex h-9 w-9 items-center justify-center rounded-md border border-border bg-base">
-                  <Bot class="h-4 w-4 text-textMuted" />
+                <span class="flex h-9 w-9 items-center justify-center rounded-md border border-border bg-base text-textMain">
+                  <ProviderLogo :provider="agent.provider" :size="18" />
                 </span>
                 <span class="min-w-0 flex-1">
                   <span class="block text-sm font-medium capitalize text-textMain">{{ agent.provider }}</span>

@@ -67,6 +67,7 @@ export function deriveRequirementStatus(input: {
   if (effective.some((status) => (ACTIVE_TASK_STATUSES as readonly string[]).includes(status))) return 'in_progress';
   if (effective.some((status) => status === 'blocked')) return 'blocked';
   if (effective.every((status) => status === 'todo')) return 'ready';
+  if (effective.some((status) => status === 'done')) return 'in_progress';
   return 'draft';
 }
 

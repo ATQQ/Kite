@@ -6,10 +6,10 @@
 ## 0. 测试准备
 
 - [x] 使用旧版本数据库 fixture 或现有 `~/.kite/kite.db` 备份启动一次服务，确认旧 `projects` / `deployments` 数据完整。
-- [ ] 准备一个可用管理员 Token（`ADMIN_TOKEN`）。
+- [x] 准备一个可用管理员 Token（`ADMIN_TOKEN`）。
 - [ ] 准备至少 2 个已存在项目，用于 Workspace 多项目关联。
 - [ ] 准备一个空仓库目录，用于 CLI `workspace init` 验证。
-- [ ] 确认运行环境同时具备 `--runtime node` 与 `--runtime bun` 条件。
+- [x] 确认运行环境同时具备 `--runtime node` 与 `--runtime bun` 条件。
 - [ ] 记录当前 `~/.kite/config.json` 内容，验证后确认仅新增 `workspaceToken` 字段。
 
 ## 1. 数据模型与迁移
@@ -60,6 +60,7 @@
   - [ ] 存在 active 任务（claimed/in_progress/review）→ `in_progress`
   - [ ] 无 active 但存在 blocked → `blocked`
   - [ ] 全部 todo → `ready`
+  - [ ] 部分完成且其余为 todo（无 active / blocked）→ `in_progress`
   - [ ] 无任务 → `draft`
 - [ ] 人工覆盖优先级高于自动规则。
 - [ ] 归档需求后历史任务与文档链接仍可追溯，未物理删除。
@@ -189,23 +190,25 @@
 
 ## 11. Board 与实时
 
-- [ ] 桌面端 Board 渲染 Three.js 全屏低多边形办公室，每个 Provider 一个工位。
-- [ ] 工位颜色/状态与 `working|idle|blocked|stalled` 一致。
-- [ ] 待分配任务池可见，数量与 `/board` 数据一致。
-- [ ] 点击角色或待分配任务打开 2D 详情，操作仍走 2D。
-- [ ] 窗口缩放后 canvas 不空白、不变形、无水平溢出。
-- [ ] 移动端 3D canvas 隐藏，降级为同数据源 2D 状态板。
-- [ ] 无活跃 Agent 时 Board 不报错，显示空状态。
-- [ ] `GET /api/workspaces/:id/events` 返回 `text/event-stream`，SSE 连接成功。
-- [ ] 任务状态、文档 revision、Agent 状态变化能通过 SSE 触发 UI 刷新。
+- [x] 桌面端 Board 渲染 Three.js 低多边形办公室，每个 Agent 一张工位（办公桌 + 显示器 + 人偶 + 状态灯条）。
+- [x] 显示器画面（`CanvasTexture`）展示状态色、Agent 名称、当前任务标题/状态/进度，并随任务变化重绘。
+- [x] 工位颜色/状态与 `working|idle|blocked|stalled` 一致。
+- [x] 待分配任务池可见，数量与 `/board` 数据一致。
+- [x] 点击工位/显示器选中 Agent，点击待分配卡片选中任务，详情面板仍走 2D。
+- [x] 拖拽旋转 / 滚轮缩放（触控旋转 + 双指缩放）可用，点击选择与拖拽互不干扰。
+- [x] 窗口缩放后 canvas 不空白、不变形、无水平溢出。
+- [x] 移动端同样渲染 3D 看板：窄屏自动切换两排错落布局并按容器宽高比反推相机距离，375px 下可见可交互。
+- [x] 无活跃 Agent 时 Board 不报错，显示空状态。
+- [x] `GET /api/workspaces/:id/events` 返回 `text/event-stream`，SSE 连接成功。
+- [x] 任务状态、文档 revision、Agent 状态变化能通过 SSE 触发 UI 刷新。
 - [ ] 断开 SSE 后 15 秒轮询兜底，UI 显示「轮询更新」。
-- [ ] SSE 在 `--runtime node` 与 `--runtime bun` 下均可用。
-- [ ] 实现未使用 Bun 专属 API 导致另一运行时失效。
+- [x] SSE 在 `--runtime node` 与 `--runtime bun` 下均可用。
+- [x] 实现未使用 Bun 专属 API 导致另一运行时失效。
 
 ## 12. 安全与边界
 
 - [ ] Token、deploy token、ADMIN_TOKEN 在日志与截图中 mask。
-- [ ] Workspace Token 权限边界符合最小权限原则。
+- [x] Workspace Token 权限边界符合最小权限原则。
 - [ ] 跨 Workspace 越权访问全部返回 401/403。
 - [ ] 文档/资产路径不存在路径穿越。
 - [ ] 超大文档/图片被拒绝，服务不 OOM。
@@ -215,14 +218,14 @@
 
 ## 13. 自动化与构建
 
-- [ ] `bun test` 全绿（服务端 fixture、CLI、迁移、并发、权限、资产、冲突）。
-- [ ] `bun run build` 全绿（web → server → cli 顺序执行）。
-- [ ] `bun run docs:build` 全绿。
-- [ ] 使用 `--runtime node` 启动并验证 API + SSE。
-- [ ] 使用 `--runtime bun` 启动并验证 API + SSE。
-- [ ] Playwright 桌面视口验证 3D canvas 非空、像素渲染正确、无 console error。
-- [ ] Playwright 移动视口验证 2D 降级、无水平溢出、无 console error。
-- [ ] 验证结束后无残留 `kite serve` / `dist/server/index.js` 进程。
+- [x] `bun test` 全绿（服务端 fixture、CLI、迁移、并发、权限、资产、冲突）。
+- [x] `bun run build` 全绿（web → server → cli 顺序执行）。
+- [x] `bun run docs:build` 全绿。
+- [x] 使用 `--runtime node` 启动并验证 API + SSE。
+- [x] 使用 `--runtime bun` 启动并验证 API + SSE。
+- [x] Playwright 桌面视口验证 3D canvas 非空、像素渲染正确、无 console error。
+- [x] Playwright 移动视口（375×812）验证 3D 看板可交互（点选 Agent、触摸拖拽旋转）、无水平溢出、无 console error；另回归 768/1280/1600 三个视口。
+- [x] 验证结束后无残留 `kite serve` / `dist/server/index.js` 进程。
 - [ ] 确认 `examples/ssr-basic/kite.config.json` 等无关改动未被误回滚。
 
 ## 14. 端到端验收场景
@@ -236,4 +239,4 @@
 - [ ] 轮换 Token，旧 Token 操作返回 401/403。
 - [ ] 归档需求/文档，确认历史 revision 与活动仍可追溯。
 - [ ] 桌面 Board 正确显示 working / idle / blocked / stalled 与待分配池。
-- [ ] 移动端 Board 使用 2D 展示同一数据源。
+- [x] 移动端 Board 使用同一数据源的 3D 看板展示。

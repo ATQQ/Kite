@@ -381,33 +381,38 @@ export async function docCommand(action: string, idOrPath: string | undefined, o
       if (localMatch) documentId = localMatch[1];
     }
     const title = options.title || path.basename(filePath, path.extname(filePath));
+    const rawContent = fs.readFileSync(filePath, 'utf-8');
+    let createdNewDocument = false;
     if (!documentId) {
-      const created = await requestJson(auth.serverUrl, auth.token, base, {
+      const createdDocument = await requestJson(auth.serverUrl, auth.token, base, {
         method: 'POST',
         headers: { 'X-Kite-Agent': auth.agent },
         body: JSON.stringify({
           title,
           kind: options.kind || 'note',
-          contentMarkdown: '',
+          contentMarkdown: rawContent,
           links: [
             ...(options.requirement ? [{ targetType: 'requirement', targetId: options.requirement }] : []),
             ...(options.task ? [{ targetType: 'task', targetId: options.task }] : []),
           ],
         }),
       });
-      documentId = created.document.id;
+      documentId = createdDocument.document.id;
+      createdNewDocument = true;
     }
-    let document = await requestJson(auth.serverUrl, auth.token, `${base}/${documentId}`, {
+    const document = await requestJson(auth.serverUrl, auth.token, `${base}/${documentId}`, {
       headers: { 'X-Kite-Agent': auth.agent },
     });
-    let content = fs.readFileSync(filePath, 'utf-8');
-    content = await uploadImages(auth, documentId!, filePath, content);
+    const uploadedContent = await uploadImages(auth, documentId!, filePath, rawContent);
     const latest = document.latestRevision;
-    const result = await requestJson(auth.serverUrl, auth.token, `${base}/${documentId}/revisions`, {
-      method: 'POST',
-      headers: { 'X-Kite-Agent': auth.agent },
-      body: JSON.stringify({ contentMarkdown: content, baseRevisionId: latest?.id || null }),
-    });
+    let result: any = { documentId, revision: latest };
+    if (!createdNewDocument || uploadedContent !== rawContent) {
+      result = await requestJson(auth.serverUrl, auth.token, `${base}/${documentId}/revisions`, {
+        method: 'POST',
+        headers: { 'X-Kite-Agent': auth.agent },
+        body: JSON.stringify({ contentMarkdown: uploadedContent, baseRevisionId: latest?.id || null }),
+      });
+    }
     if (options.requirement) {
       await requestJson(auth.serverUrl, auth.token, `${base}/${documentId}/links`, {
         method: 'POST',
