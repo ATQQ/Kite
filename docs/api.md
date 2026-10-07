@@ -712,3 +712,100 @@ Authorization: Bearer <YOUR_ADMIN_TOKEN>
   { "bound": true, "found": false, "name": "kite-web" }
   ```
 * **说明**: cluster 模式多实例会自动聚合（cpu/memory 求和，uptime 取最大）。结果在服务端有 1.5 秒短缓存，避免高频拉取。
+
+---
+
+## 10. Workspace 工作空间接口
+
+Workspace 是需求、任务、Agent 与过程资料的产品级上下文，可关联一个或多个现有项目。接口统一位于 `/api/workspaces`，同时接受管理员 Token 和 Workspace Token。
+
+### 10.1 鉴权范围
+
+```http
+Authorization: Bearer <ADMIN_TOKEN>
+```
+
+或：
+
+```http
+Authorization: Bearer <WORKSPACE_TOKEN>
+X-Kite-Agent: cursor
+```
+
+* Workspace Token 只保存 SHA-256 哈希和前缀；轮换后旧 Token 立即失效。
+* Workspace Token 可用于需求和任务读取、任务认领/更新/释放、文档读取/版本提交/图片上传、Agent 与 Board 查询。
+* 只有管理员 Token 可以创建/归档 Workspace、管理项目关联、轮换 Token、创建需求、删除需求/任务/文档和预指派任务。
+* Agent 身份来自 `X-Kite-Agent` 自声明，支持 `cursor` / `claude` / `codex` / `workbuddy` / `trae` / `custom`。
+
+### 10.2 Workspace 与项目关联
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/workspaces` | 列出未归档 Workspace；`?includeArchived=true` 包含已归档 |
+| `POST` | `/api/workspaces` | 创建 Workspace，响应中的 `token` 只返回一次 |
+| `GET` | `/api/workspaces/:id` | 聚合返回项目、需求、文档和 Agent 状态 |
+| `PUT` | `/api/workspaces/:id` | 更新名称/描述 |
+| `DELETE` | `/api/workspaces/:id` | 归档 Workspace |
+| `POST` | `/api/workspaces/:id/token/rotate` | 轮换 Workspace Token |
+| `PUT` | `/api/workspaces/:id/projects/:projectId` | 关联项目并设置 `frontend/backend/docs/demo/custom` 角色 |
+| `DELETE` | `/api/workspaces/:id/projects/:projectId` | 解除项目关联 |
+
+### 10.3 需求
+
+需求字段包括标题、Markdown 描述、`P0-P3` 优先级、标签、验收标准和关联项目。空项目范围表示整个 Workspace。
+
+* `GET /api/workspaces/:id/requirements`
+* `POST /api/workspaces/:id/requirements`
+* `GET /api/workspaces/:id/requirements/:requirementId`
+* `PUT /api/workspaces/:id/requirements/:requirementId`
+* `DELETE /api/workspaces/:id/requirements/:requirementId`（归档）
+
+状态为 `draft / ready / in_progress / blocked / done / cancelled`。`statusMode=manual` 时使用 `manualStatus`；自动模式按任务状态汇总：全部取消为 `cancelled`，全部有效任务完成为 `done`，存在 active 任务为 `in_progress`，无 active 但有阻塞为 `blocked`，全部待处理为 `ready`，无任务为 `draft`。
+
+### 10.4 任务与活动
+
+* `GET /api/workspaces/:id/tasks`：支持 `requirementId / status / provider / assignee=unassigned`
+* `POST /api/workspaces/:id/tasks`：创建任务，管理员可预指派 `assignedProvider`
+* `GET /api/workspaces/:id/tasks/:taskId`
+* `PUT /api/workspaces/:id/tasks/:taskId`
+* `POST /api/workspaces/:id/tasks/:taskId/assign`：管理员预指派/清空指派
+* `POST /api/workspaces/:id/tasks/:taskId/claim`：原子认领；已被其他 Agent 占用时返回 `409`
+* `POST /api/workspaces/:id/tasks/:taskId/release`
+* `POST /api/workspaces/:id/tasks/:taskId/activities`
+* `DELETE /api/workspaces/:id/tasks/:taskId`（归档）
+
+任务状态为 `todo / claimed / in_progress / blocked / review / done / cancelled`。同一任务同时只有一个主责 Agent；Agent 只能更新自己已认领的任务，不能改派他人任务。
+
+### 10.5 文档、版本与资产
+
+文档是独立对象，`kind = spec / design / handoff / report / note`，可多对多关联需求或任务；每次提交生成不可变 revision，归档不会物理删除历史。
+
+* `GET|POST /api/workspaces/:id/documents`
+* `GET|PUT|DELETE /api/workspaces/:id/documents/:documentId`
+* `GET /api/workspaces/:id/documents/:documentId/revisions`
+* `POST /api/workspaces/:id/documents/:documentId/revisions`
+* `POST|DELETE /api/workspaces/:id/documents/:documentId/links...`
+* `POST /api/workspaces/:id/documents/:documentId/assets`
+* `GET /api/workspaces/:id/assets/:assetId`
+
+revision 提交必须携带基于的 `baseRevisionId`。如果服务端已有更新版本，接口返回 `409`：
+
+```json
+{
+  "error": "Revision conflict",
+  "latest": {
+    "id": "rev_xxx",
+    "revisionNumber": 3
+  }
+}
+```
+
+图片资产仅允许 PNG / JPEG / WebP / GIF，单图不超过 10 MiB；单文档 Markdown 不超过 50 MiB。资产写入 `~/.kite/workspaces/<workspaceId>/assets/`，读取同样需要工作空间鉴权。
+
+### 10.6 Agent、Board 与 SSE
+
+* `GET /api/workspaces/:id/agents`：按 Provider 返回 `working / idle / blocked / stalled`
+* `GET /api/workspaces/:id/board`：返回 Agent、任务、需求、待分配任务池和统计
+* `GET /api/workspaces/:id/events`：SSE 事件流
+
+SSE 事件包含 `workspace.* / project.* / requirement.* / task.* / document.* / token.rotated`。事件只作为刷新信号，客户端收到后重新拉取 Board/Workspace 快照；断线时建议回退到 15 秒轮询。

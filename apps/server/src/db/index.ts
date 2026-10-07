@@ -10,6 +10,9 @@ const dbPath = path.join(process.env.KITE_DB_DIR || process.cwd(), 'kite.db');
 const client = createClient({ url: `file:${dbPath}` });
 const ormDb = drizzle({ client, schema });
 
+export const dbClient = client;
+export const workspaceOrm = ormDb;
+
 // Helper to initialize tables if they don't exist
 const initDb = async () => {
   await client.execute(`
@@ -250,6 +253,222 @@ const initDb = async () => {
   await client.execute(`CREATE INDEX IF NOT EXISTS idx_telemetry_events_received_at ON telemetry_events(received_at);`);
   await client.execute(`CREATE INDEX IF NOT EXISTS idx_telemetry_events_event ON telemetry_events(event);`);
   await client.execute(`CREATE INDEX IF NOT EXISTS idx_telemetry_events_instance_id ON telemetry_events(instance_id);`);
+
+  // Workspace collaboration layer. All changes are additive so older Kite
+  // versions can keep operating against the same database.
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS workspaces (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      description TEXT,
+      archived_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_workspaces_archived_at ON workspaces(archived_at);`);
+
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS workspace_projects (
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+      project_id TEXT NOT NULL REFERENCES projects(id),
+      role TEXT NOT NULL DEFAULT 'custom',
+      sort_order INTEGER DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (workspace_id, project_id)
+    );
+  `);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_workspace_projects_project_id ON workspace_projects(project_id);`);
+
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS workspace_tokens (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+      name TEXT NOT NULL DEFAULT 'default',
+      token_hash TEXT NOT NULL UNIQUE,
+      token_prefix TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      last_used_at TEXT,
+      revoked_at TEXT
+    );
+  `);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_workspace_tokens_workspace_id ON workspace_tokens(workspace_id);`);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_workspace_tokens_hash ON workspace_tokens(token_hash);`);
+
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS workspace_agents (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+      provider TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      last_seen_at TEXT NOT NULL,
+      UNIQUE (workspace_id, provider)
+    );
+  `);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_workspace_agents_workspace_id ON workspace_agents(workspace_id);`);
+
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS workspace_tags (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+      name TEXT NOT NULL,
+      color TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE (workspace_id, name)
+    );
+  `);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_workspace_tags_workspace_id ON workspace_tags(workspace_id);`);
+
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS requirements (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+      title TEXT NOT NULL,
+      description TEXT,
+      priority TEXT NOT NULL DEFAULT 'P2',
+      status_mode TEXT NOT NULL DEFAULT 'auto',
+      manual_status TEXT,
+      acceptance_criteria TEXT,
+      archived_at TEXT,
+      created_by_type TEXT NOT NULL DEFAULT 'human',
+      created_by_id TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_requirements_workspace_id ON requirements(workspace_id);`);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_requirements_archived_at ON requirements(archived_at);`);
+
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS requirement_projects (
+      requirement_id TEXT NOT NULL REFERENCES requirements(id),
+      project_id TEXT NOT NULL REFERENCES projects(id),
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (requirement_id, project_id)
+    );
+  `);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_requirement_projects_project_id ON requirement_projects(project_id);`);
+
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS requirement_tags (
+      requirement_id TEXT NOT NULL REFERENCES requirements(id),
+      tag_id TEXT NOT NULL REFERENCES workspace_tags(id),
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (requirement_id, tag_id)
+    );
+  `);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_requirement_tags_tag_id ON requirement_tags(tag_id);`);
+
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS tasks (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+      requirement_id TEXT NOT NULL REFERENCES requirements(id),
+      title TEXT NOT NULL,
+      description TEXT,
+      status TEXT NOT NULL DEFAULT 'todo',
+      assigned_provider TEXT,
+      claimed_agent_id TEXT REFERENCES workspace_agents(id),
+      claimed_at TEXT,
+      progress INTEGER,
+      archived_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      last_activity_at TEXT NOT NULL
+    );
+  `);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_tasks_workspace_id ON tasks(workspace_id);`);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_tasks_requirement_id ON tasks(requirement_id);`);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_tasks_assigned_provider ON tasks(assigned_provider);`);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);`);
+
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS task_activities (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+      task_id TEXT NOT NULL REFERENCES tasks(id),
+      actor_type TEXT NOT NULL,
+      actor_id TEXT,
+      provider TEXT,
+      kind TEXT NOT NULL,
+      status_from TEXT,
+      status_to TEXT,
+      summary TEXT,
+      document_id TEXT,
+      metadata TEXT,
+      created_at TEXT NOT NULL
+    );
+  `);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_task_activities_task_id ON task_activities(task_id);`);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_task_activities_workspace_id ON task_activities(workspace_id);`);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_task_activities_created_at ON task_activities(created_at);`);
+
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS documents (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+      title TEXT NOT NULL,
+      kind TEXT NOT NULL DEFAULT 'note',
+      current_revision_id TEXT,
+      archived_at TEXT,
+      created_by_type TEXT NOT NULL DEFAULT 'human',
+      created_by_id TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_documents_workspace_id ON documents(workspace_id);`);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_documents_archived_at ON documents(archived_at);`);
+
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS document_revisions (
+      id TEXT PRIMARY KEY,
+      document_id TEXT NOT NULL REFERENCES documents(id),
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+      revision_number INTEGER NOT NULL,
+      content_markdown TEXT NOT NULL,
+      content_hash TEXT NOT NULL,
+      base_revision_id TEXT,
+      created_by_type TEXT NOT NULL DEFAULT 'human',
+      created_by_id TEXT,
+      created_at TEXT NOT NULL,
+      UNIQUE (document_id, revision_number)
+    );
+  `);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_document_revisions_document_id ON document_revisions(document_id);`);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_document_revisions_workspace_id ON document_revisions(workspace_id);`);
+
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS document_links (
+      document_id TEXT NOT NULL REFERENCES documents(id),
+      target_type TEXT NOT NULL,
+      target_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (document_id, target_type, target_id)
+    );
+  `);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_document_links_target ON document_links(target_type, target_id);`);
+
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS document_assets (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+      document_id TEXT REFERENCES documents(id),
+      sha256 TEXT NOT NULL,
+      mime TEXT NOT NULL,
+      size INTEGER NOT NULL,
+      original_name TEXT NOT NULL,
+      storage_path TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      archived_at TEXT
+    );
+  `);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_document_assets_workspace_id ON document_assets(workspace_id);`);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_document_assets_document_id ON document_assets(document_id);`);
+  await client.execute(`CREATE INDEX IF NOT EXISTS idx_document_assets_sha256 ON document_assets(workspace_id, sha256);`);
 
   // Seed a demo project on first run (no existing projects)
   if (process.env.KITE_SEED_DEMO_PROJECT !== 'false') {

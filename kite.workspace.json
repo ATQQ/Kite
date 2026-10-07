@@ -1,0 +1,21 @@
+{
+  "workspaceId": "ws_7c0f3b331a2c49c6",
+  "docsDir": ".kite/workspace",
+  "agents": {
+    "cursor": {
+      "provider": "cursor"
+    },
+    "claude": {
+      "provider": "claude"
+    },
+    "codex": {
+      "provider": "codex"
+    },
+    "workbuddy": {
+      "provider": "workbuddy"
+    },
+    "trae": {
+      "provider": "trae"
+    }
+  }
+}

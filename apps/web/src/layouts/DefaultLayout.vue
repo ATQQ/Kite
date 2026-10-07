@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { LayoutDashboard, FolderArchive, TerminalSquare, ScrollText, Database, HardDrive, Settings, LogOut, Sun, Moon, SunMoon, Menu, X, Terminal as TerminalIcon, Languages, Github, Scale, Star, Search, BarChart3, FileText } from 'lucide-vue-next'
+import { LayoutDashboard, FolderArchive, TerminalSquare, ScrollText, Database, HardDrive, Settings, LogOut, Sun, Moon, SunMoon, Menu, X, Terminal as TerminalIcon, Languages, Github, Scale, Star, Search, BarChart3, FileText, Boxes } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { useProjectStore } from '../store/project'
 import { useThemeStore, type ThemeMode } from '../store/theme'
@@ -22,6 +22,7 @@ const palette = usePaletteStore()
 const menus = computed(() => [
   { name: t('nav.dashboard'), path: '/', icon: LayoutDashboard },
   { name: t('nav.projects'), path: '/projects', icon: FolderArchive },
+  { name: t('nav.workspaces'), path: '/workspaces', icon: Boxes },
   { name: t('nav.deployLogs'), path: '/logs', icon: TerminalSquare },
   { name: t('nav.runtimeLogs'), path: '/runtime-logs', icon: FileText },
   { name: t('nav.terminal'), path: '/terminal', icon: TerminalIcon },

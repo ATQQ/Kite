@@ -126,3 +126,158 @@ export const auditLogs = sqliteTable('audit_logs', {
   status: text('status').notNull(),            // 'success' | 'failed'
   errorMessage: text('error_message'),
 });
+
+// Workspace: 产品级项目协作上下文
+export const workspaces = sqliteTable('workspaces', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull().unique(),
+  description: text('description'),
+  archivedAt: text('archived_at'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+export const workspaceProjects = sqliteTable('workspace_projects', {
+  workspaceId: text('workspace_id').references(() => workspaces.id).notNull(),
+  projectId: text('project_id').references(() => projects.id).notNull(),
+  role: text('role').notNull().default('custom'),
+  sortOrder: integer('sort_order').default(0),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+export const workspaceTokens = sqliteTable('workspace_tokens', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').references(() => workspaces.id).notNull(),
+  name: text('name').notNull().default('default'),
+  tokenHash: text('token_hash').notNull().unique(),
+  tokenPrefix: text('token_prefix').notNull(),
+  createdAt: text('created_at').notNull(),
+  lastUsedAt: text('last_used_at'),
+  revokedAt: text('revoked_at'),
+});
+
+export const workspaceAgents = sqliteTable('workspace_agents', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').references(() => workspaces.id).notNull(),
+  provider: text('provider').notNull(),
+  displayName: text('display_name').notNull(),
+  createdAt: text('created_at').notNull(),
+  lastSeenAt: text('last_seen_at').notNull(),
+});
+
+export const workspaceTags = sqliteTable('workspace_tags', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').references(() => workspaces.id).notNull(),
+  name: text('name').notNull(),
+  color: text('color'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+export const requirements = sqliteTable('requirements', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').references(() => workspaces.id).notNull(),
+  title: text('title').notNull(),
+  description: text('description'),
+  priority: text('priority').notNull().default('P2'),
+  statusMode: text('status_mode').notNull().default('auto'),
+  manualStatus: text('manual_status'),
+  acceptanceCriteria: text('acceptance_criteria'),
+  archivedAt: text('archived_at'),
+  createdByType: text('created_by_type').notNull().default('human'),
+  createdById: text('created_by_id'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+export const requirementProjects = sqliteTable('requirement_projects', {
+  requirementId: text('requirement_id').references(() => requirements.id).notNull(),
+  projectId: text('project_id').references(() => projects.id).notNull(),
+  createdAt: text('created_at').notNull(),
+});
+
+export const requirementTags = sqliteTable('requirement_tags', {
+  requirementId: text('requirement_id').references(() => requirements.id).notNull(),
+  tagId: text('tag_id').references(() => workspaceTags.id).notNull(),
+  createdAt: text('created_at').notNull(),
+});
+
+export const tasks = sqliteTable('tasks', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').references(() => workspaces.id).notNull(),
+  requirementId: text('requirement_id').references(() => requirements.id).notNull(),
+  title: text('title').notNull(),
+  description: text('description'),
+  status: text('status').notNull().default('todo'),
+  assignedProvider: text('assigned_provider'),
+  claimedAgentId: text('claimed_agent_id').references(() => workspaceAgents.id),
+  claimedAt: text('claimed_at'),
+  progress: integer('progress'),
+  archivedAt: text('archived_at'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+  lastActivityAt: text('last_activity_at').notNull(),
+});
+
+export const taskActivities = sqliteTable('task_activities', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').references(() => workspaces.id).notNull(),
+  taskId: text('task_id').references(() => tasks.id).notNull(),
+  actorType: text('actor_type').notNull(),
+  actorId: text('actor_id'),
+  provider: text('provider'),
+  kind: text('kind').notNull(),
+  statusFrom: text('status_from'),
+  statusTo: text('status_to'),
+  summary: text('summary'),
+  documentId: text('document_id'),
+  metadata: text('metadata'),
+  createdAt: text('created_at').notNull(),
+});
+
+export const documents = sqliteTable('documents', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').references(() => workspaces.id).notNull(),
+  title: text('title').notNull(),
+  kind: text('kind').notNull().default('note'),
+  currentRevisionId: text('current_revision_id'),
+  archivedAt: text('archived_at'),
+  createdByType: text('created_by_type').notNull().default('human'),
+  createdById: text('created_by_id'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+export const documentRevisions = sqliteTable('document_revisions', {
+  id: text('id').primaryKey(),
+  documentId: text('document_id').references(() => documents.id).notNull(),
+  workspaceId: text('workspace_id').references(() => workspaces.id).notNull(),
+  revisionNumber: integer('revision_number').notNull(),
+  contentMarkdown: text('content_markdown').notNull(),
+  contentHash: text('content_hash').notNull(),
+  baseRevisionId: text('base_revision_id'),
+  createdByType: text('created_by_type').notNull().default('human'),
+  createdById: text('created_by_id'),
+  createdAt: text('created_at').notNull(),
+});
+
+export const documentLinks = sqliteTable('document_links', {
+  documentId: text('document_id').references(() => documents.id).notNull(),
+  targetType: text('target_type').notNull(),
+  targetId: text('target_id').notNull(),
+  createdAt: text('created_at').notNull(),
+});
+
+export const documentAssets = sqliteTable('document_assets', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').references(() => workspaces.id).notNull(),
+  documentId: text('document_id').references(() => documents.id),
+  sha256: text('sha256').notNull(),
+  mime: text('mime').notNull(),
+  size: integer('size').notNull(),
+  originalName: text('original_name').notNull(),
+  storagePath: text('storage_path').notNull(),
+  createdAt: text('created_at').notNull(),
+  archivedAt: text('archived_at'),
+});

@@ -672,3 +672,76 @@ kite rollback proj_abcdef --to 1f2a3b4c-... --yes
 
 公开聚合面板：[/stats](/stats)；聚合 JSON API：`GET /api/public/telemetry/overview?days=30`（无鉴权 + CORS，可直接跨域消费）。
 
+## 十六、Workspace 工作空间协作
+
+Workspace 用于把多个项目（前端、后端、文档站、Demo 等）放到同一个协作上下文中，统一管理需求、任务、Agent 与过程资料。Kite 不启动或控制外部 Agent；Agent 通过 CLI 动作接入。
+
+### 16.1 初始化
+
+在仓库根目录执行：
+
+```bash
+kite workspace init \
+  --workspace ws_xxxxxxxx \
+  --server http://127.0.0.1:5431 \
+  --token wst_xxxxxxxx
+```
+
+初始化会幂等生成：
+
+```txt
+kite.workspace.json
+.kite/workspace/
+AGENTS.md
+```
+
+`AGENTS.md` 中只写入受控的 `kite-workspace` 区块，重复执行不会重复追加，也不会覆盖你原有的内容。
+
+`kite.workspace.json` 只保存 `workspaceId`、可选 `docsDir` 和 Agent 提示配置，不写 Token。Token 写入 `~/.kite/config.json` 的 `workspaceToken[workspaceId]`。CLI 会从当前目录向上查找 manifest，因此单仓和 monorepo 子目录都可使用。默认 `.kite/workspace/` 会加入仓库 `.gitignore`。
+
+### 16.2 命令
+
+| 命令 | 说明 |
+| --- | --- |
+| `kite workspace status` | 查看 Workspace、项目/需求/任务/文档数量和 Agent 状态 |
+| `kite workspace agents` | 查看各 Provider 的 working / idle / blocked / stalled 状态 |
+| `kite requirement list` | 列出需求 |
+| `kite requirement show <id>` | 查看需求详情 |
+| `kite requirement create --title "..."` | 创建需求（需要管理员 Token） |
+| `kite requirement update <id>` | 更新需求、状态模式、标签或项目范围 |
+| `kite task inbox` | 查看已指派给自己或未分配的待处理任务 |
+| `kite task claim <id>` | 原子认领任务 |
+| `kite task update <id> --status <status>` | 更新任务状态、进度并写入活动记录 |
+| `kite task release <id>` | 释放自己认领的任务 |
+| `kite doc list` | 列出资料文档 |
+| `kite doc pull <docId>` / `kite doc pull --all` | 拉取文档到本地 `docsDir`，并把服务端图片转成本地相对路径 |
+| `kite doc push <file>` | 上传 Markdown；图片会自动上传并重写为 `asset://`，再提交新 revision |
+
+Agent 身份优先使用 `--agent`，其次 `KITE_AGENT`，默认 `codex`：
+
+```bash
+kite task inbox --agent cursor --json
+kite task claim task_xxxxxxxx --agent cursor
+kite task update task_xxxxxxxx --agent cursor \
+  --status in_progress \
+  --progress 40 \
+  --summary "完成 API 接入"
+
+kite doc push ./notes/handoff.md \
+  --agent cursor \
+  --title "交接说明" \
+  --kind handoff \
+  --requirement req_xxxxxxxx
+```
+
+`kite doc push` 对已拉取文档会根据 `doc_xxx-title.md` 文件名自动识别文档 ID；也可以显式传 `--doc <id>`。文档版本冲突会返回退出码 `1` 并打印 `409` 错误，不会静默覆盖。
+
+### 16.3 多 Agent 接入
+
+所有 Provider 共用同一个 Workspace Token。指令统一写入 `AGENTS.md` 的受控区块，内容只调用 CLI，不写密钥：
+
+* Codex / Cursor / Trae / Gemini CLI / GitHub Copilot 等：原生支持或可导入 `AGENTS.md`
+* Claude Code：需要 v2.1.277 及以上，且工作目录及其上层不存在 `CLAUDE.md` 时才会读取 `AGENTS.md`
+* Claude Code 例外处理：仓库里已有 `CLAUDE.md` 时，在其中加一行 `@AGENTS.md` 导入即可
+
+一个需求可以拆成多个 Task，每个 Task 同时只有一个主责 Provider。Agent 修改任务状态、进度或提交资料后，`kite workspace status` 和 Web Agent 看板会立即反映当前状态。

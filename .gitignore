@@ -8,3 +8,5 @@ cache
 .deployments
 plan
 .trae
+.DS_Store
+/.kite/workspace/

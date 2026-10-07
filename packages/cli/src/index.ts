@@ -17,6 +17,7 @@ import { runVerify } from './verify.js';
 import { runDoctor } from './doctor.js';
 import { runList, runStatus, runLogs, runRollback } from './ops.js';
 import { getTelemetryStatus, setTelemetryEnabled, setTelemetryEndpoint, getDefaultTelemetryEndpoint, reportPushStart } from './telemetry.js';
+import { registerWorkspaceCommands } from './workspace.js';
 
 // @ts-ignore
 const cli = cac('kite');
@@ -1065,6 +1066,8 @@ cli.command('telemetry:endpoint <url>', 'Override telemetry ingest endpoint (use
     console.log(chalk.gray(`  ${value}`));
     console.log(chalk.gray('  Tip: KITE_TELEMETRY_ENDPOINT env var overrides this config value at runtime.'));
   });
+
+registerWorkspaceCommands(cli);
 
 cli.help();
 const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf-8'));

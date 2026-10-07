@@ -14,6 +14,7 @@ import { systemRoutes } from "./routes/system.js";
 import { pm2Routes } from "./routes/pm2.js";
 import { tagRoutes } from "./routes/tags.js";
 import { projectWorkspaceRoutes } from "./routes/project-workspace.js";
+import { workspaceRoutes } from "./routes/workspaces.js";
 import { searchRoutes } from "./routes/search.js";
 import {
   terminalRoutes,
@@ -157,6 +158,7 @@ const app = new Elysia({ adapter })
   .use(pm2Routes)
   .use(tagRoutes)
   .use(projectWorkspaceRoutes)
+  .use(workspaceRoutes)
   .use(searchRoutes)
   .use(terminalRoutes)
   .use(staticPlugin);

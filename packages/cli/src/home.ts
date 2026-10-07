@@ -7,6 +7,7 @@ export interface KiteGlobalConfig {
   serverUrl?: string;
   token?: string;
   projectToken?: Record<string, string>;
+  workspaceToken?: Record<string, string>;
   telemetry?: boolean;
   telemetryInstanceId?: string;
   telemetryEndpoint?: string;
@@ -16,6 +17,9 @@ export interface KiteLocalEnv {
   KITE_SERVER_URL?: string;
   KITE_TOKEN?: string;
   KITE_DEPLOY_TOKEN?: string;
+  KITE_WORKSPACE_ID?: string;
+  KITE_WORKSPACE_TOKEN?: string;
+  KITE_AGENT?: string;
   KITE_PROJECT_ID?: string;
   KITE_OUTPUT_DIR?: string;
   KITE_PRE_DEPLOY?: string;

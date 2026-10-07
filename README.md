@@ -100,6 +100,18 @@ kite push
 kite push --server http://127.0.0.1:5431 --token <项目 Deploy Token> --project <项目 ID> --out ./dist --command "pm2 restart api-server"
 ```
 
+4. **接入 Workspace 多项目协作**
+
+创建一个 Workspace 并关联前端、后端、文档站等项目后，在仓库根目录初始化 CLI：
+
+```bash
+kite workspace init --workspace <Workspace ID> --server http://127.0.0.1:5431 --token <Workspace Token>
+kite workspace status
+kite task inbox --agent cursor
+```
+
+CLI 会生成 `kite.workspace.json`、`.kite/workspace/`，并把协作规则写进 `AGENTS.md`（只维护受控区块，重复执行不覆盖你原有的内容），从 monorepo 子目录也能向上找到 manifest。Agent 通过 `kite task claim/update` 处理任务，通过 `kite doc pull/push` 同步过程资料；完整命令见 [CLI 文档](./docs/cli.md#十六workspace-工作空间协作)。
+
 ## 📖 更多文档
 - VitePress 文档站：
   ```bash
