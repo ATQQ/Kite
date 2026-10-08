@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import { computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { Boxes, Copy, Plus, RefreshCw, Trash2 } from 'lucide-vue-next'
+import { Boxes, Building2, Copy, Plus, RefreshCw, Trash2, Users } from 'lucide-vue-next'
 import { useWorkspaceStore } from '../store/workspace'
 import { useToast } from '../composables/useToast'
+import WorkspaceBoard3D from '../components/WorkspaceBoard3D.vue'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -16,6 +18,76 @@ const creating = ref(false)
 const name = ref('')
 const description = ref('')
 const issuedToken = ref('')
+
+const FLEET_STATES = [
+  { key: 'working', dot: 'bg-sky-400', bar: 'bg-sky-400' },
+  { key: 'blocked', dot: 'bg-amber-500', bar: 'bg-amber-500' },
+  { key: 'stalled', dot: 'bg-red-500', bar: 'bg-red-500' },
+  { key: 'idle', dot: 'bg-slate-500', bar: 'bg-slate-500' },
+] as const
+
+const fleetByWorkspace = computed(() => {
+  const map = new Map<string, ReturnType<typeof buildFleet>>()
+  for (const workspace of workspaceStore.workspaces) {
+    map.set(workspace.id, buildFleet(workspace.agentStates))
+  }
+  return map
+})
+
+// 只给有 Agent 的工作空间做 3D 预览，默认选最"活跃"的那个（working 多者优先）
+const previewCandidates = computed(() =>
+  workspaceStore.workspaces
+    .filter((workspace) => (workspace.agents?.length || 0) > 0)
+    .slice()
+    .sort((a, b) => (b.agentStates?.working || 0) - (a.agentStates?.working || 0)),
+)
+
+const previewId = ref<string>('')
+const previewWorkspace = computed(() =>
+  previewCandidates.value.find((workspace) => workspace.id === previewId.value) || previewCandidates.value[0] || null,
+)
+const previewAgents = computed(() => {
+  const workspace = previewWorkspace.value
+  if (!workspace) return []
+  return (workspace.agents || []).map((agent) => ({
+    ...agent,
+    workspaceId: workspace.id,
+    openTaskIds: [] as string[],
+    lastSeenAt: workspace.updatedAt,
+  }))
+})
+
+watch(
+  () => previewCandidates.value.map((workspace) => workspace.id).join(','),
+  () => {
+    if (!previewCandidates.value.some((workspace) => workspace.id === previewId.value)) {
+      previewId.value = previewCandidates.value[0]?.id || ''
+    }
+  },
+  { immediate: true },
+)
+
+function onPreviewSelectAgent() {
+  if (!previewWorkspace.value) return
+  router.push(`/workspaces/${previewWorkspace.value.id}?tab=agents`)
+}
+
+function fleetSegments(workspace: { id: string }) {
+  return fleetByWorkspace.value.get(workspace.id) || null
+}
+
+function buildFleet(states?: { working: number; blocked: number; stalled: number; idle: number }) {
+  const total = states ? states.working + states.blocked + states.stalled + states.idle : 0
+  if (!states || total === 0) return null
+  return {
+    total,
+    segments: FLEET_STATES.map((state) => ({
+      ...state,
+      count: states[state.key],
+      percent: (states[state.key] / total) * 100,
+    })).filter((segment) => segment.count > 0),
+  }
+}
 
 async function load() {
   await workspaceStore.fetchWorkspaces()
@@ -76,6 +148,44 @@ onMounted(load)
         </button>
       </div>
     </header>
+
+    <section v-if="previewWorkspace" class="overflow-hidden rounded-lg border border-border bg-panel">
+      <div class="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-3">
+        <div class="flex min-w-0 items-center gap-2">
+          <Building2 class="h-4 w-4 shrink-0 text-primary" />
+          <h2 class="text-sm font-semibold text-textMain">{{ t('workspace.officePreview') }}</h2>
+          <span class="truncate text-xs text-textMuted">{{ previewWorkspace.name }}</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <select
+            v-model="previewId"
+            class="h-8 max-w-[200px] rounded-md border border-border bg-base px-2 text-xs text-textMain outline-none focus:border-primary"
+            :title="t('workspace.officeSwitch')"
+          >
+            <option v-for="workspace in previewCandidates" :key="workspace.id" :value="workspace.id">
+              {{ workspace.name }}
+            </option>
+          </select>
+          <button
+            class="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs text-textMuted hover:text-textMain"
+            @click="router.push(`/workspaces/${previewWorkspace.id}?tab=agents`)"
+          >
+            <Users class="h-3.5 w-3.5" />
+            {{ t('workspace.agentsTitle') }}
+          </button>
+        </div>
+      </div>
+      <div class="h-[260px] sm:h-[340px]">
+        <WorkspaceBoard3D
+          :agents="previewAgents"
+          :tasks="[]"
+          :unassigned="[]"
+          compact
+          @select-agent="onPreviewSelectAgent"
+        />
+      </div>
+      <p class="border-t border-border px-5 py-2 text-[11px] text-textMuted">{{ t('workspace.officePreviewHint') }}</p>
+    </section>
 
     <section v-if="issuedToken" class="rounded-lg border border-warning/40 bg-warning/5 p-4">
       <div class="text-sm font-medium text-textMain">{{ t('workspace.tokenIssued') }}</div>
@@ -144,6 +254,31 @@ onMounted(load)
           <div><div class="text-lg font-semibold text-textMain">{{ workspace.requirementCount || 0 }}</div><div class="text-[11px] text-textMuted">{{ t('workspace.requirements') }}</div></div>
           <div><div class="text-lg font-semibold text-textMain">{{ workspace.taskCount || 0 }}</div><div class="text-[11px] text-textMuted">{{ t('workspace.tasks') }}</div></div>
           <div><div class="text-lg font-semibold text-textMain">{{ workspace.documentCount || 0 }}</div><div class="text-[11px] text-textMuted">{{ t('workspace.documents') }}</div></div>
+        </div>
+
+        <div v-if="fleetSegments(workspace)" class="mt-4 border-t border-border pt-3">
+          <div class="flex items-center justify-between gap-2">
+            <span class="inline-flex items-center gap-1.5 text-[11px] text-textMuted">
+              <Users class="h-3 w-3" />
+              {{ t('workspace.agentFleet') }}
+            </span>
+            <span class="text-[11px] tabular-nums text-textMuted">{{ fleetSegments(workspace)!.total }}</span>
+          </div>
+          <div class="mt-2 flex h-1.5 overflow-hidden rounded-full bg-base">
+            <div
+              v-for="segment in fleetSegments(workspace)!.segments"
+              :key="segment.key"
+              class="h-full"
+              :class="segment.bar"
+              :style="{ width: `${segment.percent}%` }"
+            />
+          </div>
+          <div class="mt-2 flex flex-wrap gap-x-3 gap-y-1">
+            <span v-for="segment in fleetSegments(workspace)!.segments" :key="segment.key" class="inline-flex items-center gap-1 text-[11px] text-textMuted">
+              <i class="h-1.5 w-1.5 rounded-full" :class="segment.dot" />
+              {{ t(`workspace.${segment.key}`) }} {{ segment.count }}
+            </span>
+          </div>
         </div>
       </article>
     </section>

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { dbClient } from './index.js';
 import {
+  deriveAgentState,
   hashWorkspaceToken,
   normalizeAgentProvider,
   normalizeDocumentKind,
@@ -53,7 +54,8 @@ export const workspaceStore = {
           (SELECT COUNT(*) FROM workspace_projects wp WHERE wp.workspace_id = w.id) AS project_count,
           (SELECT COUNT(*) FROM requirements r WHERE r.workspace_id = w.id AND r.archived_at IS NULL) AS requirement_count,
           (SELECT COUNT(*) FROM tasks t WHERE t.workspace_id = w.id AND t.archived_at IS NULL) AS task_count,
-          (SELECT COUNT(*) FROM documents d WHERE d.workspace_id = w.id AND d.archived_at IS NULL) AS document_count
+          (SELECT COUNT(*) FROM documents d WHERE d.workspace_id = w.id AND d.archived_at IS NULL) AS document_count,
+          (SELECT COUNT(DISTINCT t.requirement_id) FROM tasks t WHERE t.workspace_id = w.id AND t.archived_at IS NULL AND t.status NOT IN ('done', 'cancelled')) AS active_requirement_count
         FROM workspaces w
         ${where}
         ORDER BY w.updated_at DESC
@@ -226,11 +228,61 @@ export const workspaceStore = {
         [workspaceId],
       );
     },
+    // 首页 3D 预览用：一次取多个 workspace 的 agents，避免 N+1
+    async listByWorkspaces(workspaceIds: string[]): Promise<Map<string, any[]>> {
+      const result = new Map<string, any[]>();
+      if (workspaceIds.length === 0) return result;
+      const placeholders = workspaceIds.map(() => '?').join(', ');
+      const rows = (await query(
+        `SELECT * FROM workspace_agents WHERE workspace_id IN (${placeholders}) ORDER BY workspace_id ASC, provider ASC`,
+        workspaceIds,
+      )) as any[];
+      for (const row of rows) {
+        const list = result.get(row.workspaceId) || [];
+        list.push(row);
+        result.set(row.workspaceId, list);
+      }
+      return result;
+    },
     async findProvider(workspaceId: string, provider: string) {
       return one(
         `SELECT * FROM workspace_agents WHERE workspace_id = ? AND provider = ? LIMIT 1`,
         [workspaceId, normalizeAgentProvider(provider)],
       );
+    },
+    // 每个 agent 的未完成任务（status + lastActivityAt），按 workspace 归组并带上 agentId；判定逻辑复用 deriveAgentState
+    async stateInputs(workspaceIds: string[]): Promise<Map<string, Array<{ agentId: string; taskStatuses: Array<{ status: string; lastActivityAt: string | null }> }>>> {
+      if (workspaceIds.length === 0) return new Map();
+      const placeholders = workspaceIds.map(() => '?').join(', ');
+      const rows = await query(
+        `SELECT a.workspace_id AS workspace_id, a.id AS agent_id,
+                t.status AS status, t.last_activity_at AS last_activity_at
+         FROM workspace_agents a
+         LEFT JOIN tasks t
+           ON t.workspace_id = a.workspace_id
+           AND (t.claimed_agent_id = a.id OR t.assigned_provider = a.provider)
+           AND t.archived_at IS NULL
+           AND t.status NOT IN ('done', 'cancelled')
+         WHERE a.workspace_id IN (${placeholders})
+         ORDER BY a.id ASC`,
+        workspaceIds,
+      );
+      const grouped = new Map<string, Map<string, Array<{ status: string; lastActivityAt: string | null }>>>();
+      for (const row of rows as any[]) {
+        const byWorkspace = grouped.get(row.workspaceId) || new Map();
+        grouped.set(row.workspaceId, byWorkspace);
+        const list = byWorkspace.get(row.agentId) || [];
+        byWorkspace.set(row.agentId, list);
+        if (row.status) list.push({ status: row.status, lastActivityAt: row.lastActivityAt || null });
+      }
+      const result = new Map<string, Array<{ agentId: string; taskStatuses: Array<{ status: string; lastActivityAt: string | null }> }>>();
+      for (const [workspaceId, byAgent] of grouped) {
+        result.set(
+          workspaceId,
+          Array.from(byAgent, ([agentId, taskStatuses]) => ({ agentId, taskStatuses })),
+        );
+      }
+      return result;
     },
   },
   tags: {

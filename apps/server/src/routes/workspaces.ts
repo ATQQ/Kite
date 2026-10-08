@@ -32,6 +32,31 @@ function asRows<T = Record<string, any>>(rows: any[]): T[] {
   return rows as T[];
 }
 
+export type AgentStateCounts = { working: number; blocked: number; stalled: number; idle: number };
+
+function aggregateAgentStates(perAgent: Array<{ agentId: string; taskStatuses: Array<{ status: string; lastActivityAt: string | null }> }>): AgentStateCounts {
+  const counts: AgentStateCounts = { working: 0, blocked: 0, stalled: 0, idle: 0 };
+  for (const agent of perAgent) {
+    const state = deriveAgentState({ taskStatuses: agent.taskStatuses });
+    counts[state] += 1;
+  }
+  return counts;
+}
+
+// 首页 3D 预览：只暴露渲染所需的最小字段
+function previewAgents(
+  agents: any[],
+  perAgent: Array<{ agentId: string; taskStatuses: Array<{ status: string; lastActivityAt: string | null }> }>,
+) {
+  const byId = new Map(perAgent.map((entry) => [String(entry.agentId), entry.taskStatuses]));
+  return agents.map((agent) => ({
+    id: String(agent.id),
+    provider: agent.provider,
+    displayName: agent.displayName,
+    state: deriveAgentState({ taskStatuses: byId.get(String(agent.id)) || [] }),
+  }));
+}
+
 function normalizeText(value: unknown, max = 100000): string | null {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
@@ -173,7 +198,17 @@ export const workspaceRoutes = new Elysia()
   .get('/api/workspaces', async ({ headers, set, query }) => {
     if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
     const includeArchived = query.includeArchived === 'true';
-    return await workspaceStore.workspaces.list(includeArchived);
+    const rows = asRows<any>(await workspaceStore.workspaces.list(includeArchived));
+    const ids = rows.map((row) => String(row.id));
+    const [inputs, agentsByWorkspace] = await Promise.all([
+      workspaceStore.agents.stateInputs(ids),
+      workspaceStore.agents.listByWorkspaces(ids),
+    ]);
+    return rows.map((row) => ({
+      ...row,
+      agentStates: aggregateAgentStates(inputs.get(String(row.id)) || []),
+      agents: previewAgents(agentsByWorkspace.get(String(row.id)) || [], inputs.get(String(row.id)) || []),
+    }));
   }, {
     query: t.Object({ includeArchived: t.Optional(t.String()) }),
   })

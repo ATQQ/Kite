@@ -84,7 +84,7 @@
 
 ## 6. Agent 身份与状态
 
-- [ ] Agent 按 `Workspace + Provider` 自动建记录，Provider 支持 `cursor|claude|codex|workbuddy|trae|custom`。
+- [ ] Agent 按 `Workspace + Provider` 自动建记录，Provider 支持 `cursor|claude|codex|workbuddy|trae|unknown`（历史值 `custom` 归一为 `unknown`）。
 - [ ] Agent 无心跳机制，不会因长时间无请求被误判离线。
 - [ ] 存在 `claimed/in_progress/review` 任务时状态为 `working`。
 - [ ] 仅有 `blocked` 任务时状态为 `blocked`。

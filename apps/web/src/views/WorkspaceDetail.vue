@@ -49,6 +49,13 @@ import {
 
 type WorkspaceTab = 'overview' | 'requirements' | 'documents' | 'agents'
 
+const WORKSPACE_TABS: WorkspaceTab[] = ['overview', 'requirements', 'documents', 'agents']
+
+function queryValue(key: string): string {
+  const raw = route.query[key]
+  return typeof raw === 'string' ? raw : Array.isArray(raw) ? String(raw[0] || '') : ''
+}
+
 const route = useRoute()
 const router = useRouter()
 const { t } = useI18n()
@@ -58,7 +65,10 @@ const projectStore = useProjectStore()
 
 const workspaceId = computed(() => String(route.params.id || ''))
 const current = computed(() => store.current)
-const activeTab = ref<WorkspaceTab>('overview')
+// 视图上下文来自 URL，保证刷新 / 分享链接能还原同一个 tab 与选中项
+const activeTab = ref<WorkspaceTab>(
+  WORKSPACE_TABS.includes(queryValue('tab') as WorkspaceTab) ? (queryValue('tab') as WorkspaceTab) : 'overview',
+)
 const realtimeConnected = ref(false)
 const tokenIssued = ref('')
 const rotatingToken = ref(false)
@@ -68,14 +78,14 @@ const workspaceTasks = computed<Task[]>(() => store.board?.tasks || [])
 const agents = computed<WorkspaceAgent[]>(() => store.board?.agents || current.value?.agents || [])
 const unassignedTasks = computed<Task[]>(() => store.board?.unassigned || [])
 
-const selectedRequirementId = ref('')
+const selectedRequirementId = ref(queryValue('req'))
 const selectedRequirement = computed(() =>
   requirements.value.find((item) => item.id === selectedRequirementId.value) || null,
 )
 const selectedRequirementTasks = computed(() =>
   workspaceTasks.value.filter((task) => task.requirementId === selectedRequirementId.value),
 )
-const selectedTaskId = ref('')
+const selectedTaskId = ref(queryValue('task'))
 const selectedTask = computed(() =>
   workspaceTasks.value.find((task) => task.id === selectedTaskId.value) || null,
 )
@@ -116,7 +126,7 @@ const taskDraft = reactive({
 })
 const showTaskCreate = ref(false)
 
-const selectedDocumentId = ref('')
+const selectedDocumentId = ref(queryValue('doc'))
 const activeDocument = ref<WorkspaceDocument | null>(null)
 const documentLoading = ref(false)
 const documentContent = ref('')
@@ -139,7 +149,7 @@ const newDocument = reactive({
 const showDocumentCreate = ref(false)
 
 const roleOptions: WorkspaceRole[] = ['frontend', 'backend', 'docs', 'demo', 'custom']
-const providerOptions: AgentProvider[] = ['cursor', 'claude', 'codex', 'workbuddy', 'trae', 'custom']
+const providerOptions: AgentProvider[] = ['cursor', 'claude', 'codex', 'workbuddy', 'trae', 'unknown']
 const requirementStatuses: RequirementStatus[] = ['draft', 'ready', 'in_progress', 'blocked', 'done', 'cancelled']
 const taskStatuses: TaskStatus[] = ['todo', 'claimed', 'in_progress', 'blocked', 'review', 'done', 'cancelled']
 const documentKinds: DocumentKind[] = ['spec', 'design', 'handoff', 'report', 'note']
@@ -213,6 +223,17 @@ function documentKindLabel(kind: string) {
   return t(map[kind] || 'workspace.docKindNote')
 }
 
+function documentKindClass(kind: string) {
+  const map: Record<string, string> = {
+    spec: 'border-sky-500/40 bg-sky-500/10 text-sky-300',
+    design: 'border-violet-500/40 bg-violet-500/10 text-violet-300',
+    handoff: 'border-amber-500/40 bg-amber-500/10 text-amber-300',
+    report: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
+    note: 'border-slate-500/40 bg-slate-500/10 text-slate-300',
+  }
+  return map[kind] || map.note
+}
+
 function statusClass(status: string | null | undefined) {
   if (status === 'done') return 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
   if (status === 'blocked') return 'border-amber-500/40 bg-amber-500/10 text-amber-300'
@@ -243,7 +264,8 @@ function providerLabel(provider: string | null | undefined) {
     codex: 'Codex',
     workbuddy: 'WorkBuddy',
     trae: 'Trae',
-    custom: 'Custom',
+    unknown: 'Unknown',
+    custom: 'Unknown',
   }
   return map[provider] || provider
 }
@@ -685,6 +707,172 @@ function selectTask(task: Task) {
   activeTab.value = 'agents'
 }
 
+function documentLinkSummary(document: WorkspaceDocument) {
+  const labels: string[] = []
+  for (const link of document.links || []) {
+    if (link.targetType === 'requirement') {
+      labels.push(requirements.value.find((item) => item.id === link.targetId)?.title || link.targetId)
+    } else {
+      labels.push(workspaceTasks.value.find((item) => item.id === link.targetId)?.title || link.targetId)
+    }
+  }
+  return labels.length ? labels.join(' · ') : ''
+}
+
+const documentsByTaskId = computed(() => {
+  const map = new Map<string, WorkspaceDocument[]>()
+  for (const document of current.value?.documents || []) {
+    for (const link of document.links || []) {
+      if (link.targetType !== 'task') continue
+      const list = map.get(link.targetId) || []
+      list.push(document)
+      map.set(link.targetId, list)
+    }
+  }
+  return map
+})
+
+function taskDocuments(taskId: string) {
+  return documentsByTaskId.value.get(taskId) || []
+}
+
+function openTaskDocument(taskId: string) {
+  const [first] = taskDocuments(taskId)
+  if (!first) {
+    toast.info(t('workspace.noTaskDocuments'))
+    return
+  }
+  clearDocumentFilter()
+  const task = workspaceTasks.value.find((item) => item.id === taskId)
+  if (task?.requirementId) selectedRequirementId.value = task.requirementId
+  selectedTaskId.value = taskId
+  selectedDocumentId.value = first.id
+  activeTab.value = 'documents'
+}
+
+function openRequirement(requirementId: string) {
+  selectedRequirementId.value = requirementId
+  activeTab.value = 'requirements'
+}
+
+function openLinkedTask(taskId: string) {
+  const task = workspaceTasks.value.find((item) => item.id === taskId)
+  if (task?.requirementId) selectedRequirementId.value = task.requirementId
+  selectedTaskId.value = taskId
+  activeTab.value = 'requirements'
+}
+
+const UNLINKED_FILTER = '__unlinked__'
+const documentTaskFilter = ref('')
+const documentKindFilter = ref('')
+const documentGrouped = ref(true)
+
+const filteredDocuments = computed(() => {
+  const all = current.value?.documents || []
+  return all.filter((document) => {
+    if (documentKindFilter.value && document.kind !== documentKindFilter.value) return false
+    const taskLinks = (document.links || []).filter((link) => link.targetType === 'task')
+    if (documentTaskFilter.value === UNLINKED_FILTER) return taskLinks.length === 0
+    if (documentTaskFilter.value && !taskLinks.some((link) => link.targetId === documentTaskFilter.value)) {
+      return false
+    }
+    return true
+  })
+})
+
+const documentKindOrder: DocumentKind[] = ['spec', 'design', 'handoff', 'report', 'note']
+
+const documentGroups = computed(() =>
+  documentKindOrder
+    .map((kind) => ({
+      kind,
+      documents: filteredDocuments.value.filter((document) => document.kind === kind),
+    }))
+    .filter((group) => group.documents.length > 0),
+)
+
+function documentTaskTitle(taskId: string) {
+  return workspaceTasks.value.find((item) => item.id === taskId)?.title || taskId
+}
+
+function documentTaskStatus(taskId: string) {
+  return workspaceTasks.value.find((item) => item.id === taskId)?.status || null
+}
+
+function documentTaskLinks(document: WorkspaceDocument) {
+  return (document.links || []).filter((link) => link.targetType === 'task').map((link) => link.targetId)
+}
+
+function taskStatusDot(status: string | null) {
+  switch (status) {
+    case 'in_progress':
+    case 'claimed':
+      return 'bg-sky-400'
+    case 'review':
+      return 'bg-violet-400'
+    case 'blocked':
+      return 'bg-amber-400'
+    case 'done':
+      return 'bg-emerald-400'
+    case 'cancelled':
+      return 'bg-red-400'
+    default:
+      return 'bg-slate-400'
+  }
+}
+
+function requirementTasks(requirementId: string) {
+  return workspaceTasks.value.filter((task) => task.requirementId === requirementId)
+}
+
+const hasDocumentFilter = computed(
+  () => Boolean(documentTaskFilter.value) || Boolean(documentKindFilter.value),
+)
+
+function clearDocumentFilter() {
+  documentTaskFilter.value = ''
+  documentKindFilter.value = ''
+}
+
+function openDocumentCreate() {
+  showDocumentCreate.value = !showDocumentCreate.value
+  if (!showDocumentCreate.value) return
+  if (selectedRequirementId.value && !documentLinkRequirement.value) {
+    documentLinkRequirement.value = selectedRequirementId.value
+  }
+  if (selectedTaskId.value && !documentLinkTask.value) {
+    documentLinkTask.value = selectedTaskId.value
+  }
+}
+
+async function linkDocumentContext() {
+  if (!activeDocument.value) return
+  const existing = new Set(
+    (activeDocument.value.links || []).map((link) => `${link.targetType}:${link.targetId}`),
+  )
+  const targets: Array<{ targetType: 'requirement' | 'task'; targetId: string }> = []
+  if (selectedRequirementId.value && !existing.has(`requirement:${selectedRequirementId.value}`)) {
+    targets.push({ targetType: 'requirement', targetId: selectedRequirementId.value })
+  }
+  if (selectedTaskId.value && !existing.has(`task:${selectedTaskId.value}`)) {
+    targets.push({ targetType: 'task', targetId: selectedTaskId.value })
+  }
+  if (targets.length === 0) {
+    toast.info(t('workspace.linkContextEmpty'))
+    return
+  }
+  try {
+    for (const target of targets) {
+      await store.linkDocument(workspaceId.value, activeDocument.value.id, target.targetType, target.targetId)
+    }
+    await loadDocument(activeDocument.value.id)
+    await store.fetchWorkspace(workspaceId.value)
+    toast.success(t('common.saveSuccess'))
+  } catch (error: any) {
+    toast.error(error.message || t('common.saveFailed'))
+  }
+}
+
 function selectAgent(agent: WorkspaceAgent) {
   selectedTaskId.value = agent.openTaskIds[0] || ''
   activeTab.value = 'agents'
@@ -703,8 +891,43 @@ watch(selectedDocumentId, (documentId) => {
   if (documentId) void loadDocument(documentId)
 })
 
+// 视图上下文 → URL：用 replace 避免在历史里堆一串导航
+watch([activeTab, selectedRequirementId, selectedTaskId, selectedDocumentId], () => {
+  const query: Record<string, string> = {}
+  if (activeTab.value !== 'overview') query.tab = activeTab.value
+  if (selectedRequirementId.value) query.req = selectedRequirementId.value
+  if (selectedTaskId.value) query.task = selectedTaskId.value
+  // doc 只在资料库 tab 有意义：其它 tab 下它只是加载时的兜底选中项，写进 URL 会形成噪声
+  if (activeTab.value === 'documents' && selectedDocumentId.value) query.doc = selectedDocumentId.value
+  const same =
+    queryValue('tab') === (query.tab || '') &&
+    queryValue('req') === (query.req || '') &&
+    queryValue('task') === (query.task || '') &&
+    queryValue('doc') === (query.doc || '')
+  if (same) return
+  void router.replace({ query })
+})
+
+// URL → 视图上下文：浏览器前进 / 后退时把状态同步回来
+watch(
+  () => [route.query.tab, route.query.req, route.query.task, route.query.doc],
+  () => {
+    const tab = queryValue('tab') as WorkspaceTab
+    const next = WORKSPACE_TABS.includes(tab) ? tab : 'overview'
+    if (activeTab.value !== next) activeTab.value = next
+    const req = queryValue('req')
+    const task = queryValue('task')
+    const doc = queryValue('doc')
+    if (selectedRequirementId.value !== req) selectedRequirementId.value = req
+    if (selectedTaskId.value !== task) selectedTaskId.value = task
+    if (selectedDocumentId.value !== doc) selectedDocumentId.value = doc
+  },
+)
+
 onMounted(async () => {
   await loadWorkspace()
+  // 文档 id 可能来自 URL，此时 watch 不会触发，需要显式载入一次
+  if (selectedDocumentId.value) await loadDocument(selectedDocumentId.value)
   await connectRealtime()
 })
 
@@ -1014,12 +1237,12 @@ onBeforeUnmount(() => {
 
             <div v-if="selectedRequirementTasks.length === 0" class="px-5 py-12 text-center text-sm text-textMuted">{{ t('workspace.noTasks') }}</div>
             <div v-else class="p-4">
-              <div class="grid auto-cols-[minmax(236px,1fr)] grid-flow-col gap-3 overflow-x-auto pb-1">
+              <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
                 <div v-for="column in taskBoardColumns" :key="column.id" class="flex min-w-0 flex-col rounded-md border border-border bg-base/60">
                   <div class="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
-                    <span class="inline-flex items-center gap-1.5 text-xs font-semibold text-textMain">
+                    <span class="inline-flex min-w-0 items-center gap-1.5 text-xs font-semibold text-textMain">
                       <span class="h-1.5 w-1.5 rounded-full" :class="columnDotClass(column.id)" />
-                      {{ t(column.labelKey) }}
+                      <span class="truncate">{{ t(column.labelKey) }}</span>
                     </span>
                     <span class="text-[11px] tabular-nums text-textMuted">{{ tasksByColumn(column.states).length }}</span>
                   </div>
@@ -1047,15 +1270,30 @@ onBeforeUnmount(() => {
                           <span class="truncate">{{ formatTime(task.lastActivityAt) }}</span>
                         </div>
                       </div>
-                      <div class="mt-3 grid grid-cols-2 gap-2">
-                        <select :value="task.assignedProvider || ''" class="h-7 w-full rounded border border-border bg-base px-1.5 text-[11px] text-textMain" @change="assignTask(task.id, (($event.target as HTMLSelectElement).value || null) as AgentProvider | null)">
+                      <div class="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        <select :value="task.assignedProvider || ''" class="h-7 w-full min-w-0 rounded border border-border bg-base px-1.5 text-[11px] text-textMain" @change="assignTask(task.id, (($event.target as HTMLSelectElement).value || null) as AgentProvider | null)">
                           <option value="">{{ t('workspace.unassigned') }}</option>
                           <option v-for="provider in providerOptions" :key="provider" :value="provider">{{ providerLabel(provider) }}</option>
                         </select>
-                        <select :value="task.status" class="h-7 w-full rounded border border-border bg-base px-1.5 text-[11px] text-textMain" @change="updateTaskStatus(task.id, ($event.target as HTMLSelectElement).value as TaskStatus)">
+                        <select :value="task.status" class="h-7 w-full min-w-0 rounded border border-border bg-base px-1.5 text-[11px] text-textMain" @change="updateTaskStatus(task.id, ($event.target as HTMLSelectElement).value as TaskStatus)">
                           <option v-for="status in taskStatuses" :key="status" :value="status">{{ taskStatusLabel(status) }}</option>
                         </select>
                       </div>
+                      <button
+                        type="button"
+                        class="mt-3 flex h-7 w-full items-center gap-1.5 rounded border border-border px-1.5 text-left transition-colors"
+                        :class="taskDocuments(task.id).length ? 'text-textMain hover:border-primary/40' : 'text-textMuted'"
+                        :title="t('workspace.openTaskDocuments')"
+                        @click="openTaskDocument(task.id)"
+                      >
+                        <FileText class="h-3.5 w-3.5 shrink-0" />
+                        <span v-if="taskDocuments(task.id).length" class="min-w-0 flex-1 truncate text-[11px]">
+                          <span class="hidden sm:inline">{{ taskDocuments(task.id)[0].title }}</span>
+                          <span class="sm:hidden">{{ t('workspace.taskDocumentCount', { count: taskDocuments(task.id).length }) }}</span>
+                        </span>
+                        <span v-else class="flex-1 truncate text-[11px]">{{ t('workspace.noTaskDocuments') }}</span>
+                        <span v-if="taskDocuments(task.id).length > 1" class="shrink-0 text-[10px] tabular-nums text-textMuted">+{{ taskDocuments(task.id).length - 1 }}</span>
+                      </button>
                     </article>
                   </div>
                 </div>
@@ -1076,7 +1314,7 @@ onBeforeUnmount(() => {
               <h2 class="text-sm font-semibold text-textMain">{{ t('workspace.docsTitle') }}</h2>
               <p class="mt-0.5 text-xs text-textMuted">{{ current.documents.length }}</p>
             </div>
-            <button class="inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-2.5 text-xs font-medium text-white" @click="showDocumentCreate = !showDocumentCreate">
+            <button class="inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-2.5 text-xs font-medium text-white" @click="openDocumentCreate">
               <Plus class="h-3.5 w-3.5" />
               {{ t('workspace.newDocument') }}
             </button>
@@ -1102,14 +1340,82 @@ onBeforeUnmount(() => {
             </div>
           </form>
 
+          <div v-if="current.documents.length > 0" class="space-y-2 border-b border-border bg-base/40 p-3">
+            <select v-model="documentTaskFilter" class="h-8 w-full min-w-0 rounded-md border border-border bg-base px-2 text-xs text-textMain">
+              <option value="">{{ t('workspace.filterAllTasks') }}</option>
+              <optgroup v-for="requirement in requirements" :key="requirement.id" :label="requirement.title">
+                <option v-for="task in requirementTasks(requirement.id)" :key="task.id" :value="task.id">{{ task.title }}</option>
+            </optgroup>
+              <option :value="UNLINKED_FILTER">{{ t('workspace.filterNoTask') }}</option>
+            </select>
+            <select v-model="documentKindFilter" class="h-8 w-full min-w-0 rounded-md border border-border bg-base px-2 text-xs text-textMain">
+              <option value="">{{ t('workspace.filterAllKinds') }}</option>
+              <option v-for="kind in documentKinds" :key="kind" :value="kind">{{ documentKindLabel(kind) }}</option>
+            </select>
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div class="flex rounded-md border border-border p-0.5">
+                <button type="button" class="rounded px-2 py-1 text-[11px]" :class="documentGrouped ? 'bg-primary/10 text-primary' : 'text-textMuted'" @click="documentGrouped = true">{{ t('workspace.docGrouped') }}</button>
+                <button type="button" class="rounded px-2 py-1 text-[11px]" :class="!documentGrouped ? 'bg-primary/10 text-primary' : 'text-textMuted'" @click="documentGrouped = false">{{ t('workspace.docFlat') }}</button>
+              </div>
+              <span class="text-[11px] tabular-nums text-textMuted">{{ filteredDocuments.length }} / {{ current.documents.length }}</span>
+              <button v-if="hasDocumentFilter" type="button" class="rounded border border-border px-2 py-1 text-[11px] text-textMuted hover:text-textMain" @click="clearDocumentFilter">{{ t('common.clear') }}</button>
+            </div>
+          </div>
+
           <div v-if="current.documents.length === 0" class="px-4 py-14 text-center text-sm text-textMuted">{{ t('workspace.noDocuments') }}</div>
+          <div v-else-if="filteredDocuments.length === 0" class="px-4 py-14 text-center text-sm text-textMuted">{{ t('workspace.noDocumentsMatch') }}</div>
+          <div v-else-if="documentGrouped" class="max-h-[720px] overflow-y-auto">
+            <div v-for="group in documentGroups" :key="group.kind" class="border-b border-border last:border-b-0">
+              <div class="flex items-center justify-between gap-2 bg-white/[0.02] px-4 py-2">
+                <span class="inline-flex min-w-0 items-center gap-1.5">
+                  <span class="shrink-0 rounded border px-1.5 py-px text-[10px] font-semibold" :class="documentKindClass(group.kind)">{{ documentKindLabel(group.kind) }}</span>
+                </span>
+                <span class="text-[11px] tabular-nums text-textMuted">{{ group.documents.length }}</span>
+              </div>
+              <div class="divide-y divide-border">
+                <button v-for="document in group.documents" :key="document.id" class="w-full px-4 py-3 text-left hover:bg-white/[0.02]" :class="selectedDocumentId === document.id ? 'bg-primary/5' : ''" @click="selectDocument(document.id)">
+                  <div class="flex items-start gap-2">
+                    <FileText class="mt-0.5 h-4 w-4 shrink-0 text-textMuted" />
+                    <span class="min-w-0 flex-1">
+                      <span class="block truncate text-sm font-medium text-textMain">{{ document.title }}</span>
+                      <span class="mt-1 flex items-center gap-1.5">
+                        <span class="shrink-0 rounded border px-1.5 py-px text-[10px] font-semibold" :class="documentKindClass(document.kind)">{{ documentKindLabel(document.kind) }}</span>
+                        <span class="truncate text-[11px] text-textMuted">{{ t('workspace.revision') }} {{ document.revisionCount || document.revisions?.length || 1 }}</span>
+                      </span>
+                      <span class="mt-1 block">
+                        <span v-if="documentTaskLinks(document).length" class="flex flex-wrap gap-1">
+                          <span v-for="link in documentTaskLinks(document)" :key="link" class="inline-flex max-w-full items-center gap-1">
+                            <span class="h-1.5 w-1.5 shrink-0 rounded-full" :class="taskStatusDot(documentTaskStatus(link))" />
+                            <span class="truncate text-[11px] text-textMain">{{ documentTaskTitle(link) }}</span>
+                          </span>
+                        </span>
+                        <span v-else class="text-[11px] text-textMuted">{{ documentLinkSummary(document) || t('workspace.linkNone') }}</span>
+                      </span>
+                    </span>
+                  </div>
+                </button>
+              </div>
+            </div>
+          </div>
           <div v-else class="max-h-[720px] divide-y divide-border overflow-y-auto">
-            <button v-for="document in current.documents" :key="document.id" class="w-full px-4 py-3 text-left hover:bg-white/[0.02]" :class="selectedDocumentId === document.id ? 'bg-primary/5' : ''" @click="selectDocument(document.id)">
+            <button v-for="document in filteredDocuments" :key="document.id" class="w-full px-4 py-3 text-left hover:bg-white/[0.02]" :class="selectedDocumentId === document.id ? 'bg-primary/5' : ''" @click="selectDocument(document.id)">
               <div class="flex items-start gap-2">
                 <FileText class="mt-0.5 h-4 w-4 shrink-0 text-textMuted" />
                 <span class="min-w-0 flex-1">
                   <span class="block truncate text-sm font-medium text-textMain">{{ document.title }}</span>
-                  <span class="mt-1 block text-[11px] text-textMuted">{{ documentKindLabel(document.kind) }} · {{ t('workspace.revision') }} {{ document.revisionCount || document.revisions?.length || 1 }}</span>
+                  <span class="mt-1 flex items-center gap-1.5">
+                    <span class="shrink-0 rounded border px-1.5 py-px text-[10px] font-semibold" :class="documentKindClass(document.kind)">{{ documentKindLabel(document.kind) }}</span>
+                    <span class="truncate text-[11px] text-textMuted">{{ t('workspace.revision') }} {{ document.revisionCount || document.revisions?.length || 1 }}</span>
+                  </span>
+                  <span class="mt-1 block">
+                    <span v-if="documentTaskLinks(document).length" class="flex flex-wrap gap-1">
+                      <span v-for="link in documentTaskLinks(document)" :key="link" class="inline-flex max-w-full items-center gap-1">
+                        <span class="h-1.5 w-1.5 shrink-0 rounded-full" :class="taskStatusDot(documentTaskStatus(link))" />
+                        <span class="truncate text-[11px] text-textMain">{{ documentTaskTitle(link) }}</span>
+                      </span>
+                    </span>
+                    <span v-else class="text-[11px] text-textMuted">{{ documentLinkSummary(document) || t('workspace.linkNone') }}</span>
+                  </span>
                 </span>
               </div>
             </button>
@@ -1122,6 +1428,7 @@ onBeforeUnmount(() => {
             <select v-model="documentKind" class="h-9 rounded-md border border-border bg-base px-2 text-sm text-textMain">
               <option v-for="kind in documentKinds" :key="kind" :value="kind">{{ documentKindLabel(kind) }}</option>
             </select>
+            <span class="shrink-0 rounded border px-2 py-1 text-xs font-semibold" :class="documentKindClass(documentKind)">{{ documentKindLabel(documentKind) }}</span>
             <button class="inline-flex h-9 items-center gap-1.5 rounded-md border border-border px-3 text-sm text-textMuted hover:text-textMain" @click="saveDocumentMeta">
               <Save class="h-4 w-4" />
               {{ t('workspace.save') }}
@@ -1185,10 +1492,21 @@ onBeforeUnmount(() => {
               <div class="rounded-md border border-border bg-base p-4">
                 <h3 class="text-xs font-semibold text-textMain">{{ t('workspace.links') }}</h3>
                 <div class="mt-3 flex flex-wrap gap-2">
-                  <span v-for="link in activeDocument.links" :key="`${link.targetType}-${link.targetId}`" class="inline-flex items-center gap-1.5 rounded border border-border px-2 py-1 text-xs text-textMain">
-                    {{ link.targetType === 'requirement' ? requirements.find((item) => item.id === link.targetId)?.title || link.targetId : workspaceTasks.find((item) => item.id === link.targetId)?.title || link.targetId }}
-                    <button class="text-textMuted hover:text-danger" @click="unlinkDocument(link.targetType, link.targetId)">×</button>
-                  </span>
+                  <template v-for="link in activeDocument.links" :key="`${link.targetType}-${link.targetId}`">
+                    <span v-if="link.targetType === 'task'" class="inline-flex max-w-full items-center gap-1.5 rounded border border-border px-2 py-1 text-xs">
+                      <span class="h-1.5 w-1.5 shrink-0 rounded-full" :class="taskStatusDot(documentTaskStatus(link.targetId))" />
+                      <button class="min-w-0 truncate text-textMain hover:text-primary" @click="openLinkedTask(link.targetId)">{{ documentTaskTitle(link.targetId) }}</button>
+                      <span class="shrink-0 rounded border px-1 py-px text-[10px] font-semibold" :class="statusClass(documentTaskStatus(link.targetId))">{{ taskStatusLabel(documentTaskStatus(link.targetId)) }}</span>
+                      <button class="text-textMuted hover:text-danger" @click="unlinkDocument(link.targetType, link.targetId)">×</button>
+                    </span>
+                    <span v-else class="inline-flex max-w-full items-center gap-1.5 rounded border border-border px-2 py-1 text-xs">
+                      <button class="min-w-0 truncate text-textMain hover:text-primary" @click="openRequirement(link.targetId)">
+                        {{ requirements.find((item) => item.id === link.targetId)?.title || link.targetId }}
+                      </button>
+                      <span class="shrink-0 rounded border px-1 py-px text-[10px] font-semibold text-textMuted">{{ requirementStatusLabel(requirements.find((item) => item.id === link.targetId)?.effectiveStatus) }}</span>
+                      <button class="text-textMuted hover:text-danger" @click="unlinkDocument(link.targetType, link.targetId)">×</button>
+                    </span>
+                  </template>
                   <span v-if="activeDocument.links.length === 0" class="text-xs text-textMuted">-</span>
                 </div>
                 <div class="mt-3 space-y-2">
@@ -1200,10 +1518,16 @@ onBeforeUnmount(() => {
                     <option value="">{{ t('workspace.linkTask') }}</option>
                     <option v-for="task in workspaceTasks" :key="task.id" :value="task.id">{{ task.title }}</option>
                   </select>
-                  <button class="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs text-textMain" @click="linkDocument">
-                    <Link2 class="h-3.5 w-3.5" />
-                    {{ t('workspace.link') }}
-                  </button>
+                  <div class="flex gap-2">
+                    <button class="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md border border-border px-2.5 text-xs text-textMain" @click="linkDocument">
+                      <Link2 class="h-3.5 w-3.5" />
+                      {{ t('workspace.link') }}
+                    </button>
+                    <button class="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md border border-primary/40 bg-primary/10 px-2.5 text-xs text-primary" :title="t('workspace.linkContextHint')" @click="linkDocumentContext">
+                      <Link2 class="h-3.5 w-3.5" />
+                      {{ t('workspace.linkContext') }}
+                    </button>
+                  </div>
                 </div>
               </div>
 

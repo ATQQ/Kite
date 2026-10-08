@@ -3,7 +3,9 @@ import { createHash } from 'node:crypto';
 export const WORKSPACE_ROLES = ['frontend', 'backend', 'docs', 'demo', 'custom'] as const;
 export const REQUIREMENT_STATUSES = ['draft', 'ready', 'in_progress', 'blocked', 'done', 'cancelled'] as const;
 export const TASK_STATUSES = ['todo', 'claimed', 'in_progress', 'blocked', 'review', 'done', 'cancelled'] as const;
-export const AGENT_PROVIDERS = ['cursor', 'claude', 'codex', 'workbuddy', 'trae', 'custom'] as const;
+// 'custom' 是历史值：仍作为入参接受并归一到 'unknown'，但不再预建 Agent 记录
+export const AGENT_PROVIDERS = ['cursor', 'claude', 'codex', 'workbuddy', 'trae', 'unknown'] as const;
+export const LEGACY_AGENT_PROVIDERS = ['custom'] as const;
 export const DOCUMENT_KINDS = ['spec', 'design', 'handoff', 'report', 'note'] as const;
 export const ACTIVE_TASK_STATUSES = ['claimed', 'in_progress', 'review'] as const;
 
@@ -31,7 +33,8 @@ export function normalizeWorkspaceRole(value: unknown): WorkspaceRole {
 export function normalizeAgentProvider(value: unknown): AgentProvider {
   const raw = typeof value === 'string' ? value.trim().toLowerCase() : '';
   if ((AGENT_PROVIDERS as readonly string[]).includes(raw)) return raw as AgentProvider;
-  return raw ? 'custom' : 'codex';
+  if ((LEGACY_AGENT_PROVIDERS as readonly string[]).includes(raw)) return 'unknown';
+  return raw ? 'unknown' : 'codex';
 }
 
 export function normalizeTaskStatus(value: unknown, fallback: TaskStatus = 'todo'): TaskStatus {

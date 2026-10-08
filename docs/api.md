@@ -735,7 +735,7 @@ X-Kite-Agent: cursor
 * Workspace Token 只保存 SHA-256 哈希和前缀；轮换后旧 Token 立即失效。
 * Workspace Token 可用于需求和任务读取、任务认领/更新/释放、文档读取/版本提交/图片上传、Agent 与 Board 查询。
 * 只有管理员 Token 可以创建/归档 Workspace、管理项目关联、轮换 Token、创建需求、删除需求/任务/文档和预指派任务。
-* Agent 身份来自 `X-Kite-Agent` 自声明，支持 `cursor` / `claude` / `codex` / `workbuddy` / `trae` / `custom`。
+* Agent 身份来自 `X-Kite-Agent` 自声明，支持 `cursor` / `claude` / `codex` / `workbuddy` / `trae` / `unknown`；历史值 `custom` 会被归一化为 `unknown`。
 
 ### 10.2 Workspace 与项目关联
 
@@ -749,6 +749,21 @@ X-Kite-Agent: cursor
 | `POST` | `/api/workspaces/:id/token/rotate` | 轮换 Workspace Token |
 | `PUT` | `/api/workspaces/:id/projects/:projectId` | 关联项目并设置 `frontend/backend/docs/demo/custom` 角色 |
 | `DELETE` | `/api/workspaces/:id/projects/:projectId` | 解除项目关联 |
+
+`GET /api/workspaces` 每条记录除聚合计数（`agentStates`）外，还内联返回该 Workspace 下每个 Agent 的精简状态，供工作空间首页 3D 总览直接渲染，无需再按 Workspace 逐个请求：
+
+```json
+{
+  "id": "ws_xxx",
+  "name": "Kite 自迭代验证",
+  "agentStates": { "working": 1, "blocked": 0, "stalled": 0, "idle": 5 },
+  "agents": [
+    { "id": "agent_xxx", "provider": "codex", "displayName": "codex", "state": "working" }
+  ]
+}
+```
+
+`agents[].state` 取值与 `/api/workspaces/:id/agents` 一致：`working / idle / blocked / stalled`。
 
 ### 10.3 需求
 

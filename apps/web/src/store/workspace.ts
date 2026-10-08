@@ -5,7 +5,8 @@ import { apiUrl, pageUrl } from '../lib/base'
 export type WorkspaceRole = 'frontend' | 'backend' | 'docs' | 'demo' | 'custom'
 export type RequirementStatus = 'draft' | 'ready' | 'in_progress' | 'blocked' | 'done' | 'cancelled'
 export type TaskStatus = 'todo' | 'claimed' | 'in_progress' | 'blocked' | 'review' | 'done' | 'cancelled'
-export type AgentProvider = 'cursor' | 'claude' | 'codex' | 'workbuddy' | 'trae' | 'custom'
+// 'custom' 仅作历史值兼容，服务端已归一为 'unknown'
+export type AgentProvider = 'cursor' | 'claude' | 'codex' | 'workbuddy' | 'trae' | 'unknown' | 'custom'
 export type DocumentKind = 'spec' | 'design' | 'handoff' | 'report' | 'note'
 
 export interface Workspace {
@@ -19,6 +20,15 @@ export interface Workspace {
   requirementCount?: number
   taskCount?: number
   documentCount?: number
+  activeRequirementCount?: number
+  agentStates?: { working: number; blocked: number; stalled: number; idle: number }
+  // 首页 3D 预览：服务端只回最小字段，不含 openTaskIds / taskCount
+  agents?: Array<{
+    id: string
+    provider: AgentProvider
+    displayName: string
+    state: WorkspaceAgent['state']
+  }>
 }
 
 export interface WorkspaceProjectLink {

@@ -385,6 +385,10 @@ const initDb = async () => {
   await client.execute(`CREATE INDEX IF NOT EXISTS idx_tasks_assigned_provider ON tasks(assigned_provider);`);
   await client.execute(`CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);`);
 
+  // Migration: 'custom' 这一历史 provider 改名 'unknown'（幂等；tasks 按 agent id 关联，不受影响）
+  try { await client.execute(`UPDATE workspace_agents SET provider = 'unknown' WHERE provider = 'custom'`); } catch { /* no-op */ }
+  try { await client.execute(`UPDATE tasks SET assigned_provider = 'unknown' WHERE assigned_provider = 'custom'`); } catch { /* no-op */ }
+
   await client.execute(`
     CREATE TABLE IF NOT EXISTS task_activities (
       id TEXT PRIMARY KEY,
