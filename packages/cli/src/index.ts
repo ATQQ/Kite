@@ -7,7 +7,7 @@ import readline from 'readline/promises';
 import { stdin as input, stdout as output } from 'process';
 import { packProject, type PackResult } from './pack.js';
 import { uploadZip } from './upload.js';
-import { getConfigPath, getKiteHome, randomToken, readGlobalConfig, readLocalEnv, setGlobalConfig, writeGlobalConfig, writeLocalEnvValue, listProjectEnvs, resolveProjectConfig, envTokenKey, type ResolvedProjectConfig } from './home.js';
+import { getConfigPath, getKiteHome, maskToken, randomToken, readGlobalConfig, readLocalEnv, setGlobalConfig, writeGlobalConfig, writeLocalEnvValue, listProjectEnvs, resolveProjectConfig, envTokenKey, type ResolvedProjectConfig } from './home.js';
 import { LocalStore } from './local-store.js';
 import { startServe } from './serve.js';
 import { parseIgnoreOption } from './ignore.js';
@@ -95,11 +95,12 @@ cli.command('config:set <key> <value>', 'Set global configuration')
     }
 
     setGlobalConfig(key as 'serverUrl' | 'token', value);
-    console.log(chalk.green(`Set ${key} = ${value}`));
+    console.log(chalk.green(`Set ${key} = ${key === 'token' ? maskToken(value) : value}`));
   });
 
 cli.command('config:get <key>', 'Get global configuration')
   .option('--env <name>', 'Environment name (selects kite.config.<name>.json)')
+  .option('--reveal', 'Reveal token value instead of masking it')
   .action((key: string, options: any) => {
     const config = readGlobalConfig();
     if (key === 'token') {
@@ -120,21 +121,34 @@ cli.command('config:get <key>', 'Get global configuration')
         const projectToken = config.projectToken?.[tokenKey]
           || (resolved.env ? config.projectToken?.[resolved.config.projectId] : undefined);
         if (projectToken) {
-          console.log(projectToken);
+          console.log(options.reveal ? projectToken : maskToken(projectToken));
           return;
         }
       }
     }
-    console.log((config as Record<string, string | undefined>)[key]);
+    const value = (config as Record<string, string | undefined>)[key];
+    console.log(key === 'token' && !options.reveal ? maskToken(value) : value);
   });
 
 cli.command('config:list', 'List all global configurations')
-  .action(() => {
+  .option('--json', 'Output masked JSON')
+  .action((options: any) => {
     const config = readGlobalConfig();
-    console.log(config);
-    if (config.projectToken && Object.keys(config.projectToken).length > 0) {
+    const masked = {
+      ...config,
+      token: config.token ? maskToken(config.token) : config.token,
+      projectToken: config.projectToken
+        ? Object.fromEntries(Object.entries(config.projectToken).map(([key, value]) => [key, maskToken(value)]))
+        : config.projectToken,
+      workspaceToken: config.workspaceToken
+        ? Object.fromEntries(Object.entries(config.workspaceToken).map(([key, value]) => [key, maskToken(value)]))
+        : config.workspaceToken,
+    };
+    if (options.json) return console.log(JSON.stringify(masked, null, 2));
+    console.log(masked);
+    if (masked.projectToken && Object.keys(masked.projectToken).length > 0) {
       console.log(chalk.gray('\nPer-project tokens:'));
-      for (const [pid, tok] of Object.entries(config.projectToken)) {
+      for (const [pid, tok] of Object.entries(masked.projectToken)) {
         console.log(`  ${pid}: ${tok}`);
       }
     }

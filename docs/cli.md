@@ -307,6 +307,10 @@ kite config:set serverUrl http://127.0.0.1:5431 --global
 
 # 查看当前全局配置
 kite config:list
+
+# Token 默认脱敏；仅在明确需要时读取原值
+kite config:get token
+kite config:get token --reveal
 ```
 
 如果不希望 token 进入全局配置，可以放在当前项目的 `.env.local`：
@@ -707,13 +711,22 @@ AGENTS.md
 | `kite workspace agents` | 查看各 Provider 的 working / idle / blocked / stalled 状态 |
 | `kite requirement list` | 列出需求 |
 | `kite requirement show <id>` | 查看需求详情 |
-| `kite requirement create --title "..."` | 创建需求（需要管理员 Token） |
+| `kite requirement create --title "..."` | 使用 Workspace Token 创建需求 |
 | `kite requirement update <id>` | 更新需求、状态模式、标签或项目范围 |
+| `kite task list` | 按状态、需求、Provider、Assignee 查询任务 |
 | `kite task inbox` | 查看已指派给自己或未分配的待处理任务 |
+| `kite task show <id>` | 查看任务详情与活动记录 |
+| `kite task create --requirement <id> --title "..."` | 在需求下创建任务 |
 | `kite task claim <id>` | 原子认领任务 |
+| `kite task assign <id> --provider <provider>` | 管理员预指派任务；`--provider none` 清空 |
 | `kite task update <id> --status <status>` | 更新任务状态、进度并写入活动记录 |
 | `kite task release <id>` | 释放自己认领的任务 |
 | `kite doc list` | 列出资料文档 |
+| `kite doc show <docId>` | 查看文档详情、revision 与 links |
+| `kite doc revisions <docId>` | 查看文档 revision 列表 |
+| `kite doc update <docId> --title "..." --kind spec` | 更新文档标题或类型 |
+| `kite doc link <docId> --requirement <id>` / `--task <id>` | 关联需求或任务 |
+| `kite doc unlink <docId> --requirement <id>` / `--task <id>` | 解除关联 |
 | `kite doc pull <docId>` / `kite doc pull --all` | 拉取文档到本地 `docsDir`，并把服务端图片转成本地相对路径 |
 | `kite doc push <file>` | 上传 Markdown；图片会自动上传并重写为 `asset://`，再提交新 revision |
 
@@ -721,6 +734,9 @@ Agent 身份优先使用 `--agent`，其次 `KITE_AGENT`，默认 `codex`：
 
 ```bash
 kite task inbox --agent cursor --json
+kite task list --agent cursor --status todo --json
+kite task create --agent cursor --requirement req_xxxxxxxx --title "补齐 CLI 命令"
+kite task show task_xxxxxxxx --agent cursor --json
 kite task claim task_xxxxxxxx --agent cursor
 kite task update task_xxxxxxxx --agent cursor \
   --status in_progress \
@@ -732,6 +748,9 @@ kite doc push ./notes/handoff.md \
   --title "交接说明" \
   --kind handoff \
   --requirement req_xxxxxxxx
+
+kite doc link doc_xxxxxxxx --agent cursor --task task_xxxxxxxx
+kite doc revisions doc_xxxxxxxx --agent cursor --json
 ```
 
 `kite doc push` 对已拉取文档会根据 `doc_xxx-title.md` 文件名自动识别文档 ID；也可以显式传 `--doc <id>`。文档版本冲突会返回退出码 `1` 并打印 `409` 错误，不会静默覆盖。

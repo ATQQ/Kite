@@ -113,6 +113,30 @@ const linkPayload = await json(link);
 assert.equal(linkPayload.link.workspaceId, workspaceId);
 assert.equal(linkPayload.link.projectId, 'proj_legacy_ws');
 
+const workspaceRequirementResponse = await api(`/api/workspaces/${workspaceId}/requirements`, {
+  method: 'POST',
+  body: JSON.stringify({
+    title: 'Workspace token requirement',
+    description: 'Created without an admin token.',
+    priority: 'P0',
+    tags: ['workspace-token'],
+  }),
+}, workspaceToken, 'cursor');
+assert.equal(workspaceRequirementResponse.status, 200);
+const workspaceRequirementPayload = await json(workspaceRequirementResponse);
+assert.equal(workspaceRequirementPayload.requirement.createdByType, 'agent');
+assert.deepEqual(workspaceRequirementPayload.requirement.projectIds, []);
+assert.deepEqual(workspaceRequirementPayload.requirement.tags.map((tag: any) => tag.name), ['workspace-token']);
+
+const forbiddenRequirementScope = await api(`/api/workspaces/${workspaceId}/requirements`, {
+  method: 'POST',
+  body: JSON.stringify({
+    title: 'Scoped by workspace token',
+    projectIds: ['proj_legacy_ws'],
+  }),
+}, workspaceToken, 'cursor');
+assert.equal(forbiddenRequirementScope.status, 403);
+
 const requirementResponse = await api(`/api/workspaces/${workspaceId}/requirements`, {
   method: 'POST',
   body: JSON.stringify({

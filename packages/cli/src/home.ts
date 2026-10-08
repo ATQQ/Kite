@@ -44,6 +44,12 @@ export function getConfigPath() {
   return path.join(ensureKiteHome(), 'config.json');
 }
 
+export function maskToken(token?: string | null): string {
+  if (!token) return '(not set)';
+  if (token.length <= 8) return '****';
+  return `${token.slice(0, 4)}...${token.slice(-4)}`;
+}
+
 export function readGlobalConfig(): KiteGlobalConfig {
   const configPath = getConfigPath();
   if (!fs.existsSync(configPath)) return {};

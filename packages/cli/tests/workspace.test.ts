@@ -7,10 +7,11 @@ import {
   docCommand,
   findWorkspaceManifest,
   initWorkspace,
+  requirementCommand,
   resolveWorkspaceAuth,
   taskCommand,
 } from '../src/workspace.js';
-import { readGlobalConfig } from '../src/home.js';
+import { maskToken, readGlobalConfig } from '../src/home.js';
 
 const originalHome = process.env.KITE_HOME;
 const tempHome = await fsp.mkdtemp(path.join(os.tmpdir(), 'kite-cli-workspace-home-'));
@@ -23,7 +24,7 @@ delete process.env.KITE_WORKSPACE_ID;
 delete process.env.KITE_WORKSPACE_TOKEN;
 delete process.env.KITE_AGENT;
 
-const requests: Array<{ method: string; path: string; agent: string | null; body: any }> = [];
+const requests: Array<{ method: string; path: string; search: string; agent: string | null; body: any }> = [];
 
 function jsonResponse(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), {
@@ -48,6 +49,7 @@ beforeAll(() => {
       requests.push({
         method: request.method,
         path: url.pathname,
+        search: url.search,
         agent: request.headers.get('x-kite-agent'),
         body,
       });
@@ -60,6 +62,38 @@ beforeAll(() => {
           { id: 'task_1', title: 'Implement CLI', status: 'todo', assignedProvider: null, requirementPriority: 'P1' },
           { id: 'task_2', title: 'Other work', status: 'in_progress', assignedProvider: 'codex', requirementPriority: 'P2' },
         ]);
+      }
+      if (url.pathname === '/api/workspaces/ws_cli/tasks' && request.method === 'POST') {
+        return jsonResponse({
+          success: true,
+          task: {
+            id: 'task_created',
+            title: body?.title,
+            status: 'todo',
+            assignedProvider: null,
+            activities: [],
+          },
+        });
+      }
+      if (url.pathname === '/api/workspaces/ws_cli/tasks/task_1' && request.method === 'GET') {
+        return jsonResponse({
+          id: 'task_1',
+          title: 'Implement CLI',
+          status: 'todo',
+          assignedProvider: null,
+          activities: [],
+        });
+      }
+      if (url.pathname === '/api/workspaces/ws_cli/requirements' && request.method === 'POST') {
+        return jsonResponse({
+          success: true,
+          requirement: {
+            id: 'req_cli',
+            title: body?.title,
+            projectIds: [],
+            tags: [],
+          },
+        });
       }
       if (url.pathname === '/api/workspaces/ws_cli/tasks/task_1/claim' && request.method === 'POST') {
         return jsonResponse({ success: true, task: { id: 'task_1', status: 'claimed', assignedProvider: 'cursor' } });
@@ -81,6 +115,14 @@ beforeAll(() => {
           assets: [{ id: 'asset1', documentId: 'doc_test', originalName: 'pixel.png', mime: 'image/png' }],
         });
       }
+      if (url.pathname === '/api/workspaces/ws_cli/documents/doc_test/revisions' && request.method === 'GET') {
+        return jsonResponse([
+          { id: 'rev_1', revisionNumber: 1, contentMarkdown: '![img](asset://asset1)' },
+        ]);
+      }
+      if (url.pathname === '/api/workspaces/ws_cli/documents/doc_test' && request.method === 'PUT') {
+        return jsonResponse({ success: true, document: { id: 'doc_test', title: body?.title, kind: body?.kind } });
+      }
       if (url.pathname === '/api/workspaces/ws_cli/assets/asset1' && request.method === 'GET') {
         return new Response(new Uint8Array([137, 80, 78, 71]), { headers: { 'content-type': 'image/png' } });
       }
@@ -94,6 +136,9 @@ beforeAll(() => {
         return jsonResponse({ success: true, revision: { id: 'rev_2', revisionNumber: 2, contentMarkdown: body.contentMarkdown } });
       }
       if (url.pathname === '/api/workspaces/ws_cli/documents/doc_test/links' && request.method === 'POST') {
+        return jsonResponse({ success: true });
+      }
+      if (url.pathname === '/api/workspaces/ws_cli/documents/doc_test/links/requirement/req_1' && request.method === 'DELETE') {
         return jsonResponse({ success: true });
       }
       if (url.pathname === '/api/workspaces/ws_cli/documents/doc_test' && request.method === 'PUT') {
@@ -194,6 +239,77 @@ describe('workspace CLI', () => {
     expect(update?.body.progress).toBe(40);
   });
 
+  it('lists, shows and creates tasks through workspace auth', async () => {
+    const authOptions = { cwd: nested, agent: 'cursor', json: true };
+    await taskCommand('list', undefined, {
+      ...authOptions,
+      status: 'todo',
+      requirement: 'req_1',
+      assignee: 'unassigned',
+    });
+    await taskCommand('show', 'task_1', authOptions);
+    await taskCommand('create', undefined, {
+      ...authOptions,
+      requirement: 'req_1',
+      title: 'CLI-created task',
+      description: 'Created through workspace auth',
+    });
+
+    const list = requests.find((item) => item.path.endsWith('/tasks') && item.method === 'GET' && item.search.includes('requirementId=req_1'));
+    const create = requests.find((item) => item.path.endsWith('/tasks') && item.method === 'POST');
+    expect(list?.search).toBe('?status=todo&requirementId=req_1&assignee=unassigned');
+    expect(create?.agent).toBe('cursor');
+    expect(create?.body.requirementId).toBe('req_1');
+    expect(create?.body.title).toBe('CLI-created task');
+  });
+
+  it('creates requirements with workspace auth', async () => {
+    const authOptions = { cwd: nested, agent: 'cursor', json: true };
+    await requirementCommand('create', undefined, {
+      ...authOptions,
+      title: 'CLI-managed requirement',
+      description: 'Created through workspace auth',
+      priority: 'P0',
+      statusMode: 'manual',
+      status: 'ready',
+      tags: 'cli,workspace',
+    });
+
+    const create = requests.find((item) => item.path.endsWith('/requirements') && item.method === 'POST');
+    expect(create?.agent).toBe('cursor');
+    expect(create?.body.title).toBe('CLI-managed requirement');
+    expect(create?.body.projectIds).toEqual([]);
+    expect(create?.body.tags).toEqual(['cli', 'workspace']);
+    expect(create?.body.statusMode).toBe('manual');
+    expect(create?.body.manualStatus).toBe('ready');
+  });
+
+  it('shows, updates and links documents', async () => {
+    const authOptions = { cwd: nested, agent: 'cursor', json: true };
+    await docCommand('show', 'doc_test', authOptions);
+    await docCommand('revisions', 'doc_test', authOptions);
+    await docCommand('update', 'doc_test', {
+      ...authOptions,
+      title: 'Updated spec',
+      kind: 'design',
+    });
+    await docCommand('link', 'doc_test', { ...authOptions, requirement: 'req_1' });
+    await docCommand('unlink', 'doc_test', { ...authOptions, requirement: 'req_1' });
+
+    const update = requests.find((item) => item.path.endsWith('/doc_test') && item.method === 'PUT');
+    const link = requests.find((item) => item.path.endsWith('/doc_test/links') && item.method === 'POST');
+    const unlink = requests.find((item) => item.path.endsWith('/doc_test/links/requirement/req_1') && item.method === 'DELETE');
+    expect(update?.body.title).toBe('Updated spec');
+    expect(update?.body.kind).toBe('design');
+    expect(link?.body.targetId).toBe('req_1');
+    expect(unlink?.path).toBe('/api/workspaces/ws_cli/documents/doc_test/links/requirement/req_1');
+  });
+
+  it('masks token values for display', () => {
+    expect(maskToken('kt_1234567890abcdef')).toBe('kt_1...cdef');
+    expect(maskToken('short')).toBe('****');
+  });
+
   it('pulls and pushes documents while rewriting local image paths', async () => {
     const authOptions = { cwd: nested, agent: 'cursor', json: true };
     await docCommand('pull', 'doc_test', authOptions);
@@ -212,9 +328,9 @@ describe('workspace CLI', () => {
       kind: 'spec',
     });
 
-    const revision = requests.find((item) => item.path.endsWith('/doc_test/revisions'));
-    const link = requests.find((item) => item.path.endsWith('/doc_test/links'));
-    const upload = requests.find((item) => item.path.endsWith('/doc_test/assets'));
+    const revision = requests.findLast((item) => item.path.endsWith('/doc_test/revisions') && item.method === 'POST');
+    const link = requests.findLast((item) => item.path.endsWith('/doc_test/links') && item.method === 'POST');
+    const upload = requests.findLast((item) => item.path.endsWith('/doc_test/assets') && item.method === 'POST');
     expect(revision?.body.baseRevisionId).toBe('rev_1');
     expect(revision?.body.contentMarkdown).toContain('asset://asset1');
     expect(revision?.body.contentMarkdown).toContain('CLI push body');

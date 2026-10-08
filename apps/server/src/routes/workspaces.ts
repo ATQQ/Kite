@@ -332,7 +332,11 @@ export const workspaceRoutes = new Elysia()
   .post('/api/workspaces/:id/requirements', async ({ headers, params, body, set }) => {
     const ctx = await contextOrError(headers, params.id);
     if (!ctx) { set.status = 401; return { error: 'Unauthorized' }; }
-    if (!ctx.admin) { set.status = 403; return { error: 'Only the admin can create requirements' }; }
+    const projectIds = parseStringArray(body.projectIds);
+    if (!ctx.admin && projectIds.length > 0) {
+      set.status = 403;
+      return { error: 'Agents cannot set requirement project scope' };
+    }
     const title = normalizeText(body.title, 200);
     if (!title) { set.status = 400; return { error: '需求标题不能为空' }; }
     const created = await workspaceStore.requirements.create({
@@ -346,7 +350,6 @@ export const workspaceRoutes = new Elysia()
       createdByType: ctx.actor.type,
       createdById: ctx.actor.id,
     });
-    const projectIds = parseStringArray(body.projectIds);
     const tagNames = parseStringArray(body.tags);
     const tagIds: string[] = [];
     for (const tagName of tagNames) {

@@ -39,7 +39,10 @@
 
 - [ ] 管理员 Token 可访问全部 `/api/workspaces` 读写接口。
 - [ ] Workspace Token 可访问需求、任务、文档、Agent、Board 等授权读写接口。
-- [ ] Workspace Token 不能管理 Workspace、项目关联、Token 轮换、归档/删除。
+- [ ] Workspace Token 可创建需求，且新建需求的项目范围为空（整个 Workspace）。
+- [ ] Agent 可通过 `kite task list/show/create/claim/update/release` 完成任务闭环，无需直接查询数据库或调用 HTTP API。
+- [ ] Agent 可通过 `kite doc show/update/revisions/link/unlink/push` 完成资料闭环。
+- [ ] Workspace Token 不能管理 Workspace、项目关联、需求项目范围、Token 轮换、归档/删除。
 - [ ] Workspace Token 不能删除或改派他人任务。
 - [ ] `POST /api/workspaces/:id/token/rotate` 返回新 Token，旧 Token 立即失效（401/403）。
 - [ ] 无 Token / 错误 Token 请求返回 401，且响应不泄漏 Token 内容。

@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import chalk from 'chalk';
 import readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
-import { getConfigPath, readGlobalConfig, writeGlobalConfig } from './home.js';
+import { getConfigPath, maskToken, readGlobalConfig, writeGlobalConfig } from './home.js';
 
 export interface WorkspaceManifest {
   workspaceId: string;
@@ -23,13 +23,22 @@ export interface WorkspaceAuth {
 
 type CommandOptions = Record<string, any>;
 
-function maskToken(token: string): string {
-  if (!token) return '(not set)';
-  return `${token.slice(0, 8)}...${token.slice(-4)}`;
-}
-
 function printJson(value: unknown) {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
+}
+
+function parseCsv(value: unknown): string[] {
+  if (typeof value !== 'string') return [];
+  return value.split(',').map((item) => item.trim()).filter(Boolean);
+}
+
+function withQuery(pathname: string, params: Record<string, unknown>) {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null && value !== '') query.set(key, String(value));
+  }
+  const suffix = query.toString();
+  return suffix ? `${pathname}?${suffix}` : pathname;
 }
 
 function apiUrl(serverUrl: string, suffix: string) {
@@ -124,10 +133,12 @@ function workspaceInstruction() {
 When this repository is part of a Kite Workspace, use the Kite CLI as the source of truth for requirements, tasks and documents.
 
 - Start work with \`kite task inbox --agent ${agentArg} --json\`.
+- Query existing work with \`kite requirement list --agent ${agentArg} --json\` and \`kite task list --agent ${agentArg} --json\`; inspect details with \`kite requirement show <id>\` and \`kite task show <id>\`.
+- Create requirements and tasks with \`kite requirement create\` and \`kite task create --requirement <id> --title "<title>"\`.
 - Claim only an assigned task or an unassigned task in the inbox with \`kite task claim <taskId> --agent ${agentArg}\`.
 - Report meaningful progress with \`kite task update <taskId> --agent ${agentArg} --status <status> --summary "<what changed>"\`.
 - Put durable process knowledge in \`kite doc push <file> --agent ${agentArg} --title "<title>" --kind <spec|design|handoff|report|note>\` and link it to the active requirement or task.
-- Before editing an existing document, run \`kite doc pull <docId> --agent ${agentArg}\`; never overwrite a revision conflict.
+- Before editing an existing document, run \`kite doc pull <docId> --agent ${agentArg}\`; never overwrite a revision conflict. Use \`kite doc link/unlink\` to maintain requirement and task links.
 - Do not write tokens into repository files. Tokens live in \`~/.kite/config.json\`.
 - Do not manage workspace membership, rotate tokens, delete requirements, or reassign another agent's task.`;
 }
@@ -214,7 +225,7 @@ async function workspaceAgents(options: CommandOptions) {
   printTable(agents.map((agent: any) => [agent.provider, agent.state, String(agent.openTaskIds.length)]), ['AGENT', 'STATE', 'OPEN']);
 }
 
-async function requirementCommand(action: string, id: string | undefined, options: CommandOptions) {
+export async function requirementCommand(action: string, id: string | undefined, options: CommandOptions) {
   const auth = resolveWorkspaceAuth(options);
   const base = `/api/workspaces/${auth.workspaceId}/requirements`;
   if (action === 'list') {
@@ -229,20 +240,7 @@ async function requirementCommand(action: string, id: string | undefined, option
   if (action === 'create') {
     const row = await requestJson(auth.serverUrl, auth.token, base, {
       method: 'POST',
-      body: JSON.stringify({
-        title: options.title,
-        description: options.description,
-        priority: options.priority,
-        acceptanceCriteria: options.acceptance,
-        tags: options.tags ? String(options.tags).split(',').map((item: string) => item.trim()).filter(Boolean) : [],
-        projectIds: options.project ? String(options.project).split(',').map((item: string) => item.trim()).filter(Boolean) : [],
-      }),
-    });
-    return options.json ? printJson(row) : console.log(chalk.green(`Created ${row.requirement.id}`));
-  }
-  if (action === 'update' && id) {
-    const row = await requestJson(auth.serverUrl, auth.token, `${base}/${id}`, {
-      method: 'PUT',
+      headers: { 'X-Kite-Agent': auth.agent },
       body: JSON.stringify({
         title: options.title,
         description: options.description,
@@ -250,7 +248,25 @@ async function requirementCommand(action: string, id: string | undefined, option
         statusMode: options.statusMode,
         manualStatus: options.status,
         acceptanceCriteria: options.acceptance,
-        tags: options.tags !== undefined ? String(options.tags).split(',').map((item) => item.trim()).filter(Boolean) : undefined,
+        tags: parseCsv(options.tags),
+        projectIds: parseCsv(options.project),
+      }),
+    });
+    return options.json ? printJson(row) : console.log(chalk.green(`Created ${row.requirement.id}`));
+  }
+  if (action === 'update' && id) {
+    const row = await requestJson(auth.serverUrl, auth.token, `${base}/${id}`, {
+      method: 'PUT',
+      headers: { 'X-Kite-Agent': auth.agent },
+      body: JSON.stringify({
+        title: options.title,
+        description: options.description,
+        priority: options.priority,
+        statusMode: options.statusMode,
+        manualStatus: options.status,
+        acceptanceCriteria: options.acceptance,
+        tags: options.tags !== undefined ? parseCsv(options.tags) : undefined,
+        projectIds: options.project !== undefined ? parseCsv(options.project) : undefined,
       }),
     });
     return options.json ? printJson(row) : console.log(chalk.green(`Updated ${id}`));
@@ -261,8 +277,23 @@ async function requirementCommand(action: string, id: string | undefined, option
 export async function taskCommand(action: string, id: string | undefined, options: CommandOptions) {
   const auth = resolveWorkspaceAuth(options);
   const base = `/api/workspaces/${auth.workspaceId}/tasks`;
-  if (action === 'inbox') {
-    const rows = await requestJson(auth.serverUrl, auth.token, base);
+  if (action === 'list' || action === 'inbox') {
+    const rows = await requestJson(auth.serverUrl, auth.token, withQuery(base, {
+      status: action === 'inbox' ? 'todo' : options.status,
+      requirementId: options.requirement,
+      provider: options.provider,
+      assignee: options.assignee,
+    }));
+    if (action === 'list') {
+      if (options.json) return printJson(rows);
+      return printTable(rows.map((row: any) => [
+        row.id,
+        row.status,
+        row.assignedProvider || chalk.gray('unassigned'),
+        row.requirementPriority || '',
+        row.title,
+      ]), ['ID', 'STATUS', 'AGENT', 'PRI', 'TITLE']);
+    }
     const inbox = rows.filter((row: any) =>
       row.status === 'todo' && (!row.assignedProvider || row.assignedProvider === auth.agent),
     );
@@ -273,6 +304,29 @@ export async function taskCommand(action: string, id: string | undefined, option
       row.requirementPriority || '',
       row.title,
     ]), ['ID', 'AGENT', 'PRI', 'TITLE']);
+  }
+  if (action === 'show' && id) {
+    const row = await requestJson(auth.serverUrl, auth.token, `${base}/${id}`, {
+      headers: { 'X-Kite-Agent': auth.agent },
+    });
+    return printJson(row);
+  }
+  if (action === 'create') {
+    if (!options.requirement || !options.title) {
+      throw new Error('Usage: kite task create --requirement <id> --title <title>');
+    }
+    const row = await requestJson(auth.serverUrl, auth.token, base, {
+      method: 'POST',
+      headers: { 'X-Kite-Agent': auth.agent },
+      body: JSON.stringify({
+        requirementId: options.requirement,
+        title: options.title,
+        description: options.description,
+        assignedProvider: options.assignedProvider,
+        progress: options.progress !== undefined ? Number(options.progress) : undefined,
+      }),
+    });
+    return options.json ? printJson(row) : console.log(chalk.green(`Created ${row.task.id}`));
   }
   if (action === 'claim' && id) {
     const row = await requestJson(auth.serverUrl, auth.token, `${base}/${id}/claim`, {
@@ -290,6 +344,15 @@ export async function taskCommand(action: string, id: string | undefined, option
     });
     return options.json ? printJson(row) : console.log(chalk.green(`Released ${id}`));
   }
+  if (action === 'assign' && id) {
+    const provider = options.provider === 'none' ? null : options.provider;
+    const row = await requestJson(auth.serverUrl, auth.token, `${base}/${id}/assign`, {
+      method: 'POST',
+      headers: { 'X-Kite-Agent': auth.agent },
+      body: JSON.stringify({ provider }),
+    });
+    return options.json ? printJson(row) : console.log(chalk.green(`Assigned ${id}${provider ? ` to ${provider}` : ''}`));
+  }
   if (action === 'update' && id) {
     const row = await requestJson(auth.serverUrl, auth.token, `${base}/${id}`, {
       method: 'PUT',
@@ -303,7 +366,7 @@ export async function taskCommand(action: string, id: string | undefined, option
     });
     return options.json ? printJson(row) : console.log(chalk.green(`Updated ${id}${row.task?.status ? chalk.gray(` -> ${row.task.status}`) : ''}`));
   }
-  throw new Error('Usage: kite task <inbox|claim|update|release> [id]');
+  throw new Error('Usage: kite task <list|inbox|show|create|claim|assign|update|release> [id]');
 }
 
 function localDocPath(root: string, docsDir: string, document: any) {
@@ -361,6 +424,50 @@ export async function docCommand(action: string, idOrPath: string | undefined, o
     const rows = await requestJson(auth.serverUrl, auth.token, base);
     if (options.json) return printJson(rows);
     return printTable(rows.map((row: any) => [row.id, row.kind, String(row.revisionCount || row.revision_count || 1), row.title]), ['ID', 'KIND', 'REV', 'TITLE']);
+  }
+  if (action === 'show' && idOrPath) {
+    const row = await requestJson(auth.serverUrl, auth.token, `${base}/${idOrPath}`, {
+      headers: { 'X-Kite-Agent': auth.agent },
+    });
+    return printJson(row);
+  }
+  if (action === 'revisions' && idOrPath) {
+    const rows = await requestJson(auth.serverUrl, auth.token, `${base}/${idOrPath}/revisions`, {
+      headers: { 'X-Kite-Agent': auth.agent },
+    });
+    return printJson(rows);
+  }
+  if (action === 'update' && idOrPath) {
+    if (options.title === undefined && options.kind === undefined) {
+      throw new Error('Usage: kite doc update <docId> --title <title> --kind <kind>');
+    }
+    const row = await requestJson(auth.serverUrl, auth.token, `${base}/${idOrPath}`, {
+      method: 'PUT',
+      headers: { 'X-Kite-Agent': auth.agent },
+      body: JSON.stringify({ title: options.title, kind: options.kind }),
+    });
+    return options.json ? printJson(row) : console.log(chalk.green(`Updated ${idOrPath}`));
+  }
+  if ((action === 'link' || action === 'unlink') && idOrPath) {
+    const targets = [
+      ...(options.requirement ? [{ targetType: 'requirement', targetId: options.requirement }] : []),
+      ...(options.task ? [{ targetType: 'task', targetId: options.task }] : []),
+    ];
+    if (targets.length === 0) {
+      throw new Error(`Usage: kite doc ${action} <docId> --requirement <id> --task <id>`);
+    }
+    const results = [];
+    for (const target of targets) {
+      const suffix = action === 'link'
+        ? `${base}/${idOrPath}/links`
+        : `${base}/${idOrPath}/links/${encodeURIComponent(target.targetType)}/${encodeURIComponent(target.targetId)}`;
+      results.push(await requestJson(auth.serverUrl, auth.token, suffix, {
+        method: action === 'link' ? 'POST' : 'DELETE',
+        headers: { 'X-Kite-Agent': auth.agent },
+        ...(action === 'link' ? { body: JSON.stringify(target) } : {}),
+      }));
+    }
+    return options.json ? printJson(results) : console.log(chalk.green(`${action === 'link' ? 'Linked' : 'Unlinked'} ${idOrPath}`));
   }
   if (action === 'pull' && options.all) {
     const rows = await requestJson(auth.serverUrl, auth.token, base);
@@ -432,7 +539,7 @@ export async function docCommand(action: string, idOrPath: string | undefined, o
     }));
     return options.json ? printJson(result) : console.log(chalk.green(`Pushed ${documentId}`) + chalk.gray(`  ${localPath}`));
   }
-  throw new Error('Usage: kite doc <list|pull|push> [docId|file]');
+  throw new Error('Usage: kite doc <list|show|revisions|update|link|unlink|pull|push> [docId|file]');
 }
 
 async function pullDocument(auth: WorkspaceAuth, documentId: string, docsDir: string) {
@@ -505,7 +612,13 @@ export function registerWorkspaceCommands(cli: any) {
     .option('--server <url>', 'Kite server URL')
     .option('--token <token>', 'Workspace token')
     .option('--agent <provider>', 'Agent provider')
+    .option('--requirement <id>', 'Requirement id')
+    .option('--title <title>', 'Task title')
+    .option('--description <text>', 'Task description')
     .option('--status <status>', 'Task status')
+    .option('--provider <provider>', 'Agent provider filter or assignment')
+    .option('--assignee <mode>', 'Task assignee filter, e.g. unassigned')
+    .option('--assigned-provider <provider>', 'Pre-assign a new task (admin only)')
     .option('--progress <n>', 'Progress percentage')
     .option('--summary <text>', 'Activity summary')
     .option('--doc <id>', 'Linked document id')
