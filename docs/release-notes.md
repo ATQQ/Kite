@@ -1,10 +1,21 @@
 # 更新日志
 
-## Unreleased
+## v1.9.0 (2026/10/10)
+
+### Feature
+
+- 项目列表多选操作条新增「全选」操作
+- 关闭 CLI 内联脚本时改为忽略并提示，不再中断部署（部署日志对 `WARN` 行黄色高亮）
+
+### Docs
+
+- 更新内联脚本安全开关的说明与 API / CLI 文档
+
+## v1.8.0 (2026/10/09)
 
 ### Breaking
 
-- **部署内联脚本默认关闭（`allowCliHooks`）**：为降低 Deploy Token 泄漏导致的任意命令执行（RCE）风险，请求体内联提交的 `preDeploy` / `postDeploy` 默认**不会被执行**，但**不再中断部署**——服务端会忽略这些内联脚本并继续部署，同时在部署日志中提示如何开启（项目详情「执行脚本」里的「允许 CLI 内联脚本」）或改用平台脚本（`preDeployScript` / `postDeployScript`）。**存量项目升级后同样默认关闭**。
+- **部署内联脚本默认关闭（`allowCliHooks`）**：为降低 Deploy Token 泄漏导致的任意命令执行（RCE）风险，请求体内联提交的 `preDeploy` / `postDeploy` 现在默认被服务端拒绝（返回 `403`），**存量项目升级后同样默认关闭**。受影响的用户需在项目详情「执行脚本」中开启「允许 CLI 内联脚本」，或改用平台脚本（`preDeployScript` / `postDeployScript`）——推荐后者。
 - 内联 `postDeployAsync` 同步受该开关约束，未开启时静默回退 `false`。
 
 ### Feature
