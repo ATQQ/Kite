@@ -622,6 +622,8 @@ export default {
       bulkDeselectTitle: '取消选中',
       bulkSelectAllTitle: '全选当前列表',
       bulkDeselectAllTitle: '清空选择',
+      bulkSelectAll: '全选',
+      bulkSelectAllDone: '已全选',
       bulkSetCategory: '设置分类',
       bulkAddTags: '添加标签',
       bulkRemoveTags: '移除标签',

@@ -2970,6 +2970,16 @@ async function confirmBulkFillRecent() {
     <!-- Bulk Action Bar -->
     <BulkActionBar :count="bulk.selectedCount.value" :total="filteredProjects.length" @clear="bulk.clear">
       <template #actions>
+        <button
+          type="button"
+          :disabled="isBulkSubmitting || bulk.isAllSelected.value"
+          class="flex items-center px-2.5 py-1.5 text-xs rounded-md border border-border hover:border-primary/50 text-textMain transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          :title="t('project.list.bulkSelectAllTitle')"
+          @click="toggleAllSelection"
+        >
+          <CheckSquare class="w-3.5 h-3.5 mr-1.5" />
+          {{ bulk.isAllSelected.value ? t('project.list.bulkSelectAllDone') : t('project.list.bulkSelectAll') }}
+        </button>
         <div class="relative">
           <button
             type="button"

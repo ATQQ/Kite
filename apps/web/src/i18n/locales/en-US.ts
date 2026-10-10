@@ -622,6 +622,8 @@ export default {
       bulkDeselectTitle: 'Deselect',
       bulkSelectAllTitle: 'Select all in list',
       bulkDeselectAllTitle: 'Clear selection',
+      bulkSelectAll: 'Select all',
+      bulkSelectAllDone: 'All selected',
       bulkSetCategory: 'Set category',
       bulkAddTags: 'Add tags',
       bulkRemoveTags: 'Remove tags',
