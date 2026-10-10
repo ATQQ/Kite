@@ -1730,7 +1730,7 @@ async function confirmBulkFillRecent() {
           </div>
 
           <!-- Quick views + saved views -->
-          <div class="mt-2.5 flex items-center gap-2 overflow-x-auto no-scrollbar pb-0.5">
+          <div class="mt-2.5 flex flex-wrap items-center gap-2">
             <button
               v-for="qv in quickViews"
               :key="qv.key"
@@ -3282,13 +3282,6 @@ async function confirmBulkFillRecent() {
 </template>
 
 <style scoped>
-.no-scrollbar {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-}
-.no-scrollbar::-webkit-scrollbar {
-  display: none;
-}
 .fade-enter-active,
 .fade-leave-active {
   transition: opacity 0.12s ease;
