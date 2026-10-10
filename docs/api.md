@@ -102,7 +102,7 @@ Authorization: Bearer <YOUR_ADMIN_TOKEN>
     "postDeployScript": "string",  // 可选
     "deployPath": "string",        // 可选
     "postDeployAsync": false,      // 可选；true 时 postDeploy 异步执行（fire-and-forget），默认 false 保留旧行为
-    "allowCliHooks": false,        // 可选；是否允许 CLI 在上传请求体中内联提交 pre/post 脚本。默认 false（拒绝内联脚本，见 4.4）
+    "allowCliHooks": false,        // 可选；是否允许 CLI 在上传请求体中内联提交 pre/post 脚本。默认 false（忽略内联脚本，不中断部署，见 4.4）
     "categoryId": "string|null",   // 可选
     "pm2AppName": "string|null",   // 可选；传空字符串等同于解绑（null）
     "tagIds": ["string"]           // 可选；传入即覆盖该项目的全部标签关联
@@ -329,12 +329,12 @@ Authorization: Bearer <YOUR_ADMIN_TOKEN>
 * **FormData 参数**:
   * `file`: 压缩包文件 (File)
   * `projectId`: 项目 ID (String)
-  * `preDeploy`: 前置脚本 (String, 可选)。**仅当项目开启 `allowCliHooks` 且未配置平台 `preDeployScript` 时才会执行**；否则被忽略，部署日志会打印 `Pre-deploy: using platform script (CLI-provided script ignored)`。
+  * `preDeploy`: 前置脚本 (String, 可选)。**仅当项目开启 `allowCliHooks` 且未配置平台 `preDeployScript` 时才会执行**；否则被忽略（部署不会失败），部署日志会打印相应提示——平台已配置时提示改用平台脚本，否则提示开启 `allowCliHooks`。
   * `postDeploy`: 后置脚本 (String, 可选)。覆盖规则同 `preDeploy`。
   * `postDeployAsync`: 单次部署的 async 覆盖 (String, 可选；接受 `"true"|"false"|"1"|"0"`)。**必须项目开启 `allowCliHooks` 才生效**，且当 Web 端项目设置未开启 `postDeployAsync` 时才生效：CLI 传 `true` 时本次部署异步执行；CLI 传 `false` 同步执行。Web 端开启 `postDeployAsync`（true）时强制异步，CLI `false` 被忽略（部署日志会打印 `Post-deploy async: forced by platform config (CLI flag ignored)`）。
   * `env`: 部署时注入到 pre/post 脚本的环境变量，**JSON 字符串** 形式 (String, 可选)。危险键（`PATH`/`LD_PRELOAD`/`NODE_OPTIONS`/`BASH_ENV`/`IFS` 等）会被服务端过滤。
 
-* **安全约束（默认拒绝内联脚本）**：当项目 `allowCliHooks` 为 `false`（默认，含存量项目）时，请求体若携带非空的 `preDeploy` / `postDeploy`，接口直接返回 **403**，错误信息为 `CLI inline hook scripts are disabled for this project. Enable "allow CLI hooks" in project settings, or configure a platform script (preDeployScript / postDeployScript).`。这是为了避免 Deploy Token 泄漏后演变为任意命令执行（RCE）；内联 `postDeployAsync` 在未开启时会被静默忽略（回退为 `false`）。开启方式见 `PUT /api/projects/:id` 的 `allowCliHooks`，或在管理端项目设置中勾选「允许 CLI 内联脚本」。
+* **安全约束（默认忽略内联脚本）**：当项目 `allowCliHooks` 为 `false`（默认，含存量项目）时，请求体若携带非空的 `preDeploy` / `postDeploy`，服务端**不会执行**这些内联脚本，但**不再返回错误**——部署照常进行，并在部署日志中打印提示：平台已配置脚本时提示改用平台脚本，否则提示开启「允许 CLI 内联脚本」。这是为了避免 Deploy Token 泄漏后演变为任意命令执行（RCE）；内联 `postDeployAsync` 在未开启时会被静默忽略（回退为 `false`）。开启方式见 `PUT /api/projects/:id` 的 `allowCliHooks`，或在管理端项目设置中勾选「允许 CLI 内联脚本」。
 * **Response**: NDJSON 流（`Content-Type: application/x-ndjson`），每行一个 JSON 对象：
 
   ```json

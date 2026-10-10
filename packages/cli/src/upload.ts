@@ -1,5 +1,10 @@
 import fs from 'fs';
 import { randomUUID } from 'crypto';
+import chalk from 'chalk';
+
+function writeDeployLog(data: string) {
+  process.stdout.write((data.includes('[Kite Deploy] WARN') ? chalk.yellow(data) : data) + '\n');
+}
 
 interface UploadOptions {
   serverUrl: string;
@@ -90,7 +95,7 @@ export async function uploadZip(options: UploadOptions): Promise<UploadResult> {
         try {
           const event = JSON.parse(line);
           if (event.event === 'log') {
-            process.stdout.write(event.data + '\n');
+            writeDeployLog(event.data);
           } else if (event.event === 'status') {
             result = {
               success: event.status === 'success',
@@ -109,7 +114,7 @@ export async function uploadZip(options: UploadOptions): Promise<UploadResult> {
     if (buffer.trim()) {
       try {
         const event = JSON.parse(buffer);
-        if (event.event === 'log') process.stdout.write(event.data + '\n');
+        if (event.event === 'log') writeDeployLog(event.data);
         if (event.event === 'status') {
           result = { success: event.status === 'success', deployId: event.deployId, duration: event.duration, traceId };
         }

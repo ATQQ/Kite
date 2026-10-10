@@ -882,25 +882,37 @@ export const deployRoutes = new Elysia()
       }
 
       // 权限闸门：默认禁止 CLI 内联脚本，避免 Deploy Token 泄漏导致任意命令执行。
-      // 仅 gate 内联 pre/post 脚本；平台脚本始终可运行；body.env 不 gate（危险键由 runtime 过滤）。
+      // 关闭时不再 403：内联脚本被忽略（不执行），部署继续；平台脚本始终生效且优先于 CLI 内联值。
+      // body.env 不 gate（危险键由 runtime 过滤）。
       const allowCliHooks = Boolean(project.allowCliHooks);
       const hasInlinePre = Boolean(body.preDeploy);
       const hasInlinePost = Boolean(body.postDeploy);
-      if (!allowCliHooks && (hasInlinePre || hasInlinePost)) {
-        set.status = 403;
-        return {
-          error: 'CLI inline hook scripts are disabled for this project. '
-            + 'Enable "allow CLI hooks" in project settings, or configure a platform script (preDeployScript / postDeployScript).',
-        };
-      }
+      const cliPre = allowCliHooks ? body.preDeploy : undefined;
+      const cliPost = allowCliHooks ? body.postDeploy : undefined;
 
       // Platform config wins over CLI-uploaded scripts; CLI value is fallback when platform unset.
-      const preDeployOverride = Boolean(project.preDeployScript) && Boolean(body.preDeploy);
-      const preDeployCmd = project.preDeployScript || body.preDeploy;
-      const postDeployOverride = Boolean(project.postDeployScript) && Boolean(body.postDeploy);
-      const postDeployCmd = project.postDeployScript || body.postDeploy;
+      const preDeployCmd = project.preDeployScript || cliPre;
+      const postDeployCmd = project.postDeployScript || cliPost;
       const preHookSource = project.preDeployScript ? 'platform' : 'cli-inline';
       const postHookSource = project.postDeployScript ? 'platform' : 'cli-inline';
+
+      // 内联脚本被忽略 / 被平台脚本覆盖时的提示，在流式日志开头统一输出
+      const inlineNotices: string[] = [];
+      const collectInlineNotice = (label: string, phase: string, hasInline: boolean, platformConfigured: boolean) => {
+        if (!hasInline) return;
+        if (!allowCliHooks) {
+          inlineNotices.push(
+            `[Kite Deploy] WARN: CLI-provided ${phase} script will NOT run — inline scripts are disabled for this project. `
+            + (platformConfigured
+              ? 'The platform script configured in the admin console will be used instead.'
+              : 'Enable "Allow CLI inline scripts" in project settings to run it.'),
+          );
+        } else if (platformConfigured) {
+          inlineNotices.push(`[Kite Deploy] ${label}: using the platform script configured in the admin console (the CLI-provided script is ignored).`);
+        }
+      };
+      collectInlineNotice('Pre-deploy', 'pre-deploy', hasInlinePre, Boolean(project.preDeployScript));
+      collectInlineNotice('Post-deploy', 'post-deploy', hasInlinePost, Boolean(project.postDeployScript));
       // postDeployAsync: 平台优先 —— 项目级开启 (true) 时以平台为准，CLI 单次覆盖不生效；
       // 项目级未开启 (false/默认) 时 fallback 到 CLI 单次值（仅在允许 CLI 内联脚本时）。FormData 传字符串 'true'/'false'，需归一化
       const parseBool = (v: unknown): boolean | undefined => {
@@ -995,6 +1007,11 @@ export const deployRoutes = new Elysia()
             sendEvent(controller, 'log', { data: `[Kite Deploy] Starting deployment for ${project.name}...` });
             await appendLog(`[Kite Deploy] Starting deployment for ${project.name}...`);
 
+            for (const notice of inlineNotices) {
+              sendEvent(controller, 'log', { data: notice });
+              await appendLog(notice);
+            }
+
             const tempDir = path.join(process.cwd(), '.temp_deploy');
             await fs.mkdir(tempDir, { recursive: true });
             const tempZipPath = path.join(tempDir, `${Date.now()}.zip`);
@@ -1028,11 +1045,6 @@ export const deployRoutes = new Elysia()
 
             // Pre-deploy
             if (preDeployCmd) {
-              if (preDeployOverride) {
-                const overrideMsg = `[Kite Deploy] Pre-deploy: using platform script (CLI-provided script ignored)`;
-                sendEvent(controller, 'log', { data: overrideMsg });
-                await appendLog(overrideMsg);
-              }
               sendEvent(controller, 'log', { data: `[Kite Deploy] Running Pre-deploy: ${preDeployCmd}` });
               await appendLog(`[Kite Deploy] Running Pre-deploy: ${preDeployCmd}`);
               let failed = false;
@@ -1068,11 +1080,6 @@ export const deployRoutes = new Elysia()
 
             // Post-deploy
             if (postDeployCmd) {
-              if (postDeployOverride) {
-                const overrideMsg = `[Kite Deploy] Post-deploy: using platform script (CLI-provided script ignored)`;
-                sendEvent(controller, 'log', { data: overrideMsg });
-                await appendLog(overrideMsg);
-              }
               if (postDeployAsync) {
                 if (postDeployAsyncOverride) {
                   const asyncOverrideMsg = `[Kite Deploy] Post-deploy async: forced by platform config (CLI flag ignored)`;

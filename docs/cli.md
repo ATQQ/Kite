@@ -363,8 +363,8 @@ kite init --project proj_1a2b3c4d5e --token <DEPLOY_TOKEN> --token-store local
 *   `ignoreBuiltin` (可选): 布尔。设为 `true` 时**禁用**内置忽略规则（默认 `false`，保留内置规则）。等价于命令行 `--no-ignore-builtin`。
 *   `serverUrl` (可选): 部署服务地址。优先级：CLI `--server` > `.env.local` `KITE_SERVER_URL` > **`kite.config.json`** > 全局配置。
 *   `env` (可选): 键值对对象，部署时注入到 `preDeploy` / `postDeploy` 脚本的环境变量。CLI `--set-env` 可覆盖。
-*   `preDeploy` (可选): 在**服务端**解压前执行的前置脚本（注意：不是本地构建）。适合做清理、备份等准备工作。**需项目先在 Web 端开启「允许 CLI 内联脚本」（`allowCliHooks`），否则携带该字段会被服务端以 `403` 拒绝**（默认关闭，含存量项目）。开启后优先级：**Web 端项目配置 `preDeployScript` > CLI `--pre` / `.env.local` / `kite.config.json`**——即项目在 Web 端配置了前置脚本时，CLI 上传的 `preDeploy` 不生效（部署日志会打印 `using platform script (CLI-provided script ignored)`），仅当 Web 端未配置时才 fallback 到 CLI 值。
-*   `postDeploy` (可选): 在**服务端**解压完成后，在目标部署目录执行的后置脚本（例如重启服务、构建、nginx reload 等）。同样**需项目先开启 `allowCliHooks`**，否则被 `403` 拒绝。优先级同 `preDeploy`：**Web 端 `postDeployScript` 优先，CLI 值仅作 fallback**。
+*   `preDeploy` (可选): 在**服务端**解压前执行的前置脚本（注意：不是本地构建）。适合做清理、备份等准备工作。**需项目先在 Web 端开启「允许 CLI 内联脚本」（`allowCliHooks`）才会执行，否则携带该字段会被服务端忽略（部署不会失败），并在部署日志中提示如何开启**（默认关闭，含存量项目）。优先级：**Web 端项目配置 `preDeployScript` > CLI `--pre` / `.env.local` / `kite.config.json`**——即项目在 Web 端配置了前置脚本时，CLI 上传的 `preDeploy` 不生效（部署日志会打印 `using the platform script configured in the admin console (the CLI-provided script is ignored)`），仅当 Web 端未配置时才 fallback 到 CLI 值。
+*   `postDeploy` (可选): 在**服务端**解压完成后，在目标部署目录执行的后置脚本（例如重启服务、构建、nginx reload 等）。同样**需项目先开启 `allowCliHooks`** 才会执行，否则被忽略（部署不会失败）。优先级同 `preDeploy`：**Web 端 `postDeployScript` 优先，CLI 值仅作 fallback**。
 *   `postDeployAsync` (可选): 布尔，默认 `false`（沿用旧行为：等待 `postDeploy` 跑完）。设为 `true` 时，`postDeploy` 改为"fire-and-forget"：服务端 spawn 子进程后立刻返回 success，子进程输出仍会落到该次部署日志，CLI/Web 端不再阻塞等待。  
     适用场景：`postDeploy` 中包含会重启自身或长时间运行的命令（如 `kite serve --runtime bun --pm2 restart`、PM2 重启自己、热重载守护进程），同步等待会让上传请求挂死。  
     **注意**：若该 flag 是随内联 `postDeploy` 一起由请求体传入，同样受 `allowCliHooks` 开关约束，未开启时会被静默忽略（回退 `false`）。  

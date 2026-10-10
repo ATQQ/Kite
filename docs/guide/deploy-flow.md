@@ -65,7 +65,7 @@ Server 会：
 
 > **脚本来源与安全开关**
 >
-> 第 4 / 6 步执行的脚本来自「平台脚本（项目配置的 `preDeployScript` / `postDeployScript`）」或「CLI 请求体内联脚本」。内联脚本受项目级开关 `allowCliHooks` 控制，**默认关闭**：关闭时若请求体携带内联脚本，服务端直接返回 `403` 拒绝部署。详见下方[命令覆盖优先级](#命令覆盖优先级)。
+> 第 4 / 6 步执行的脚本来自「平台脚本（项目配置的 `preDeployScript` / `postDeployScript`）」或「CLI 请求体内联脚本」。内联脚本受项目级开关 `allowCliHooks` 控制，**默认关闭**：关闭时若请求体携带内联脚本，服务端会忽略这些脚本（不执行）并继续部署，同时在部署日志中提示如何开启。详见下方[命令覆盖优先级](#命令覆盖优先级)。
 
 > **`postDeploy` 同步 / 异步执行**
 >
@@ -110,13 +110,13 @@ kite serve --runtime bun
 2. 本地配置：`.env.local` 和 `kite.config.json`
 3. Web 管理端项目默认配置
 
-> **`preDeploy` / `postDeploy` / `postDeployAsync` 例外**：脚本内容与异步开关**以 Web 管理端项目配置为准**。项目在 Web 端配置了 `preDeployScript` / `postDeployScript` 时，CLI 通过 `--pre` / `--post` 或本地配置上传的同名字段**不生效**（部署日志会打印 `using platform script (CLI-provided script ignored)` 提示）。仅当 Web 端未配置脚本时，才 fallback 到 CLI 上传值。Web 端开启 `postDeployAsync`（true）时强制异步，CLI `--post-deploy-async=false` 无法改回同步（部署日志会打印 `Post-deploy async: forced by platform config (CLI flag ignored)`）；Web 端未开启时 CLI flag 仍可单次开启异步。
+> **`preDeploy` / `postDeploy` / `postDeployAsync` 例外**：脚本内容与异步开关**以 Web 管理端项目配置为准**。项目在 Web 端配置了 `preDeployScript` / `postDeployScript` 时，CLI 通过 `--pre` / `--post` 或本地配置上传的同名字段**不生效**（部署日志会打印 `using the platform script configured in the admin console (the CLI-provided script is ignored)` 提示，即“用管理后台配置的脚本、本地怎么改都不生效”）。仅当 Web 端未配置脚本时，才 fallback 到 CLI 上传值。Web 端开启 `postDeployAsync`（true）时强制异步，CLI `--post-deploy-async=false` 无法改回同步（部署日志会打印 `Post-deploy async: forced by platform config (CLI flag ignored)`）；Web 端未开启时 CLI flag 仍可单次开启异步。
 
 > **内联脚本安全开关（`allowCliHooks`，默认关闭）**
 >
 > 为防止 Deploy Token 泄漏后被用于在服务器上执行任意命令（RCE），Kite 对「由 CLI/请求体内联提交的脚本」增加了项目级开关：**默认关闭**（含存量项目，升级后不自动开启）。
 >
-> - **关闭时**：请求体中自带 `preDeploy` / `postDeploy`（内联脚本）会被服务端**直接拒绝**，返回 `403`，错误信息为 `CLI inline hook scripts are disabled for this project. Enable "allow CLI hooks" in project settings, or configure a platform script (preDeployScript / postDeployScript).`。内联 `postDeployAsync` 同样被忽略（静默回退 `false`）。
+> - **关闭时**：请求体中自带 `preDeploy` / `postDeploy`（内联脚本）**不会被执行**，但**不再中断部署**——服务端会忽略这些内联脚本并继续部署，同时在部署日志里打印提示：平台已配置脚本时提示将改用平台脚本，否则提示到项目设置里开启「允许 CLI 内联脚本」。内联 `postDeployAsync` 同样被忽略（静默回退 `false`）。
 > - **开启时**：内联脚本才允许执行，且仍遵循上面的优先级——**平台脚本（`preDeployScript` / `postDeployScript`）优先于内联脚本**。
 > - **不 gate `env`**：`body.env` 不受此开关影响，但危险键（`PATH`、`LD_PRELOAD`、`NODE_OPTIONS`、`BASH_ENV`、`IFS` 等）会被服务端过滤。
 > - **推荐做法**：在项目设置的「执行脚本」中配置平台脚本（随项目持久化、不随 token 传输），而不是用 CLI 内联脚本。
