@@ -107,8 +107,8 @@
 - `apps/server` 的产物由 `bun build` 输出到 `packages/cli/dist/server`，且**显式 external** `@libsql/*` 与 `drizzle-orm/*`（这两个包必须由 CLI 在用户机器上以依赖形式安装）。
 - `apps/web` 的产物会被 `packages/cli/package.json` 的 `build` 脚本拷贝到 `packages/cli/dist/web`。
 - CLI 包的 `files` 字段只包含 `bin` 与 `dist`；**新增运行时必需文件务必加入 `files`**。
-- 发布：`bun run release`（封装 `bumpp` + `changelogen`），**只在 [packages/cli](./packages/cli) 下发布**。
-- 不要手动修改 [CHANGELOG.md](./CHANGELOG.md)，由 `changelogen` 自动生成。
+- 发布：`bun run release`（封装 `bumpp` + `changelogen`），**只在 [packages/cli](./packages/cli) 下发布**。注意：`changelogen` 生成的格式与仓库现有 changelog 不一致，发版时不要用它覆盖手写内容。
+- [CHANGELOG.md](./CHANGELOG.md) 与 [docs/release-notes.md](./docs/release-notes.md) **由人工手写维护**（不跑 `changelogen`）：发布时在文件顶部追加 `## vX.Y.Z (YYYY/MM/DD)` 段，按 `### Feature` / `### Bugfix` / `### Refactor` / `### Docs` 等分类书写中文条目；**不写 emoji、不加 commit 链接、不加 Contributors 段落**。两份文件的版本段保持同步。
 
 ---
 
