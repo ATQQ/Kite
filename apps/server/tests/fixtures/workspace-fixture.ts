@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -52,9 +53,48 @@ await legacy.execute(`
           '2026-01-01T00:00:00.000Z', '2026-01-02T00:00:00.000Z');
 `);
 await legacy.execute(`
+  INSERT INTO projects (id, name, deploy_path, token, env, status, created_at, updated_at)
+  VALUES ('proj_legacy_ws2', 'Legacy Workspace Portal', '/tmp/legacy-ws2', 'kt_legacy_ws2', 'prod', 'idle',
+          '2026-01-01T00:00:00.000Z', '2026-01-02T00:00:00.000Z');
+`);
+await legacy.execute(`
   INSERT INTO deployments (id, project_id, project_name, status, trigger_source, start_time)
   VALUES ('dep_legacy_ws', 'proj_legacy_ws', 'Legacy Workspace App', 'success', 'cli', '2026-01-03T00:00:00.000Z');
 `);
+// 老库的 workspace_tokens 没有 token_plain 列，用于验证幂等迁移与明文缺失时的降级
+await legacy.execute(`
+  CREATE TABLE workspaces (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    description TEXT,
+    archived_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+`);
+await legacy.execute(`
+  CREATE TABLE workspace_tokens (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    name TEXT NOT NULL DEFAULT 'default',
+    token_hash TEXT NOT NULL UNIQUE,
+    token_prefix TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    last_used_at TEXT,
+    revoked_at TEXT
+  );
+`);
+const legacyRawToken = 'wst_legacy_plain_token';
+await legacy.execute({
+  sql: `INSERT INTO workspaces (id, name, description, archived_at, created_at, updated_at)
+        VALUES ('ws_legacy_token', 'Legacy Token Workspace', NULL, NULL, ?, ?)`,
+  args: ['2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'],
+});
+await legacy.execute({
+  sql: `INSERT INTO workspace_tokens (id, workspace_id, name, token_hash, token_prefix, created_at)
+        VALUES ('wst_legacy', 'ws_legacy_token', 'default', ?, ?, ?)`,
+  args: [createHash('sha256').update(legacyRawToken).digest('hex'), legacyRawToken.slice(0, 10), '2026-01-01T00:00:00.000Z'],
+});
 legacy.close();
 
 const { db } = await import('../../src/db/index.js');
@@ -84,6 +124,10 @@ const legacyProject = await db.projects.findById('proj_legacy_ws');
 assert.ok(legacyProject, 'legacy project should survive workspace migrations');
 assert.equal(legacyProject!.name, 'Legacy Workspace App');
 
+const legacyTokenRead = await api('/api/workspaces/ws_legacy_token/token');
+assert.equal(legacyTokenRead.status, 200);
+assert.equal((await json(legacyTokenRead)).token, null, 'legacy tokens without token_plain return null');
+
 const createdWorkspace = await api('/api/workspaces', {
   method: 'POST',
   body: JSON.stringify({ name: 'Product Workspace', description: 'Cross-project delivery' }),
@@ -94,6 +138,40 @@ assert.match(workspacePayload.token, /^wst_/);
 assert.equal(typeof workspacePayload.workspace.createdAt, 'string');
 const workspaceId = String(workspacePayload.workspace.id);
 const workspaceToken = String(workspacePayload.token);
+
+const readToken = await api(`/api/workspaces/${workspaceId}/token`);
+assert.equal(readToken.status, 200);
+const readTokenPayload = await json(readToken);
+assert.equal(readTokenPayload.token, workspaceToken);
+assert.equal(readTokenPayload.prefix, workspaceToken.slice(0, 10));
+
+const readTokenWithAgent = await api(`/api/workspaces/${workspaceId}/token`, {}, workspaceToken, 'cursor');
+assert.equal(readTokenWithAgent.status, 401);
+const readTokenWithBadAdmin = await api(`/api/workspaces/${workspaceId}/token`, {}, 'not-the-admin');
+assert.equal(readTokenWithBadAdmin.status, 401);
+
+const createdWithProjects = await api('/api/workspaces', {
+  method: 'POST',
+  body: JSON.stringify({
+    name: 'Seeded Workspace',
+    projects: [
+      { projectId: 'proj_legacy_ws', role: 'frontend' },
+      { projectId: 'proj_legacy_ws2', role: 'backend' },
+    ],
+  }),
+});
+assert.equal(createdWithProjects.status, 200);
+const seededDetail = await api(`/api/workspaces/${String((await json(createdWithProjects)).workspace.id)}`);
+assert.deepEqual(
+  (await json(seededDetail)).projects.map((row: any) => [row.projectId, row.role]).sort(),
+  [['proj_legacy_ws', 'frontend'], ['proj_legacy_ws2', 'backend']].sort(),
+);
+
+const createdWithUnknownProject = await api('/api/workspaces', {
+  method: 'POST',
+  body: JSON.stringify({ name: 'Broken Workspace', projects: [{ projectId: 'proj_missing' }] }),
+});
+assert.equal(createdWithUnknownProject.status, 400);
 
 const detail = await api(`/api/workspaces/${workspaceId}`, {}, workspaceToken, 'cursor');
 assert.equal(detail.status, 200);
@@ -112,6 +190,28 @@ assert.equal(link.status, 200);
 const linkPayload = await json(link);
 assert.equal(linkPayload.link.workspaceId, workspaceId);
 assert.equal(linkPayload.link.projectId, 'proj_legacy_ws');
+
+const batchLink = await api(`/api/workspaces/${workspaceId}/projects`, {
+  method: 'PUT',
+  body: JSON.stringify({ links: [{ projectId: 'proj_legacy_ws2', role: 'frontend' }] }),
+});
+assert.equal(batchLink.status, 200);
+assert.equal(
+  (await json(batchLink)).links.some((row: any) => row.projectId === 'proj_legacy_ws2' && row.role === 'frontend'),
+  true,
+);
+
+const batchLinkUnknown = await api(`/api/workspaces/${workspaceId}/projects`, {
+  method: 'PUT',
+  body: JSON.stringify({ links: [{ projectId: 'proj_missing', role: 'custom' }] }),
+});
+assert.equal(batchLinkUnknown.status, 400);
+
+const batchLinkEmpty = await api(`/api/workspaces/${workspaceId}/projects`, {
+  method: 'PUT',
+  body: JSON.stringify({ links: [] }),
+});
+assert.equal(batchLinkEmpty.status, 400);
 
 const workspaceRequirementResponse = await api(`/api/workspaces/${workspaceId}/requirements`, {
   method: 'POST',
@@ -322,6 +422,9 @@ const rotated = await api(`/api/workspaces/${workspaceId}/token/rotate`, { metho
 assert.equal(rotated.status, 200);
 const rotatedToken = String((await json(rotated)).token);
 assert.notEqual(rotatedToken, workspaceToken);
+
+const rotatedTokenRead = await api(`/api/workspaces/${workspaceId}/token`);
+assert.equal((await json(rotatedTokenRead)).token, rotatedToken, 'rotated token plaintext is readable by admin');
 
 const oldToken = await api(`/api/workspaces/${workspaceId}`, {}, workspaceToken, 'cursor');
 assert.equal(oldToken.status, 401);

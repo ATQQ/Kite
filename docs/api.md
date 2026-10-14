@@ -732,7 +732,7 @@ Authorization: Bearer <WORKSPACE_TOKEN>
 X-Kite-Agent: cursor
 ```
 
-* Workspace Token 只保存 SHA-256 哈希和前缀；轮换后旧 Token 立即失效。
+* Workspace Token 保存 SHA-256 哈希、前缀与明文（明文仅供管理员在 Web 工作空间详情页复看初始化配置）；轮换后旧 Token 立即失效。
 * Workspace Token 可用于需求读取/创建/更新、任务读取与认领更新释放、文档读取/版本提交/图片上传、Agent 与 Board 查询。
 * Workspace Token 创建需求时项目范围固定为空，表示整个 Workspace；设置或修改需求项目范围仍需要管理员 Token。
 * 只有管理员 Token 可以创建/归档 Workspace、管理项目关联、轮换 Token、归档需求、删除任务/文档和预指派任务。
@@ -743,13 +743,17 @@ X-Kite-Agent: cursor
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | `GET` | `/api/workspaces` | 列出未归档 Workspace；`?includeArchived=true` 包含已归档 |
-| `POST` | `/api/workspaces` | 创建 Workspace，响应中的 `token` 只返回一次 |
+| `POST` | `/api/workspaces` | 创建 Workspace，可选 `projects: [{ projectId, role? }]` 一次性关联项目 |
 | `GET` | `/api/workspaces/:id` | 聚合返回项目、需求、文档和 Agent 状态 |
 | `PUT` | `/api/workspaces/:id` | 更新名称/描述 |
 | `DELETE` | `/api/workspaces/:id` | 归档 Workspace |
+| `GET` | `/api/workspaces/:id/token` | 仅管理员：读取当前有效 Token 明文、前缀与创建/最近使用时间 |
 | `POST` | `/api/workspaces/:id/token/rotate` | 轮换 Workspace Token |
+| `PUT` | `/api/workspaces/:id/projects` | 仅管理员：批量关联项目，体为 `{ links: [{ projectId, role }] }` |
 | `PUT` | `/api/workspaces/:id/projects/:projectId` | 关联项目并设置 `frontend/backend/docs/demo/custom` 角色 |
 | `DELETE` | `/api/workspaces/:id/projects/:projectId` | 解除项目关联 |
+
+`GET /api/workspaces/:id/token` 只接受管理员 Token，返回 `{ token, prefix, createdAt, lastUsedAt }`；老版本创建、未保存明文的 Token 返回 `token: null`，需重新轮换。该接口刻意独立于 `GET /api/workspaces/:id`，避免持有 Workspace Token 的 Agent 读到明文。
 
 `GET /api/workspaces` 每条记录除聚合计数（`agentStates`）外，还内联返回该 Workspace 下每个 Agent 的精简状态，供工作空间首页 3D 总览直接渲染，无需再按 Workspace 逐个请求：
 

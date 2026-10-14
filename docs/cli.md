@@ -703,6 +703,8 @@ AGENTS.md
 
 `kite.workspace.json` 只保存 `workspaceId`、可选 `docsDir` 和 Agent 提示配置，不写 Token。Token 写入 `~/.kite/config.json` 的 `workspaceToken[workspaceId]`。CLI 会从当前目录向上查找 manifest，因此单仓和 monorepo 子目录都可使用。默认 `.kite/workspace/` 会加入仓库 `.gitignore`。
 
+上面这段初始化命令（含 Token）可在 Web 工作空间详情页的「初始化配置」卡片随时复看，默认折叠。Token 只存在本机 `~/.kite/config.json`，换电脑不会自动同步；在新机器上打开同一卡片复制命令重新执行一次即可，无需轮换 Token。
+
 ### 16.2 命令
 
 | 命令 | 说明 |

@@ -288,11 +288,13 @@ const initDb = async () => {
       name TEXT NOT NULL DEFAULT 'default',
       token_hash TEXT NOT NULL UNIQUE,
       token_prefix TEXT NOT NULL,
+      token_plain TEXT,
       created_at TEXT NOT NULL,
       last_used_at TEXT,
       revoked_at TEXT
     );
   `);
+  try { await client.execute(`ALTER TABLE workspace_tokens ADD COLUMN token_plain TEXT`); } catch { /* exists */ }
   await client.execute(`CREATE INDEX IF NOT EXISTS idx_workspace_tokens_workspace_id ON workspace_tokens(workspace_id);`);
   await client.execute(`CREATE INDEX IF NOT EXISTS idx_workspace_tokens_hash ON workspace_tokens(token_hash);`);
 

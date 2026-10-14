@@ -1,23 +1,46 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { Boxes, Building2, Copy, Plus, RefreshCw, Trash2, Users } from 'lucide-vue-next'
-import { useWorkspaceStore } from '../store/workspace'
+import { Boxes, Building2, Plus, RefreshCw, Trash2, Users } from 'lucide-vue-next'
+import { useWorkspaceStore, type WorkspaceRole } from '../store/workspace'
+import { useProjectStore } from '../store/project'
 import { useToast } from '../composables/useToast'
 import WorkspaceBoard3D from '../components/WorkspaceBoard3D.vue'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
 
 const { t } = useI18n()
 const router = useRouter()
 const workspaceStore = useWorkspaceStore()
+const projectStore = useProjectStore()
 const toast = useToast()
 
 const showCreate = ref(false)
 const creating = ref(false)
 const name = ref('')
 const description = ref('')
-const issuedToken = ref('')
+const draftProjects = reactive<Record<string, WorkspaceRole>>({})
+
+const roleOptions: WorkspaceRole[] = ['frontend', 'backend', 'docs', 'demo', 'custom']
+const selectedProjectCount = computed(() => Object.keys(draftProjects).length)
+
+function roleLabel(role: string) {
+  const key = `workspace.projectRole${role.charAt(0).toUpperCase()}${role.slice(1)}`
+  return t(key)
+}
+
+function isProjectSelected(projectId: string) {
+  return projectId in draftProjects
+}
+
+function toggleProject(projectId: string) {
+  if (projectId in draftProjects) {
+    delete draftProjects[projectId]
+  } else {
+    draftProjects[projectId] = 'custom'
+  }
+}
 
 const FLEET_STATES = [
   { key: 'working', dot: 'bg-sky-400', bar: 'bg-sky-400' },
@@ -90,22 +113,25 @@ function buildFleet(states?: { working: number; blocked: number; stalled: number
 }
 
 async function load() {
-  await workspaceStore.fetchWorkspaces()
+  await Promise.all([workspaceStore.fetchWorkspaces(), projectStore.fetchProjects()])
 }
 
 async function createWorkspace() {
   if (!name.value.trim()) return
   creating.value = true
   try {
+    const projects = Object.entries(draftProjects).map(([projectId, role]) => ({ projectId, role }))
     const result = await workspaceStore.createWorkspace({
       name: name.value.trim(),
       description: description.value.trim() || undefined,
+      projects,
     })
-    issuedToken.value = result.token
     name.value = ''
     description.value = ''
+    for (const projectId of Object.keys(draftProjects)) delete draftProjects[projectId]
     showCreate.value = false
-    toast.success(t('workspace.tokenIssued'))
+    toast.success(t('workspace.created'))
+    router.push(`/workspaces/${result.workspace.id}?setup=1`)
   } catch (error: any) {
     toast.error(error.message || t('workspace.createFailed'))
   } finally {
@@ -113,15 +139,29 @@ async function createWorkspace() {
   }
 }
 
-async function copyToken() {
-  await navigator.clipboard.writeText(issuedToken.value)
-  toast.success(t('workspace.tokenCopied'))
+const showArchiveConfirm = ref(false)
+const archiveTarget = ref<{ id: string; name: string } | null>(null)
+const archivingWorkspace = ref(false)
+
+function removeWorkspace(id: string, name: string) {
+  archiveTarget.value = { id, name }
+  showArchiveConfirm.value = true
 }
 
-async function removeWorkspace(id: string) {
-  if (!window.confirm(t('workspace.archiveConfirm'))) return
-  await workspaceStore.archiveWorkspace(id)
-  toast.success(t('workspace.archived'))
+async function confirmArchiveWorkspace() {
+  const target = archiveTarget.value
+  if (!target) return
+  archivingWorkspace.value = true
+  try {
+    await workspaceStore.archiveWorkspace(target.id)
+    toast.success(t('workspace.archived'))
+  } catch (error: any) {
+    toast.error(error.message || t('common.deleteFailed'))
+  } finally {
+    archivingWorkspace.value = false
+    showArchiveConfirm.value = false
+    archiveTarget.value = null
+  }
 }
 
 onMounted(load)
@@ -187,18 +227,6 @@ onMounted(load)
       <p class="border-t border-border px-5 py-2 text-[11px] text-textMuted">{{ t('workspace.officePreviewHint') }}</p>
     </section>
 
-    <section v-if="issuedToken" class="rounded-lg border border-warning/40 bg-warning/5 p-4">
-      <div class="text-sm font-medium text-textMain">{{ t('workspace.tokenIssued') }}</div>
-      <p class="mt-1 text-xs text-textMuted">{{ t('workspace.tokenHint') }}</p>
-      <div class="mt-3 flex items-center gap-2">
-        <code class="min-w-0 flex-1 truncate rounded-md border border-border bg-base px-3 py-2 font-mono text-xs text-textMain">{{ issuedToken }}</code>
-        <button class="inline-flex h-9 items-center gap-2 rounded-md border border-border px-3 text-sm text-textMain hover:border-primary/50" @click="copyToken">
-          <Copy class="h-4 w-4" />
-          {{ t('common.copy') }}
-        </button>
-      </div>
-    </section>
-
     <section v-if="showCreate" class="rounded-lg border border-border bg-panel p-5">
       <h2 class="text-sm font-semibold text-textMain">{{ t('workspace.create') }}</h2>
       <div class="mt-4 grid gap-4 md:grid-cols-2">
@@ -210,6 +238,34 @@ onMounted(load)
           <span class="text-xs text-textMuted">{{ t('workspace.description') }}</span>
           <input v-model="description" class="w-full rounded-md border border-border bg-base px-3 py-2 text-sm text-textMain outline-none focus:border-primary" :placeholder="t('workspace.descriptionPlaceholder')" />
         </label>
+      </div>
+      <div class="mt-4">
+        <div class="flex items-center justify-between">
+          <span class="text-xs text-textMuted">{{ t('workspace.linkProjectsOptional') }}</span>
+          <span class="text-xs tabular-nums text-textMuted">{{ selectedProjectCount }} / {{ projectStore.projects.length }}</span>
+        </div>
+        <div v-if="projectStore.projects.length === 0" class="mt-2 rounded-md border border-dashed border-border px-3 py-4 text-center text-xs text-textMuted">
+          {{ t('workspace.noProjectsAvailable') }}
+        </div>
+        <div v-else class="mt-2 max-h-56 divide-y divide-border overflow-y-auto rounded-md border border-border bg-base">
+          <label v-for="project in projectStore.projects" :key="project.id" class="flex items-center gap-3 px-3 py-2">
+            <input
+              type="checkbox"
+              class="h-4 w-4 shrink-0 accent-primary"
+              :checked="isProjectSelected(project.id)"
+              @change="toggleProject(project.id)"
+            />
+            <span class="min-w-0 flex-1 truncate text-sm text-textMain">{{ project.name }}</span>
+            <select
+              v-if="isProjectSelected(project.id)"
+              v-model="draftProjects[project.id]"
+              class="h-8 rounded-md border border-border bg-base px-2 text-xs text-textMain outline-none focus:border-primary"
+              @click.stop
+            >
+              <option v-for="role in roleOptions" :key="role" :value="role">{{ roleLabel(role) }}</option>
+            </select>
+          </label>
+        </div>
       </div>
       <div class="mt-4 flex justify-end gap-2">
         <button class="h-9 rounded-md border border-border px-3 text-sm text-textMuted hover:text-textMain" @click="showCreate = false">{{ t('common.cancel') }}</button>
@@ -244,7 +300,7 @@ onMounted(load)
           <button
             class="rounded-md p-1.5 text-textMuted opacity-0 transition-opacity hover:bg-danger/10 hover:text-danger group-hover:opacity-100"
             :title="t('workspace.archive')"
-            @click.stop="removeWorkspace(workspace.id)"
+            @click.stop="removeWorkspace(workspace.id, workspace.name)"
           >
             <Trash2 class="h-4 w-4" />
           </button>
@@ -282,5 +338,15 @@ onMounted(load)
         </div>
       </article>
     </section>
+
+    <ConfirmDialog
+      v-model:open="showArchiveConfirm"
+      tone="danger"
+      :title="t('workspace.archiveTitle')"
+      :message="archiveTarget ? `${archiveTarget.name}\n${t('workspace.archiveConfirm')}` : t('workspace.archiveConfirm')"
+      :confirm-text="t('workspace.archive')"
+      :loading="archivingWorkspace"
+      @confirm="confirmArchiveWorkspace"
+    />
   </div>
 </template>

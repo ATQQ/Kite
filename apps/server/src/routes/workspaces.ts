@@ -69,6 +69,32 @@ function parseStringArray(value: unknown): string[] {
     : [];
 }
 
+type ProjectLinkInput = { projectId: string; role: string | null };
+
+function parseProjectLinks(value: unknown): ProjectLinkInput[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const links: ProjectLinkInput[] = [];
+  for (const item of value) {
+    const projectId = item && typeof item === 'object' && typeof (item as any).projectId === 'string'
+      ? (item as any).projectId.trim()
+      : '';
+    if (!projectId || seen.has(projectId)) continue;
+    seen.add(projectId);
+    const role = item && typeof (item as any).role === 'string' ? (item as any).role : null;
+    links.push({ projectId, role });
+  }
+  return links;
+}
+
+async function missingProjectIds(links: ProjectLinkInput[]): Promise<string[]> {
+  const missing: string[] = [];
+  for (const link of links) {
+    if (!(await db.projects.findById(link.projectId))) missing.push(link.projectId);
+  }
+  return missing;
+}
+
 const DOCUMENT_CONTENT_LIMIT = 50 * 1024 * 1024;
 
 function documentContentTooLarge(content: string): boolean {
@@ -220,6 +246,9 @@ export const workspaceRoutes = new Elysia()
       set.status = 409;
       return { error: 'Workspace 名称已存在' };
     }
+    const projectLinks = parseProjectLinks(body.projects);
+    const missing = await missingProjectIds(projectLinks);
+    if (missing.length) { set.status = 400; return { error: `项目不存在: ${missing.join(', ')}` }; }
     const workspace = await workspaceStore.workspaces.create({
       name,
       description: normalizeText(body.description),
@@ -229,10 +258,19 @@ export const workspaceRoutes = new Elysia()
     }
     const rawToken = workspaceToken();
     await workspaceStore.tokens.rotate(workspace.id, rawToken);
+    let sortOrder = 0;
+    for (const link of projectLinks) {
+      await workspaceStore.projects.link(workspace.id, link.projectId, link.role || 'custom', sortOrder);
+      sortOrder += 1;
+    }
     broadcast(workspace.id, 'workspace.created', { workspaceId: workspace.id });
     return { success: true, workspace, token: rawToken };
   }, {
-    body: t.Object({ name: t.String(), description: t.Optional(t.String()) }),
+    body: t.Object({
+      name: t.String(),
+      description: t.Optional(t.String()),
+      projects: t.Optional(t.Array(t.Object({ projectId: t.String(), role: t.Optional(t.String()) }))),
+    }),
   })
   .get('/api/workspaces/:id', async ({ headers, params, set }) => {
     const ctx = await contextOrError(headers, params.id);
@@ -286,6 +324,19 @@ export const workspaceRoutes = new Elysia()
     broadcast(params.id, 'workspace.archived', { workspaceId: params.id });
     return { success: true };
   })
+  .get('/api/workspaces/:id/token', async ({ headers, params, set }) => {
+    if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
+    const workspace = await workspaceStore.workspaces.findById(params.id);
+    if (!workspace || workspace.archivedAt) { set.status = 404; return { error: 'Workspace not found' }; }
+    const token = await workspaceStore.tokens.findActive(params.id);
+    return {
+      success: true,
+      token: token?.tokenPlain ?? null,
+      prefix: token?.tokenPrefix ?? null,
+      createdAt: token?.createdAt ?? null,
+      lastUsedAt: token?.lastUsedAt ?? null,
+    };
+  })
   .post('/api/workspaces/:id/token/rotate', async ({ headers, params, set }) => {
     const ctx = await contextOrError(headers, params.id);
     if (!ctx) { set.status = 401; return { error: 'Unauthorized' }; }
@@ -296,6 +347,26 @@ export const workspaceRoutes = new Elysia()
     await workspaceStore.tokens.rotate(params.id, token);
     broadcast(params.id, 'token.rotated', { workspaceId: params.id });
     return { success: true, token };
+  })
+  .put('/api/workspaces/:id/projects', async ({ headers, params, body, set }) => {
+    if (!verifyAdminToken(headers)) { set.status = 401; return { error: 'Unauthorized' }; }
+    const workspace = await workspaceStore.workspaces.findById(params.id);
+    if (!workspace || workspace.archivedAt) { set.status = 404; return { error: 'Workspace not found' }; }
+    const links = parseProjectLinks(body.links);
+    if (!links.length) { set.status = 400; return { error: '请选择要关联的项目' }; }
+    const missing = await missingProjectIds(links);
+    if (missing.length) { set.status = 400; return { error: `项目不存在: ${missing.join(', ')}` }; }
+    let sortOrder = (await workspaceStore.projects.listByWorkspace(params.id)).length;
+    for (const link of links) {
+      await workspaceStore.projects.link(params.id, link.projectId, link.role || 'custom', sortOrder);
+      sortOrder += 1;
+    }
+    broadcast(params.id, 'project.linked', { workspaceId: params.id, projectIds: links.map((link) => link.projectId) });
+    return { success: true, links: await workspaceStore.projects.listByWorkspace(params.id) };
+  }, {
+    body: t.Object({
+      links: t.Array(t.Object({ projectId: t.String(), role: t.Optional(t.String()) })),
+    }),
   })
   .put('/api/workspaces/:id/projects/:projectId', async ({ headers, params, body, set }) => {
     const ctx = await contextOrError(headers, params.id);

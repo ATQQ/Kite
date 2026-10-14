@@ -30,9 +30,10 @@ import {
   Unlink,
 } from 'lucide-vue-next'
 import WorkspaceBoard3D from '../components/WorkspaceBoard3D.vue'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
 import ProviderLogo from '../components/ProviderLogo.vue'
 import { useToast } from '../composables/useToast'
-import { apiUrl } from '../lib/base'
+import { BASE_PATH, apiUrl } from '../lib/base'
 import { useProjectStore } from '../store/project'
 import {
   useWorkspaceStore,
@@ -70,8 +71,10 @@ const activeTab = ref<WorkspaceTab>(
   WORKSPACE_TABS.includes(queryValue('tab') as WorkspaceTab) ? (queryValue('tab') as WorkspaceTab) : 'overview',
 )
 const realtimeConnected = ref(false)
-const tokenIssued = ref('')
+const tokenInfo = ref<{ token: string | null; prefix: string | null } | null>(null)
 const rotatingToken = ref(false)
+const initConfigOpen = ref(false)
+const serverBaseUrl = ref('http://127.0.0.1:5431')
 
 const requirements = computed<Requirement[]>(() => store.board?.requirements || current.value?.requirements || [])
 const workspaceTasks = computed<Task[]>(() => store.board?.tasks || [])
@@ -90,14 +93,32 @@ const selectedTask = computed(() =>
   workspaceTasks.value.find((task) => task.id === selectedTaskId.value) || null,
 )
 
-const projectLinkDraft = reactive<{ projectId: string; role: WorkspaceRole }>({
-  projectId: '',
-  role: 'frontend',
-})
+const projectDraft = reactive<Record<string, WorkspaceRole>>({})
+const showProjectPicker = ref(false)
+const showUnlinkConfirm = ref(false)
+const unlinkTarget = ref<{ projectId: string; name: string } | null>(null)
+const unlinkingProject = ref(false)
+const showRotateConfirm = ref(false)
+const showArchiveRequirementConfirm = ref(false)
+const archiveRequirementTarget = ref<Requirement | null>(null)
+const archivingRequirement = ref(false)
 const availableProjects = computed(() => {
   const linked = new Set((current.value?.projects || []).map((item) => item.projectId))
   return projectStore.projects.filter((project) => !linked.has(project.id))
 })
+const selectedProjectCount = computed(() => Object.keys(projectDraft).length)
+
+function isProjectSelected(projectId: string) {
+  return projectId in projectDraft
+}
+
+function toggleProject(projectId: string) {
+  if (projectId in projectDraft) {
+    delete projectDraft[projectId]
+  } else {
+    projectDraft[projectId] = 'custom'
+  }
+}
 
 const showRequirementCreate = ref(false)
 const showAcceptanceFields = ref(false)
@@ -423,6 +444,7 @@ async function loadWorkspace() {
     store.fetchWorkspace(workspaceId.value),
     store.fetchBoard(workspaceId.value),
     projectStore.fetchProjects(),
+    loadToken(),
   ])
   if (!selectedRequirementId.value && requirements.value[0]) {
     selectedRequirementId.value = requirements.value[0].id
@@ -430,6 +452,31 @@ async function loadWorkspace() {
   if (!selectedDocumentId.value && current.value?.documents[0]) {
     selectedDocumentId.value = current.value.documents[0].id
   }
+}
+
+async function loadToken() {
+  try {
+    tokenInfo.value = await store.fetchWorkspaceToken(workspaceId.value)
+  } catch {
+    tokenInfo.value = null
+  }
+}
+
+const initCommand = computed(() => [
+  'kite workspace init \\',
+  `  --workspace ${workspaceId.value} \\`,
+  `  --server ${serverBaseUrl.value} \\`,
+  `  --token ${tokenInfo.value?.token || '<WORKSPACE_TOKEN>'}`,
+].join('\n'))
+
+// 折叠态只露出一行脱敏预览，暗示"里面有完整命令"，不泄漏 Token
+const maskedInitCommand = computed(() =>
+  `kite workspace init --workspace ${workspaceId.value} --server ${serverBaseUrl.value} --token ${tokenInfo.value?.token ? 'wst_••••••••' : '<WORKSPACE_TOKEN>'}`,
+)
+
+async function copyInitCommand() {
+  await navigator.clipboard.writeText(initCommand.value)
+  toast.success(t('workspace.initConfigCopied'))
 }
 
 async function refreshAll() {
@@ -441,11 +488,13 @@ async function refreshAll() {
   }
 }
 
-async function linkProject() {
-  if (!projectLinkDraft.projectId) return
+async function linkSelectedProjects() {
+  const links = Object.entries(projectDraft).map(([projectId, role]) => ({ projectId, role }))
+  if (!links.length) return
   try {
-    await store.linkProject(workspaceId.value, projectLinkDraft.projectId, projectLinkDraft.role)
-    projectLinkDraft.projectId = ''
+    await store.linkProjects(workspaceId.value, links)
+    for (const projectId of Object.keys(projectDraft)) delete projectDraft[projectId]
+    showProjectPicker.value = false
     await store.fetchBoard(workspaceId.value)
     toast.success(t('common.saveSuccess'))
   } catch (error: any) {
@@ -462,34 +511,47 @@ async function updateProjectRole(projectId: string, role: WorkspaceRole) {
   }
 }
 
-async function unlinkProject(projectId: string) {
+function unlinkProject(projectId: string) {
+  const linked = current.value?.projects.find((item) => item.projectId === projectId)
+  unlinkTarget.value = { projectId, name: linked?.name || projectId }
+  showUnlinkConfirm.value = true
+}
+
+async function confirmUnlinkProject() {
+  const target = unlinkTarget.value
+  if (!target) return
+  unlinkingProject.value = true
   try {
-    await store.unlinkProject(workspaceId.value, projectId)
+    await store.unlinkProject(workspaceId.value, target.projectId)
     await store.fetchBoard(workspaceId.value)
+    toast.success(t('common.deleteSuccess'))
   } catch (error: any) {
     toast.error(error.message || t('common.deleteFailed'))
+  } finally {
+    unlinkingProject.value = false
+    showUnlinkConfirm.value = false
+    unlinkTarget.value = null
   }
 }
 
-async function rotateToken() {
-  if (!window.confirm(t('workspace.rotateConfirm'))) return
+function rotateToken() {
+  showRotateConfirm.value = true
+}
+
+async function confirmRotateToken() {
   rotatingToken.value = true
   try {
     const result = await store.rotateToken(workspaceId.value)
-    tokenIssued.value = result.token
+    tokenInfo.value = { token: result.token, prefix: result.token.slice(0, 10) }
+    initConfigOpen.value = true
     await navigator.clipboard.writeText(result.token)
     toast.success(t('workspace.tokenCopied'))
   } catch (error: any) {
     toast.error(error.message || t('common.requestFailed'))
   } finally {
     rotatingToken.value = false
+    showRotateConfirm.value = false
   }
-}
-
-async function copyIssuedToken() {
-  if (!tokenIssued.value) return
-  await navigator.clipboard.writeText(tokenIssued.value)
-  toast.success(t('workspace.tokenCopied'))
 }
 
 async function createRequirement() {
@@ -533,14 +595,25 @@ async function saveRequirementEdit() {
   }
 }
 
-async function archiveRequirement(requirementId: string) {
-  if (!window.confirm(t('common.confirmDelete'))) return
+function archiveRequirement(requirementId: string) {
+  archiveRequirementTarget.value = requirements.value.find((item) => item.id === requirementId) || null
+  showArchiveRequirementConfirm.value = true
+}
+
+async function confirmArchiveRequirement() {
+  const target = archiveRequirementTarget.value
+  if (!target) return
+  archivingRequirement.value = true
   try {
-    await store.archiveRequirement(workspaceId.value, requirementId)
-    selectedRequirementId.value = requirements.value.find((item) => item.id !== requirementId)?.id || ''
+    await store.archiveRequirement(workspaceId.value, target.id)
+    selectedRequirementId.value = requirements.value.find((item) => item.id !== target.id)?.id || ''
     toast.success(t('common.deleteSuccess'))
   } catch (error: any) {
     toast.error(error.message || t('common.deleteFailed'))
+  } finally {
+    archivingRequirement.value = false
+    showArchiveRequirementConfirm.value = false
+    archiveRequirementTarget.value = null
   }
 }
 
@@ -925,6 +998,13 @@ watch(
 )
 
 onMounted(async () => {
+  serverBaseUrl.value = window.location.origin + BASE_PATH
+  if (queryValue('setup') === '1') {
+    initConfigOpen.value = true
+    const nextQuery = { ...route.query }
+    delete nextQuery.setup
+    void router.replace({ query: nextQuery })
+  }
   await loadWorkspace()
   // 文档 id 可能来自 URL，此时 watch 不会触发，需要显式载入一次
   if (selectedDocumentId.value) await loadDocument(selectedDocumentId.value)
@@ -1013,23 +1093,49 @@ onBeforeUnmount(() => {
 
           <div class="rounded-lg border border-border bg-panel">
             <div class="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4">
-              <div>
-                <h2 class="text-sm font-semibold text-textMain">{{ t('workspace.linkedProjects') }}</h2>
-                <p class="mt-1 text-xs text-textMuted">{{ current.projects.length }} / {{ projectStore.projects.length }}</p>
-              </div>
-              <div class="flex flex-wrap items-center gap-2">
-                <select v-model="projectLinkDraft.projectId" class="h-9 min-w-44 rounded-md border border-border bg-base px-2 text-sm text-textMain outline-none focus:border-primary">
-                  <option value="">{{ t('workspace.selectProject') }}</option>
-                  <option v-for="project in availableProjects" :key="project.id" :value="project.id">{{ project.name }}</option>
-                </select>
-                <select v-model="projectLinkDraft.role" class="h-9 rounded-md border border-border bg-base px-2 text-sm text-textMain outline-none focus:border-primary">
-                  <option v-for="role in roleOptions" :key="role" :value="role">{{ roleLabel(role) }}</option>
-                </select>
-                <button class="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-3 text-sm font-medium text-white disabled:opacity-50" :disabled="!projectLinkDraft.projectId" @click="linkProject">
-                  <Link2 class="h-4 w-4" />
-                  {{ t('workspace.link') }}
-                </button>
-              </div>
+              <h2 class="text-sm font-semibold text-textMain">{{ t('workspace.linkedProjects') }}</h2>
+              <button
+                class="inline-flex h-9 items-center gap-1.5 rounded-md border border-border px-3 text-sm text-textMuted hover:border-primary/50 hover:text-textMain"
+                @click="showProjectPicker = !showProjectPicker"
+              >
+                <component :is="showProjectPicker ? ChevronUp : ChevronDown" class="h-4 w-4" />
+                {{ t('workspace.linkProjects') }}
+              </button>
+            </div>
+            <div v-if="showProjectPicker" class="border-b border-border bg-base/60 p-4">
+              <div v-if="availableProjects.length === 0" class="py-4 text-center text-xs text-textMuted">{{ t('workspace.noProjectsAvailable') }}</div>
+              <template v-else>
+                <div class="max-h-56 divide-y divide-border overflow-y-auto rounded-md border border-border bg-base">
+                  <label v-for="project in availableProjects" :key="project.id" class="flex items-center gap-3 px-3 py-2">
+                    <input
+                      type="checkbox"
+                      class="h-4 w-4 shrink-0 accent-primary"
+                      :checked="isProjectSelected(project.id)"
+                      @change="toggleProject(project.id)"
+                    />
+                    <span class="min-w-0 flex-1 truncate text-sm text-textMain">{{ project.name }}</span>
+                    <select
+                      v-if="isProjectSelected(project.id)"
+                      v-model="projectDraft[project.id]"
+                      class="h-8 rounded-md border border-border bg-base px-2 text-xs text-textMain outline-none focus:border-primary"
+                      @click.stop
+                    >
+                      <option v-for="role in roleOptions" :key="role" :value="role">{{ roleLabel(role) }}</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="mt-3 flex items-center justify-between gap-2">
+                  <span class="text-xs tabular-nums text-textMuted">{{ t('workspace.selectedProjects', { count: selectedProjectCount }) }}</span>
+                  <button
+                    class="inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-white disabled:opacity-50"
+                    :disabled="selectedProjectCount === 0"
+                    @click="linkSelectedProjects"
+                  >
+                    <Link2 class="h-3.5 w-3.5" />
+                    {{ t('workspace.linkSelected') }}
+                  </button>
+                </div>
+              </template>
             </div>
             <div v-if="current.projects.length === 0" class="px-5 py-12 text-center text-sm text-textMuted">{{ t('workspace.noProjects') }}</div>
             <div v-else class="divide-y divide-border">
@@ -1050,23 +1156,48 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <aside class="space-y-5">
-          <div class="rounded-lg border border-border bg-panel p-5">
-            <div class="flex items-center gap-2">
-              <KeyRound class="h-4 w-4 text-primary" />
-              <h2 class="text-sm font-semibold text-textMain">{{ t('workspace.token') }}</h2>
+        <aside class="min-w-0 space-y-5">
+          <div class="min-w-0 rounded-lg border border-border bg-panel p-5">
+            <button
+              class="flex w-full items-center justify-between gap-2 text-left"
+              :aria-expanded="initConfigOpen"
+              @click="initConfigOpen = !initConfigOpen"
+            >
+              <span class="flex items-center gap-2">
+                <KeyRound class="h-4 w-4 text-primary" />
+                <h2 class="text-sm font-semibold text-textMain">{{ t('workspace.initConfig') }}</h2>
+              </span>
+              <span class="inline-flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-textMuted hover:border-primary/50 hover:text-textMain">
+                {{ initConfigOpen ? t('workspace.collapse') : t('workspace.expand') }}
+                <component :is="initConfigOpen ? ChevronUp : ChevronDown" class="h-3.5 w-3.5" />
+              </span>
+            </button>
+            <p class="mt-2 text-xs text-textMuted">{{ t('workspace.initConfigHint') }}</p>
+            <div v-if="initConfigOpen" class="mt-4 space-y-3">
+              <pre class="overflow-x-auto whitespace-pre rounded-md border border-border bg-base p-3 font-mono text-xs text-textMain">{{ initCommand }}</pre>
+              <div class="flex flex-wrap items-center gap-2">
+                <button class="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs text-textMain hover:border-primary/50" @click="copyInitCommand">
+                  <Copy class="h-3.5 w-3.5" />
+                  {{ t('workspace.copyInitCommand') }}
+                </button>
+                <button class="inline-flex h-8 items-center gap-1.5 rounded-md border border-warning/40 bg-warning/5 px-2.5 text-xs text-warning hover:bg-warning/10 disabled:opacity-50" :disabled="rotatingToken" @click="rotateToken">
+                  <RefreshCw class="h-3.5 w-3.5" :class="rotatingToken ? 'animate-spin' : ''" />
+                  {{ t('workspace.rotateToken') }}
+                </button>
+              </div>
+              <p v-if="tokenInfo && !tokenInfo.token" class="text-xs text-warning">{{ t('workspace.tokenLegacyHint') }}</p>
+              <p v-else class="text-xs text-textMuted">{{ t('workspace.tokenHint') }}</p>
             </div>
-            <div v-if="tokenIssued" class="mt-4">
-              <code class="block break-all rounded-md border border-warning/40 bg-warning/5 p-3 font-mono text-xs text-textMain">{{ tokenIssued }}</code>
-              <button class="mt-2 inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs text-textMain" @click="copyIssuedToken">
-                <Copy class="h-3.5 w-3.5" />
-                {{ t('workspace.copy') }}
-              </button>
-            </div>
-            <p v-else class="mt-3 text-xs text-textMuted">{{ t('workspace.tokenHint') }}</p>
-            <button class="mt-4 inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border border-warning/40 bg-warning/5 text-sm text-warning hover:bg-warning/10 disabled:opacity-50" :disabled="rotatingToken" @click="rotateToken">
-              <RefreshCw class="h-4 w-4" :class="rotatingToken ? 'animate-spin' : ''" />
-              {{ t('workspace.rotateToken') }}
+            <button
+              v-else
+              class="group mt-3 flex w-full items-center gap-2 rounded-md border border-dashed border-border bg-base/60 px-3 py-2 text-left transition-colors hover:border-primary/50 hover:bg-base"
+              @click="initConfigOpen = true"
+            >
+              <code class="min-w-0 flex-1 truncate font-mono text-xs text-textMuted group-hover:text-textMain">{{ maskedInitCommand }}</code>
+              <span class="inline-flex shrink-0 items-center gap-1 text-xs text-primary">
+                <ChevronDown class="h-3.5 w-3.5" />
+                {{ t('workspace.viewInitCommand') }}
+              </span>
             </button>
           </div>
 
@@ -1662,5 +1793,35 @@ onBeforeUnmount(() => {
         </div>
       </section>
     </template>
+
+    <ConfirmDialog
+      v-model:open="showRotateConfirm"
+      tone="warning"
+      :title="t('workspace.rotateTitle')"
+      :message="t('workspace.rotateConfirm')"
+      :confirm-text="t('workspace.rotateToken')"
+      :loading="rotatingToken"
+      @confirm="confirmRotateToken"
+    />
+
+    <ConfirmDialog
+      v-model:open="showUnlinkConfirm"
+      tone="warning"
+      :title="t('workspace.unlinkTitle')"
+      :message="unlinkTarget ? t('workspace.unlinkConfirm') : ''"
+      :confirm-text="t('workspace.unlink')"
+      :loading="unlinkingProject"
+      @confirm="confirmUnlinkProject"
+    />
+
+    <ConfirmDialog
+      v-model:open="showArchiveRequirementConfirm"
+      tone="danger"
+      :title="t('workspace.archiveRequirementTitle')"
+      :message="archiveRequirementTarget ? `${archiveRequirementTarget.title}\n${t('workspace.archiveRequirementConfirm')}` : t('workspace.archiveRequirementConfirm')"
+      :confirm-text="t('common.delete')"
+      :loading="archivingRequirement"
+      @confirm="confirmArchiveRequirement"
+    />
   </div>
 </template>

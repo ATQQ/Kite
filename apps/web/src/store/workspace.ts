@@ -193,7 +193,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  async function createWorkspace(payload: { name: string; description?: string }) {
+  async function createWorkspace(payload: { name: string; description?: string; projects?: Array<{ projectId: string; role?: WorkspaceRole }> }) {
     const data = await apiFetch('/workspaces', { method: 'POST', body: JSON.stringify(payload) })
     await fetchWorkspaces()
     return data as { workspace: Workspace; token: string }
@@ -224,10 +224,27 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return await apiFetch(`/workspaces/${id}/token/rotate`, { method: 'POST' }) as { token: string }
   }
 
+  async function fetchWorkspaceToken(id: string) {
+    return await apiFetch(`/workspaces/${id}/token`) as {
+      token: string | null
+      prefix: string | null
+      createdAt: string | null
+      lastUsedAt: string | null
+    }
+  }
+
   async function linkProject(workspaceId: string, projectId: string, role: WorkspaceRole, sortOrder = 0) {
     await apiFetch(`/workspaces/${workspaceId}/projects/${projectId}`, {
       method: 'PUT',
       body: JSON.stringify({ role, sortOrder }),
+    })
+    await fetchWorkspace(workspaceId)
+  }
+
+  async function linkProjects(workspaceId: string, links: Array<{ projectId: string; role?: WorkspaceRole }>) {
+    await apiFetch(`/workspaces/${workspaceId}/projects`, {
+      method: 'PUT',
+      body: JSON.stringify({ links }),
     })
     await fetchWorkspace(workspaceId)
   }
@@ -354,7 +371,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     updateWorkspace,
     archiveWorkspace,
     rotateToken,
+    fetchWorkspaceToken,
     linkProject,
+    linkProjects,
     unlinkProject,
     createRequirement,
     updateRequirement,

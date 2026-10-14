@@ -152,6 +152,7 @@ export const workspaceTokens = sqliteTable('workspace_tokens', {
   name: text('name').notNull().default('default'),
   tokenHash: text('token_hash').notNull().unique(),
   tokenPrefix: text('token_prefix').notNull(),
+  tokenPlain: text('token_plain'),           // nullable: 老库迁移前创建的 Token 无法还原明文
   createdAt: text('created_at').notNull(),
   lastUsedAt: text('last_used_at'),
   revokedAt: text('revoked_at'),

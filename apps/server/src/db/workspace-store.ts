@@ -171,17 +171,26 @@ export const workspaceStore = {
         name,
         tokenHash: hashWorkspaceToken(rawToken),
         tokenPrefix: rawToken.slice(0, 10),
+        tokenPlain: rawToken,
         createdAt: now,
         lastUsedAt: null,
         revokedAt: null,
       };
       await run(
         `INSERT INTO workspace_tokens
-          (id, workspace_id, name, token_hash, token_prefix, created_at, last_used_at, revoked_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [token.id, workspaceId, name, token.tokenHash, token.tokenPrefix, now, null, null],
+          (id, workspace_id, name, token_hash, token_prefix, token_plain, created_at, last_used_at, revoked_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [token.id, workspaceId, name, token.tokenHash, token.tokenPrefix, token.tokenPlain, now, null, null],
       );
       return token;
+    },
+    async findActive(workspaceId: string) {
+      return one(
+        `SELECT * FROM workspace_tokens
+         WHERE workspace_id = ? AND revoked_at IS NULL
+         ORDER BY created_at DESC LIMIT 1`,
+        [workspaceId],
+      );
     },
     async findByRaw(rawToken: string) {
       const tokenHash = hashWorkspaceToken(rawToken);
