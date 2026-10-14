@@ -1,5 +1,30 @@
 # 更新日志
 
+## v1.10.0 (2026/10/14)
+
+### Feature
+
+- 工作空间初始化配置常驻可复看：详情页新增「初始化配置」卡片，默认折叠，展开后给出可直接复制的 `kite workspace init --workspace … --server … --token …` 命令与轮换 Token；Token 会写入本机 `~/.kite/config.json`，换电脑重复执行该命令即可，无需轮换。
+- 创建工作空间时可一次多选关联项目，并逐个指定角色。
+- 工作空间详情「关联项目」改为多选批量关联（新增 `PUT /api/workspaces/:id/projects`），已关联项目仍可逐个改角色或解除关联。
+
+### Bugfix
+
+- 修复工作空间 Token 只在创建时显示一次、换电脑后无法复看初始化命令的问题；旧版本遗留的 Token 明文不可用，页面提示重新生成。
+
+### Refactor
+
+- 工作空间解除关联、轮换 Token、归档工作空间与归档需求统一改用应用内二次确认弹窗，移除系统 `confirm`。
+- 工作空间详情「关联项目」移除项目计数，初始化配置改为可展开的半隐藏折叠样式。
+
+### Security
+
+- Workspace Token 明文以新增可空列 `workspace_tokens.token_plain` 存储，仅落在本机 `~/.kite/kite.db`；新增管理员接口 `GET /api/workspaces/:id/token` 返回明文，Agent Token 与未鉴权请求不可读，不写入日志与遥测。
+
+### Docs
+
+- 更新 Workspace API 与 CLI 文档：补充 Token 查询、批量关联接口与初始化命令复看说明。
+
 ## v1.9.1 (2026/10/10)
 
 ### Bugfix
